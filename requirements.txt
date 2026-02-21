@@ -1,0 +1,44 @@
+# ─── Core Pipeline ────────────────────────────────────────────────────────────
+whisperx>=3.1.1
+# elevenlabs>=1.2.0
+ffmpeg-python>=0.2.0
+
+# ─── Clip Finder (Gemini AI) ────────────────────────────────────────────────
+httpx>=0.27.0
+
+# ─── Async & HTTP ─────────────────────────────────────────────────────────────
+aiohttp>=3.9.0
+aiofiles>=23.2.1
+fastapi>=0.109.0
+uvicorn>=0.27.0
+python-multipart>=0.0.9
+
+# ─── Retry / Rate-limit handling ──────────────────────────────────────────────
+tenacity>=8.2.3
+
+# ─── Data & Config ────────────────────────────────────────────────────────────
+python-dotenv>=1.0.0
+pydantic>=2.6.0
+
+# ─── Subtitle Rendering ───────────────────────────────────────────────────────
+pycaps @ git+https://github.com/francozanardi/pycaps.git
+playwright>=1.58.0
+#         # (not yet on PyPI stable — check https://github.com/pycaps/pycaps)
+
+# ─── ML / GPU ─────────────────────────────────────────────────────────────────
+torch>=2.1.0
+torchaudio>=2.1.0
+# Install CUDA-enabled torch separately if needed:
+# pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+
+
+# ─── Utilities ────────────────────────────────────────────────────────────────
+numpy>=1.26.0
+tqdm>=4.66.0
+loguru>=0.7.2
+
+# ─── Testing ──────────────────────────────────────────────────────────────────
+pytest>=8.0.0
+pytest-asyncio>=0.23.0
+pytest-mock>=3.12.0

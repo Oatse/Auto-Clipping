@@ -1,0 +1,26 @@
+# Environments
+.env
+venv/
+venv_python311/
+
+# Models
+models/
+
+# Outputs
+output/
+example/
+
+# Caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Credentials & Sensitive files
+cookies.txt
+.env
+
+# Windows specific
+thumbs.db
+desktop.ini
+nul

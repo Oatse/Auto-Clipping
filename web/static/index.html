@@ -1,0 +1,939 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CLIP-AUTOMATION — AI Video Dubbing System</title>
+    <meta
+      name="description"
+      content="Automated AI video dubbing with voice cloning, elastic audio sync, and synchronized subtitles."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=Bangers&family=Fredoka+One&family=Bebas+Neue&family=Righteous&family=Press+Start+2P&family=Orbitron:wght@700;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <!-- ── Background ── -->
+    <div class="bg-grid"></div>
+    <div class="bg-glow glow-1"></div>
+    <div class="bg-glow glow-2"></div>
+
+    <!-- ── Header ── -->
+    <header class="header">
+      <div class="header-inner">
+        <button class="nav-back-btn hidden" id="navBackBtn" aria-label="Go back">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+            <path d="M10 3L5 8l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Back</span>
+        </button>
+        <div class="logo">
+          <div class="logo-icon">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <path
+                d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+            </svg>
+          </div>
+          <span class="logo-text"
+            >CLIP<span class="logo-accent">AUTO</span></span
+          >
+        </div>
+        <nav class="header-nav" id="headerNav">
+          <button class="nav-tab active" data-tab="subtitle">Auto Subtitle</button>
+          <button class="nav-tab" data-tab="clipfinder">Clip Finder</button>
+        </nav>
+        <div class="header-status" id="systemStatus">
+          <span class="status-dot"></span>
+          <span class="status-text">Checking system...</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- ── Main ── -->
+    <main class="main">
+      <!-- ── Hero ── -->
+      <section class="hero">
+        <div class="hero-top">
+          <div>
+            <div class="hero-badge">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+                <circle cx="6" cy="6" r="6" />
+              </svg>
+              Auto Subtitle Workspace
+            </div>
+            <h1 class="hero-title">
+              Create Accurate Subtitles<br /><span class="gradient-text"
+                >Faster and Cleaner</span
+              >
+            </h1>
+            <p class="hero-subtitle">
+              Upload video, pilih bahasa target, lalu lanjutkan ke preview subtitle untuk edit sebelum render final.
+            </p>
+          </div>
+          <div class="hero-steps" aria-label="Workflow steps">
+            <div class="hero-step-item">
+              <span class="hero-step-num">1</span>
+              <span class="hero-step-label">Upload Video</span>
+            </div>
+            <div class="hero-step-item">
+              <span class="hero-step-num">2</span>
+              <span class="hero-step-label">Transcribe &amp; Review</span>
+            </div>
+            <div class="hero-step-item">
+              <span class="hero-step-num">3</span>
+              <span class="hero-step-label">Render Output</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+
+      <!-- ── APP SCREENS ── -->
+
+      <!-- ─── SCREEN 1: UPLOAD ─── -->
+      <div id="screen-upload" class="app-screen active">
+        <div class="content-grid">
+          <!-- Upload Panel -->
+          <div class="panel upload-panel">
+            <div class="panel-header panel-header-stack">
+              <div>
+                <h2 class="panel-title">Create New Subtitle Job</h2>
+                <p class="panel-desc">Pilih sumber video, atur bahasa, lalu mulai proses transkripsi.</p>
+              </div>
+              <span class="panel-badge">Step 1</span>
+            </div>
+
+            <form id="uploadForm" class="upload-form">
+              <!-- Drop Zone -->
+              <div class="drop-zone" id="dropZone">
+                <div class="drop-zone-inner" id="dropZoneInner">
+                  <div class="drop-icon">
+                    <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
+                      <rect width="40" height="40" rx="12" fill="url(#grad1)" />
+                      <path
+                        d="M20 12v12M14 18l6-6 6 6"
+                        stroke="white"
+                        stroke-width="2.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      />
+                      <path
+                        d="M12 28h16"
+                        stroke="white"
+                        stroke-width="2.5"
+                        stroke-linecap="round"
+                      />
+                      <defs>
+                        <linearGradient id="grad1" x1="0" y1="0" x2="40" y2="40">
+                          <stop offset="0%" stop-color="#6366f1" />
+                          <stop offset="100%" stop-color="#8b5cf6" />
+                        </linearGradient>
+                      </defs>
+                    </svg>
+                  </div>
+                  <p class="drop-title">Drop your video here</p>
+                  <p class="drop-sub">
+                    or
+                    <label for="fileInput" class="file-link">browse files</label>
+                  </p>
+                  <p class="drop-formats">MP4 · MOV · MKV · AVI</p>
+                </div>
+                <div class="drop-zone-selected hidden" id="fileSelected">
+                  <div class="file-info">
+                    <div class="file-icon">VIDEO</div>
+                    <div class="file-details">
+                      <div class="file-name" id="fileName">—</div>
+                      <div class="file-size" id="fileSize">—</div>
+                    </div>
+                    <button type="button" class="file-remove" id="fileRemove">
+                      ✕
+                    </button>
+                  </div>
+                </div>
+                <input
+                  type="file"
+                  id="fileInput"
+                  accept=".mp4,.mov,.mkv,.avi"
+                  hidden
+                />
+              </div>
+
+              <!-- Or pick from Clip Finder -->
+              <div class="clip-picker-section" id="clipPickerSection">
+                <div class="clip-picker-divider">
+                  <span class="clip-picker-divider-line"></span>
+                  <span class="clip-picker-divider-text">or</span>
+                  <span class="clip-picker-divider-line"></span>
+                </div>
+                <button type="button" class="btn-clip-picker" id="clipPickerBtn">
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                    <rect x="2" y="4" width="14" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/>
+                    <path d="M7 7.5l4.5 2.5-4.5 2.5v-5z" fill="currentColor"/>
+                  </svg>
+                  <span>Pick from Clip Finder</span>
+                </button>
+                <div class="clip-picker-list hidden" id="clipPickerList">
+                  <!-- Clip items rendered by JS -->
+                </div>
+              </div>
+
+              <!-- Settings -->
+              <div class="settings-grid">
+                <div class="setting-group">
+                  <label class="setting-label">Transcription Model</label>
+                  <p class="setting-help">Model yang digunakan untuk speech-to-text transcription.</p>
+                  <select
+                    class="setting-select"
+                    id="whisperModel"
+                    name="whisper_model"
+                  >
+                    <option value="large-v2" selected>🧠 WhisperX Large-V2 — General content</option>
+                    <option value="large-v3">🧠 WhisperX Large-V3 — Improved accuracy</option>
+                    <option value="anime">🎌 Anime Whisper — Optimized for anime/Japanese</option>
+                    <option value="elevenlabs">🔊 ElevenLabs STT — Cloud-based, auto-translate via Gemini</option>
+                  </select>
+                  <p class="setting-help elevenlabs-note" id="elevenlabsNote" style="display:none; color: #f0ad4e; margin-top: 4px;">
+                    ElevenLabs: transkripsi bahasa asal → auto-translate via Gemini ke Target Language.
+                  </p>
+                  <div id="elevenlabsQuota" style="display:none; margin-top: 6px; padding: 8px 12px; border-radius: 8px; background: rgba(255,255,255,0.05); font-size: 0.82rem; color: #aab;">
+                    <span id="elQuotaContent">Loading quota...</span>
+                  </div>
+                </div>
+                <div class="setting-group">
+                  <label class="setting-label">Target Language</label>
+                  <p class="setting-help">Bahasa subtitle yang akan digunakan untuk output akhir.</p>
+                  <select
+                    class="setting-select"
+                    id="targetLang"
+                    name="target_language"
+                  >
+                    <option value="en" selected>🇺🇸 English</option>
+                    <option value="id">🇮🇩 Indonesian</option>
+                    <option value="es">🇪🇸 Spanish</option>
+                    <option value="fr">🇫🇷 French</option>
+                    <option value="de">🇩🇪 German</option>
+                    <option value="ja">🇯🇵 Japanese</option>
+                    <option value="ko">🇰🇷 Korean</option>
+                    <option value="zh">🇨🇳 Chinese</option>
+                    <option value="ar">🇸🇦 Arabic</option>
+                    <option value="pt">🇧🇷 Portuguese</option>
+                  </select>
+                </div>
+              </div>
+
+              <!-- Advanced Options -->
+              <div class="advanced-section">
+                <button type="button" class="advanced-toggle" id="advancedToggle">
+                  <svg class="advanced-arrow" id="advancedArrow" width="12" height="12" viewBox="0 0 12 12" fill="none">
+                    <path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                  Advanced Options
+                </button>
+                <div class="advanced-body hidden" id="advancedBody">
+                  <!-- Speaker Detection Toggle -->
+                  <div class="advanced-row">
+                    <div class="advanced-row-header">
+                      <div class="advanced-row-info">
+                        <span class="advanced-row-label">Speaker Detection</span>
+                        <span class="advanced-row-desc">Detect multiple speakers via timing gaps. Disable for single-speaker to use Pycaps animations</span>
+                      </div>
+                      <label class="toggle toggle-sm">
+                        <input type="checkbox" id="speakerDetectionEnabled" checked />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <!-- Speaker Count -->
+                  <div class="advanced-row" id="numSpeakersRow">
+                    <div class="advanced-row-header">
+                      <div class="advanced-row-info">
+                        <span class="advanced-row-label">Number of Speakers</span>
+                        <span class="advanced-row-desc">Override auto-detection — set if you know the exact count</span>
+                      </div>
+                      <label class="toggle toggle-sm">
+                        <input type="checkbox" id="numSpeakersEnabled" />
+                        <span class="toggle-slider"></span>
+                      </label>
+                    </div>
+                    <div class="num-speakers-input hidden" id="numSpeakersInput">
+                      <div class="speaker-count-row">
+                        <button type="button" class="speaker-count-btn" id="speakerCountDec">−</button>
+                        <span class="speaker-count-val" id="speakerCountVal">2</span>
+                        <button type="button" class="speaker-count-btn" id="speakerCountInc">+</button>
+                        <span class="speaker-count-label">speaker(s)</span>
+                      </div>
+                      <div class="speaker-count-pills" id="speakerCountPills">
+                        <button type="button" class="speaker-pill" data-count="1">1</button>
+                        <button type="button" class="speaker-pill active" data-count="2">2</button>
+                        <button type="button" class="speaker-pill" data-count="3">3</button>
+                        <button type="button" class="speaker-pill" data-count="4">4</button>
+                        <button type="button" class="speaker-pill" data-count="5">5</button>
+                        <button type="button" class="speaker-pill" data-count="6">6</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Transcribe Button -->
+              <button type="submit" class="btn-primary" id="transcribeBtn" disabled>
+                <span class="btn-icon">🎙️</span>
+                <span class="btn-text">Transcribe & Preview</span>
+              </button>
+            </form>
+
+            <!-- System Status Card -->
+            <div class="sys-card" id="sysCard">
+              <div class="sys-title">System Status</div>
+              <div class="sys-grid" id="sysGrid">
+                <div class="sys-item loading">Checking...</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Jobs Panel -->
+          <div class="panel jobs-panel">
+            <div class="panel-header panel-header-stack">
+              <div>
+                <h2 class="panel-title">Recent Jobs</h2>
+                <p class="panel-desc">Pantau progress dan buka kembali hasil transkripsi sebelumnya.</p>
+              </div>
+              <button class="btn-icon-only" id="refreshBtn" title="Refresh">
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path
+                    d="M13.65 2.35A8 8 0 1 0 15 8h-2a6 6 0 1 1-1.1-3.45L10 6h5V1l-1.35 1.35z"
+                    fill="currentColor"
+                  />
+                </svg>
+              </button>
+            </div>
+
+            <div class="jobs-toggle" id="jobsToggle">
+              <button type="button" class="jobs-toggle-btn active" data-jobs-tab="jobs">Jobs</button>
+              <button type="button" class="jobs-toggle-btn" data-jobs-tab="clips">Pick from Clip Finder</button>
+            </div>
+
+            <div class="jobs-pane" id="jobsPane">
+              <div class="jobs-list" id="jobsList">
+                <div class="empty-state">
+                  <div class="empty-icon">◻</div>
+                  <p>No jobs yet. Upload a video to get started.</p>
+                </div>
+              </div>
+            </div>
+
+            <div class="jobs-pane hidden" id="clipsPane">
+              <div class="clip-jobs-list" id="clipJobsList">
+                <div class="empty-state">
+                  <div class="empty-icon">◻</div>
+                  <p>No clips available. Use Clip Finder to download clips first.</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── SCREEN 2: TRANSCRIBING (Loading) ─── -->
+      <div id="screen-transcribing" class="app-screen">
+        <div class="transcribing-screen">
+          <div class="transcribing-card">
+            <div class="transcribing-anim">
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+            </div>
+            <h2 class="transcribing-title">Transcribing Voice...</h2>
+            <p class="transcribing-sub" id="transcribingStatus">Running WhisperX speech-to-text on your video</p>
+            <div class="transcribing-file" id="transcribingFile"></div>
+            <div class="transcribing-progress">
+              <div class="transcribing-bar" id="transcribingBar"></div>
+            </div>
+            <div class="transcribing-log" id="transcribingLog"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── SCREEN 3: PREVIEW & DESIGN ─── -->
+      <div id="screen-preview" class="app-screen">
+        <div class="preview-layout">
+
+          <!-- Left: Transcript -->
+          <div class="preview-left">
+            <div class="transcript-panel">
+              <div class="transcript-header">
+                <span class="transcript-title">Transcript</span>
+                <div class="transcript-header-actions">
+                  <div class="transcript-source-toggle" id="transcriptSourceToggle" style="display:none;">
+                    <span class="transcript-source-label" id="transcriptSourceLabel">Refined</span>
+                    <label class="toggle toggle-sm">
+                      <input type="checkbox" id="showOriginalTranscript" />
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+                  <button class="btn-secondary btn-sm" id="editTranscriptBtn">&#x270F;&#xFE0F; Edit</button>
+                </div>
+              </div>
+              <div class="transcript-body" id="transcriptBody">
+                <!-- Segments rendered here -->
+              </div>
+            </div>
+          </div>
+
+          <!-- Center: Video Preview + Timeline -->
+          <div class="preview-center">
+            <div class="video-preview-wrap">
+              <video id="previewVideo" class="preview-video" preload="metadata"></video>
+              <!-- Subtitle Overlay -->
+              <div class="subtitle-overlay" id="subtitleOverlay">
+                <div class="subtitle-container" id="subtitleContainer">
+                  <!-- Subtitles rendered here -->
+                </div>
+              </div>
+            </div>
+
+            <!-- Timeline Component -->
+            <div class="timeline-panel" id="timelinePanel">
+              <div class="timeline-toolbar">
+                <div class="timeline-playback-btns">
+                  <button class="btn-secondary btn-sm" id="previewPlayBtn">▶ Play</button>
+                  <button class="btn-secondary btn-sm" id="previewRestartBtn">↺ Restart</button>
+                  <button class="btn-icon-only" id="fullscreenBtn" title="Fullscreen (F)">⛶</button>
+                </div>
+                <span class="timeline-title">Timeline</span>
+                <div class="timeline-tools">
+                  <button class="btn-secondary btn-sm" id="addSegmentBtn" title="Add subtitle at playhead position">+ Add</button>
+                  <button class="btn-secondary btn-sm" id="deleteSegmentBtn" title="Delete selected segment" disabled>Del</button>
+                  <span class="timeline-time-display" id="tlTimeDisplay">0:00 / 0:00</span>
+                </div>
+              </div>
+              <!-- Timeline body: labels column + scrollable ruler+tracks -->
+              <div class="timeline-body">
+                <!-- Speaker labels column (fixed, does not scroll horizontally) -->
+                <div class="timeline-labels-col" id="timelineLabelsCol">
+                  <div class="timeline-ruler-spacer"></div>
+                  <!-- Speaker label rows injected by JS -->
+                </div>
+                <!-- Scrollable area containing ruler + track -->
+                <div class="timeline-scroll-area" id="timelineScrollArea">
+                  <div class="timeline-ruler" id="timelineRuler"></div>
+                  <div class="timeline-track-area" id="timelineTrackArea">
+                    <div class="timeline-track" id="timelineTrack">
+                      <!-- Segment blocks and playhead rendered by JS -->
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Add Segment Dialog -->
+            <div class="segment-dialog hidden" id="segmentDialog">
+              <div class="segment-dialog-inner">
+                <h4 class="segment-dialog-title">Add Subtitle</h4>
+                <div class="segment-dialog-fields">
+                  <div class="segment-dialog-row">
+                    <div class="segment-dialog-field">
+                      <label>Start</label>
+                      <input type="text" id="newSegStart" placeholder="0:00.0" />
+                    </div>
+                    <div class="segment-dialog-field">
+                      <label>End</label>
+                      <input type="text" id="newSegEnd" placeholder="0:02.0" />
+                    </div>
+                    <div class="segment-dialog-field">
+                      <label>Speaker</label>
+                      <select id="newSegSpeaker">
+                        <option value="SPEAKER_00">S0</option>
+                        <option value="SPEAKER_01">S1</option>
+                        <option value="SPEAKER_02">S2</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="segment-dialog-field full">
+                    <label>Text</label>
+                    <textarea id="newSegText" rows="2" placeholder="Enter subtitle text..."></textarea>
+                  </div>
+                </div>
+                <div class="segment-dialog-actions">
+                  <button class="btn-secondary btn-sm" id="cancelNewSeg">Cancel</button>
+                  <button class="btn-primary btn-sm" id="confirmNewSeg" style="width:auto;padding:8px 16px;">Add</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Split Segment Dialog -->
+            <div class="segment-dialog hidden" id="splitDialog">
+              <div class="segment-dialog-inner">
+                <h4 class="segment-dialog-title">✂ Split Segment</h4>
+                <p class="split-dialog-hint">Click a word to set the split point. Words after the marker start the second segment.</p>
+                <div class="split-words-wrap" id="splitDialogWords">
+                  <!-- Word tokens rendered by JS -->
+                </div>
+                <div class="split-preview">
+                  <div class="split-preview-part">
+                    <span class="split-preview-label split-label-1">Part 1</span>
+                    <span class="split-preview-time" id="splitPart1Time"></span>
+                    <span class="split-preview-text" id="splitPart1Text"></span>
+                  </div>
+                  <div class="split-preview-divider">→</div>
+                  <div class="split-preview-part">
+                    <span class="split-preview-label split-label-2">Part 2</span>
+                    <span class="split-preview-time" id="splitPart2Time"></span>
+                    <span class="split-preview-text" id="splitPart2Text"></span>
+                  </div>
+                </div>
+                <div class="segment-dialog-actions">
+                  <button class="btn-secondary btn-sm" id="cancelSplitSeg">Cancel</button>
+                  <button class="btn-primary btn-sm" id="confirmSplitSeg" style="width:auto;padding:8px 16px;">Split</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Right: Font & Style Controls -->
+          <div class="preview-right">
+            <div class="style-panel">
+              <div class="style-panel-header">
+                <span class="style-panel-title">Subtitle Style</span>
+                <span class="panel-badge">Design</span>
+              </div>
+
+              <!-- Preset Styles -->
+              <div class="style-section">
+                <label class="style-label">Quick Presets</label>
+                <div class="preset-grid" id="presetGrid">
+                  <button class="preset-btn active" data-preset="vtuber-pop" title="VTuber Pop">
+                    <span class="preset-preview" style="font-family:'Bangers',cursive;color:#fff;-webkit-text-stroke:2px #ff006e;font-size:14px;">Pop!</span>
+                    <span class="preset-name">VTuber Pop</span>
+                  </button>
+                  <button class="preset-btn" data-preset="vtuber-neon" title="Neon Glow">
+                    <span class="preset-preview" style="font-family:'Orbitron',sans-serif;color:#00f5ff;text-shadow:0 0 8px #00f5ff;font-size:10px;">NEON</span>
+                    <span class="preset-name">Neon</span>
+                  </button>
+                  <button class="preset-btn" data-preset="anime-bold" title="Anime Bold">
+                    <span class="preset-preview" style="font-family:'Fredoka One',cursive;color:#ffe600;-webkit-text-stroke:2px #000;font-size:13px;">Anime</span>
+                    <span class="preset-name">Anime Bold</span>
+                  </button>
+                  <button class="preset-btn" data-preset="clean-white" title="Clean White">
+                    <span class="preset-preview" style="font-family:'Inter',sans-serif;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,0.8);font-size:12px;">Clean</span>
+                    <span class="preset-name">Clean</span>
+                  </button>
+                  <button class="preset-btn" data-preset="retro-game" title="Retro Game">
+                    <span class="preset-preview" style="font-family:'Press Start 2P',monospace;color:#00ff41;font-size:7px;">GAME</span>
+                    <span class="preset-name">Retro</span>
+                  </button>
+                  <button class="preset-btn" data-preset="idol-pink" title="Idol Pink">
+                    <span class="preset-preview" style="font-family:'Righteous',cursive;color:#ff85c2;-webkit-text-stroke:1px #fff;font-size:12px;">Idol✦</span>
+                    <span class="preset-name">Idol</span>
+                  </button>
+                </div>
+              </div>
+
+              <!-- Font Family -->
+              <div class="style-section">
+                <label class="style-label">Font Family</label>
+                <select class="setting-select" id="fontFamily">
+                  <option value="'Inter', sans-serif">Inter (Default)</option>
+                  <option value="'Bangers', cursive">Bangers (VTuber Pop)</option>
+                  <option value="'Fredoka One', cursive">Fredoka One (Anime)</option>
+                  <option value="'Bebas Neue', cursive">Bebas Neue (Bold)</option>
+                  <option value="'Righteous', cursive">Righteous (Idol)</option>
+                  <option value="'Orbitron', sans-serif">Orbitron (Sci-Fi)</option>
+                  <option value="'Press Start 2P', monospace">Press Start 2P (Retro)</option>
+                  <option value="'JetBrains Mono', monospace">JetBrains Mono (Code)</option>
+                  <option value="Impact, sans-serif">Impact (Meme)</option>
+                  <option value="Arial, sans-serif">Arial</option>
+                </select>
+              </div>
+
+              <!-- Font Size -->
+              <div class="style-section">
+                <label class="style-label">Font Size <span class="style-value" id="fontSizeVal">42</span>px</label>
+                <input type="range" class="style-range" id="fontSize" min="20" max="90" value="42" step="1" />
+              </div>
+
+              <!-- Font Color -->
+              <div class="style-section">
+                <label class="style-label">Text Color</label>
+                <div class="color-row">
+                  <input type="color" class="color-input" id="fontColor" value="#ffffff" />
+                  <div class="color-swatches" id="colorSwatches">
+                    <button class="swatch active" data-color="#ffffff" style="background:#ffffff" title="White"></button>
+                    <button class="swatch" data-color="#ffe600" style="background:#ffe600" title="Yellow"></button>
+                    <button class="swatch" data-color="#ff006e" style="background:#ff006e" title="Pink"></button>
+                    <button class="swatch" data-color="#00f5ff" style="background:#00f5ff" title="Cyan"></button>
+                    <button class="swatch" data-color="#00ff41" style="background:#00ff41" title="Green"></button>
+                    <button class="swatch" data-color="#ff8c00" style="background:#ff8c00" title="Orange"></button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Stroke -->
+              <div class="style-section">
+                <label class="style-label">
+                  <span>Stroke (Outline)</span>
+                  <label class="toggle toggle-sm">
+                    <input type="checkbox" id="strokeEnabled" checked />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </label>
+                <div class="stroke-controls" id="strokeControls">
+                  <div class="stroke-row">
+                    <div class="stroke-field">
+                      <span class="stroke-sublabel">Color</span>
+                      <input type="color" class="color-input" id="strokeColor" value="#000000" />
+                    </div>
+                    <div class="stroke-field">
+                      <span class="stroke-sublabel">Width <span class="style-value" id="strokeWidthVal">3</span>px</span>
+                      <input type="range" class="style-range" id="strokeWidth" min="0" max="12" value="3" step="1" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Text Shadow / Glow -->
+              <div class="style-section">
+                <label class="style-label">
+                  <span>Glow / Shadow</span>
+                  <label class="toggle toggle-sm">
+                    <input type="checkbox" id="glowEnabled" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </label>
+                <div class="glow-controls hidden" id="glowControls">
+                  <div class="stroke-row">
+                    <div class="stroke-field">
+                      <span class="stroke-sublabel">Color</span>
+                      <input type="color" class="color-input" id="glowColor" value="#ff006e" />
+                    </div>
+                    <div class="stroke-field">
+                      <span class="stroke-sublabel">Blur <span class="style-value" id="glowBlurVal">12</span>px</span>
+                      <input type="range" class="style-range" id="glowBlur" min="0" max="40" value="12" step="1" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Animation Style -->
+              <div class="style-section">
+                <label class="style-label">Animation Style</label>
+                <div class="anim-grid" id="animGrid">
+                  <button class="anim-btn active" data-anim="word-pop">Word Pop</button>
+                  <button class="anim-btn" data-anim="narration-pop">Narration Pop</button>
+                  <button class="anim-btn" data-anim="bounce-in">Bounce In</button>
+                  <button class="anim-btn" data-anim="slide-up">Slide Up</button>
+                  <button class="anim-btn" data-anim="zoom-flash">Zoom Flash</button>
+                  <button class="anim-btn" data-anim="typewriter">Typewriter</button>
+                  <button class="anim-btn" data-anim="karaoke">Karaoke HL</button>
+                </div>
+              </div>
+
+              <!-- Subtitle Position -->
+              <div class="style-section">
+                <label class="style-label">Subtitle Position</label>
+                <div class="position-grid" id="positionGrid">
+                  <button class="pos-btn" data-pos="top">Top</button>
+                  <button class="pos-btn active" data-pos="bottom">Bottom</button>
+                  <button class="pos-btn" data-pos="center">Center</button>
+                </div>
+              </div>
+
+              <!-- Background Box -->
+              <div class="style-section">
+                <label class="style-label">
+                  <span>Background Box</span>
+                  <label class="toggle toggle-sm">
+                    <input type="checkbox" id="bgBoxEnabled" />
+                    <span class="toggle-slider"></span>
+                  </label>
+                </label>
+                <div class="bgbox-controls hidden" id="bgBoxControls">
+                  <div class="stroke-row">
+                    <div class="stroke-field">
+                      <span class="stroke-sublabel">Color</span>
+                      <input type="color" class="color-input" id="bgBoxColor" value="#000000" />
+                    </div>
+                    <div class="stroke-field">
+                      <span class="stroke-sublabel">Opacity <span class="style-value" id="bgOpacityVal">60</span>%</span>
+                      <input type="range" class="style-range" id="bgOpacity" min="0" max="100" value="60" step="5" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Per-Speaker Colors -->
+              <div class="style-section" id="speakerStylesSection" style="display:none">
+                <label class="style-label">
+                  Per-Speaker Colors
+                  <span class="speaker-style-hint">Multi-speaker detected</span>
+                </label>
+                <div class="speaker-styles-panel" id="speakerStylesPanel">
+                  <!-- Rows injected dynamically by app.js -->
+                </div>
+              </div>
+
+              <!-- Actions -->
+              <div class="style-actions">
+                <div class="save-group">
+                  <button class="btn-save" id="saveTranscriptBtn" title="Save transcript changes (Ctrl+S)">
+                    <span class="btn-save-icon">💾</span>
+                    <span class="btn-save-text">Save</span>
+                  </button>
+                  <span class="autosave-indicator" id="autosaveIndicator"></span>
+                </div>
+                <button class="btn-ae-export" id="exportAEBtn" title="Export After Effects ExtendScript (.jsx)">
+                  <span class="btn-ae-label">AE</span>
+                  <span class="btn-text">Export .jsx</span>
+                </button>
+                <button class="btn-primary" id="startRenderBtn">
+                  <span class="btn-icon">🎬</span>
+                  <span class="btn-text">Render Video</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ─── SCREEN 4: RENDERING ─── -->
+      <div id="screen-rendering" class="app-screen">
+        <div class="transcribing-screen">
+          <div class="transcribing-card">
+            <div class="render-animation">
+              <div class="render-ring"></div>
+              <div class="render-icon">🎬</div>
+            </div>
+            <h2 class="transcribing-title">Rendering Video...</h2>
+            <p class="transcribing-sub" id="renderStatus">Processing pipeline phases</p>
+            <div class="transcribing-file" id="renderFile"></div>
+            <!-- Phase progress -->
+            <div class="render-phases" id="renderPhases"></div>
+            <div class="transcribing-progress">
+              <div class="transcribing-bar" id="renderBar"></div>
+            </div>
+            <div class="transcribing-log" id="renderLog"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ═══ CLIP FINDER SCREEN ═══ -->
+      <div id="screen-clipfinder" class="app-screen">
+        <div class="cf-layout">
+          <!-- ── Left: Input Panel ── -->
+          <div class="panel cf-input-panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Clip Finder</h2>
+              <span class="panel-badge">AI</span>
+            </div>
+
+            <!-- YouTube URL -->
+            <div class="cf-field">
+              <label class="setting-label">YouTube URL</label>
+              <div class="cf-url-wrap">
+                <svg class="cf-url-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
+                  <path d="M13.5 5.5L8 1 2.5 5.5M3 13h10V6H3v7z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M6 10l2.5-2L11 10" stroke="#ff0000" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <input type="url" id="cfUrl" class="cf-url-input" placeholder="https://youtube.com/watch?v=..." />
+              </div>
+            </div>
+
+            <!-- Instructions -->
+            <div class="cf-field">
+              <label class="setting-label">Clip Instructions <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-3)">(optional)</span></label>
+              <textarea id="cfInstructions" class="cf-instructions" rows="5"
+                placeholder="Leave empty to find all interesting moments, or describe specific clips...&#10;&#10;Examples:&#10;- Find funny moments&#10;- Find moments when someone scores a goal&#10;- Find highlights and epic plays"></textarea>
+            </div>
+
+            <!-- Video Start Time (for livestreams) -->
+            <div class="cf-field">
+              <label class="setting-label">Video Start Time <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-3)">(optional — for livestreams)</span></label>
+              <div class="cf-start-offset-wrap">
+                <input type="text" id="cfStartOffset" class="cf-start-offset-input" placeholder="e.g. 5:00 or 300" />
+                <span class="cf-start-offset-hint">Skip waiting time before stream starts (M:SS or seconds)</span>
+              </div>
+            </div>
+
+            <!-- Subtitle Language -->
+            <div class="cf-field">
+              <label class="setting-label">Subtitle Language</label>
+              <select class="setting-select" id="cfLang">
+                <option value="en" selected>English</option>
+                <option value="id">Indonesian</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="zh">Chinese</option>
+                <option value="ar">Arabic</option>
+                <option value="pt">Portuguese</option>
+                <option value="ru">Russian</option>
+                <option value="th">Thai</option>
+                <option value="vi">Vietnamese</option>
+              </select>
+            </div>
+
+            <!-- Find Clips Button -->
+            <button class="btn-primary cf-find-btn" id="cfFindBtn">
+              <span class="btn-icon">
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                  <circle cx="7.5" cy="7.5" r="5.5" stroke="currentColor" stroke-width="2"/>
+                  <path d="M12 12l4 4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <span class="btn-text">Find Clips</span>
+            </button>
+          </div>
+
+          <!-- ── Right: Results Panel ── -->
+          <div class="panel cf-results-panel">
+            <div class="panel-header">
+              <h2 class="panel-title">Results</h2>
+              <span class="panel-badge" id="cfResultCount">0 clips</span>
+            </div>
+
+            <!-- Progress Section -->
+            <div class="cf-progress hidden" id="cfProgress">
+              <div class="cf-steps">
+                <div class="cf-step" id="cfStep1" data-label="Transcript">
+                  <div class="cf-step-dot"></div>
+                  <span>Transcript</span>
+                </div>
+                <div class="cf-step-line"></div>
+                <div class="cf-step" id="cfStep2" data-label="AI Analysis">
+                  <div class="cf-step-dot"></div>
+                  <span>AI Analysis</span>
+                </div>
+                <div class="cf-step-line"></div>
+                <div class="cf-step" id="cfStep3" data-label="Results">
+                  <div class="cf-step-dot"></div>
+                  <span>Results</span>
+                </div>
+              </div>
+              <div class="cf-progress-bar-wrap">
+                <div class="cf-progress-bar" id="cfProgressBar"></div>
+              </div>
+              <div class="cf-log" id="cfLog"></div>
+            </div>
+
+            <!-- Download All Button (shown after analysis) -->
+            <div class="cf-download-all hidden" id="cfDownloadAll">
+              <button class="btn-primary cf-download-all-btn" id="cfDownloadAllBtn">
+                <span class="btn-icon">
+                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+                    <path d="M9 2v10M5 8l4 4 4-4M2 15h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  </svg>
+                </span>
+                <span class="btn-text">Download All Clips</span>
+              </button>
+            </div>
+
+            <!-- Clips Grid -->
+            <div class="cf-clips-grid" id="cfClipsGrid">
+              <div class="cf-empty-state">
+                <div class="cf-empty-icon">
+                  <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                    <rect x="6" y="10" width="36" height="28" rx="4" stroke="currentColor" stroke-width="2" opacity="0.3"/>
+                    <path d="M20 19l10 5-10 5V19z" fill="currentColor" opacity="0.3"/>
+                  </svg>
+                </div>
+                <p class="cf-empty-title">No clips yet</p>
+                <p class="cf-empty-sub">Enter a YouTube URL and describe what clips you want to find.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Render Options Modal ── -->
+      <div class="modal-overlay hidden" id="renderOptionsOverlay">
+        <div class="modal" style="max-width:480px">
+          <div class="modal-header">
+            <div>
+              <h3 class="modal-title">🎬 Render Options</h3>
+              <div class="modal-id">Pilih subtitle yang akan digunakan untuk render</div>
+            </div>
+            <button class="modal-close" id="renderOptionsClose">✕</button>
+          </div>
+          <div class="render-options-body">
+            <label class="render-option-card selected" id="renderOptRefined">
+              <input type="radio" name="renderTranscriptSource" value="refined" checked />
+              <div class="render-option-info">
+                <span class="render-option-title">✨ Refined Transcript</span>
+                <span class="render-option-desc">Subtitle yang sudah di-refine oleh Gemini (sama dengan yang ditampilkan di preview)</span>
+              </div>
+            </label>
+            <label class="render-option-card" id="renderOptOriginal">
+              <input type="radio" name="renderTranscriptSource" value="original" />
+              <div class="render-option-info">
+                <span class="render-option-title">📝 Original ElevenLabs Transcript</span>
+                <span class="render-option-desc">Transcript asli dari ElevenLabs sebelum di-refine (word-level timing lebih akurat)</span>
+              </div>
+            </label>
+          </div>
+          <div class="render-options-actions">
+            <button class="btn-secondary" id="renderOptionsCancel">Cancel</button>
+            <button class="btn-primary" id="renderOptionsConfirm">
+              <span class="btn-icon">🎬</span>
+              <span class="btn-text">Start Render</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Job Detail Modal ── -->
+      <div class="modal-overlay hidden" id="modalOverlay">
+        <div class="modal" id="jobModal">
+          <div class="modal-header">
+            <div>
+              <h3 class="modal-title" id="modalTitle">Job Details</h3>
+              <div class="modal-id" id="modalId"></div>
+            </div>
+            <button class="modal-close" id="modalClose">✕</button>
+          </div>
+
+          <!-- Progress -->
+          <div class="modal-progress">
+            <div class="progress-header">
+              <span class="progress-phase" id="modalPhase">—</span>
+              <span class="progress-pct" id="modalPct">0%</span>
+            </div>
+            <div class="progress-bar-wrap">
+              <div class="progress-bar" id="modalProgressBar"></div>
+            </div>
+            <div class="phase-dots" id="phaseDots"></div>
+          </div>
+
+          <!-- Log -->
+          <div class="log-panel">
+            <div class="log-header">
+              <span>Live Log</span>
+              <span class="log-badge" id="logBadge">LIVE</span>
+            </div>
+            <div class="log-body" id="logBody"></div>
+          </div>
+
+          <!-- Actions -->
+          <div class="modal-actions" id="modalActions"></div>
+        </div>
+      </div>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
