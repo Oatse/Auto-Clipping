@@ -16,7 +16,7 @@
     />
     <link rel="stylesheet" href="style.css" />
   </head>
-  <body>
+  <body class="theme-endfield">
     <!-- ── Background ── -->
     <div class="bg-grid"></div>
     <div class="bg-glow glow-1"></div>
@@ -1578,6 +1578,49 @@
                   </p>
                 </div>
 
+                <!-- Subtitle Settings -->
+                <div class="sm-subtitle-settings">
+                  <div class="sm-subtitle-toggle">
+                    <div class="sm-subtitle-toggle-info">
+                      <span class="sm-subtitle-toggle-label">🎤 Add Subtitles</span>
+                      <span class="sm-subtitle-toggle-desc">Transcribe & add subtitles to the short video</span>
+                    </div>
+                    <label class="toggle toggle-sm">
+                      <input type="checkbox" id="smSubtitleEnabled" />
+                      <span class="toggle-slider"></span>
+                    </label>
+                  </div>
+
+                  <div class="sm-subtitle-options hidden" id="smSubtitleOptions">
+                    <div class="sm-subtitle-row">
+                      <div class="sm-subtitle-field">
+                        <label class="sm-subtitle-field-label">Transcription Model</label>
+                        <select class="setting-select" id="smWhisperModel">
+                          <option value="large-v2" selected>🧠 WhisperX Large-V2</option>
+                          <option value="large-v3">🧠 WhisperX Large-V3</option>
+                          <option value="anime">🎌 Anime Whisper</option>
+                          <option value="elevenlabs">🔊 ElevenLabs STT</option>
+                        </select>
+                      </div>
+                      <div class="sm-subtitle-field">
+                        <label class="sm-subtitle-field-label">Target Language</label>
+                        <select class="setting-select" id="smTargetLang">
+                          <option value="en" selected>🇺🇸 English</option>
+                          <option value="id">🇮🇩 Indonesian</option>
+                          <option value="es">🇪🇸 Spanish</option>
+                          <option value="fr">🇫🇷 French</option>
+                          <option value="de">🇩🇪 German</option>
+                          <option value="ja">🇯🇵 Japanese</option>
+                          <option value="ko">🇰🇷 Korean</option>
+                          <option value="zh">🇨🇳 Chinese</option>
+                          <option value="ar">🇸🇦 Arabic</option>
+                          <option value="pt">🇧🇷 Portuguese</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <button class="btn-primary sm-generate-btn" id="smGenerateBtn">
                   <span class="btn-icon">🎬</span>
                   <span class="btn-text">Generate Short</span>
@@ -1608,16 +1651,21 @@
                 <div class="sm-done-card">
                   <div class="sm-done-icon">✅</div>
                   <h3>Short Created!</h3>
-                  <p>Your YouTube Short (1080×1920) is ready for download.</p>
+                  <p id="smDoneMsg">Your YouTube Short (1080×1920) is ready for download.</p>
                   <div class="sm-done-actions">
                     <button class="btn-primary" id="smDownloadBtn">
                       <span class="btn-icon">⬇</span>
                       <span class="btn-text">Download Short</span>
                     </button>
+                    <button class="btn-primary sm-subtitle-preview-btn hidden" id="smSubtitlePreviewBtn">
+                      <span class="btn-icon">🎤</span>
+                      <span class="btn-text">Preview & Edit Subtitles</span>
+                    </button>
                     <button class="btn-secondary" id="smNewBtn">
                       Create Another
                     </button>
                   </div>
+                  <p class="sm-sub-status hidden" id="smSubStatus">Transcription in progress...</p>
                 </div>
               </div>
             </div>
