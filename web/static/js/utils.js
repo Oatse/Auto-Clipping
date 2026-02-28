@@ -94,10 +94,10 @@ export function switchTab(tab) {
   activeTab = tab;
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
 
-  if (tab === 'clipfinder') {
-    // Hide all subtitle screens, show clip finder
+  if (tab === 'clipfinder' || tab === 'shortmaker') {
+    // Hide all subtitle screens, show the selected screen
     document.querySelectorAll('.app-screen').forEach(s => s.classList.remove('active'));
-    document.getElementById('screen-clipfinder').classList.add('active');
+    document.getElementById('screen-' + tab).classList.add('active');
     const hero = document.querySelector('.hero');
     if (hero) hero.style.display = 'none';
     document.body.classList.remove('preview-active');

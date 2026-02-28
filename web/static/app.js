@@ -194,6 +194,26 @@ const PRESETS = {
   },
 };
 
+// ── VTuber Highlights Preset Instructions ─────────────────────────────────
+const VTUBER_HIGHLIGHTS_PRESET = `Find high-engagement VTuber highlights using these criteria:
+
+PEAK MOMENTS (prioritize these):
+• Karma Arc: Extreme overconfidence immediately followed by a disastrous fail
+• Genuine Reactions: Non-scripted scares, wheezing laughter, or unhinged rants that show personality
+• High-Intensity Gameplay: Clutch plays or epic fails where chat reactions are too fast to read
+• Chaotic Pleas: Hilarious screaming, begging NPCs/enemies for mercy, or panic-induced noise
+
+STRUCTURE (required for every clip):
+• Setup (Bridge): Include 15–45 seconds of buildup — the calm before the storm
+• Hook: If the VTuber sets a goal or tells a story, include that narrative so viewers feel invested
+• Full Cycle (No Cliffhangers): Include the Aftermath — VTuber's reaction after the peak event (speechless, reading funny chat, making excuses). Only end the clip when the topic changes or the energy settles.
+
+DURATION & PACING:
+• Target clip length: 2–5 minutes per clip
+• Flag any silence longer than 5 seconds inside the clip as a potential edit point
+
+For each clip output highlight_type (karma_arc | genuine_reaction | clutch_play | chaotic_plea | other) and dead_air_timestamps (array of timestamps in seconds where silence > 5s occurs inside the clip).`;
+
 // ── DOM Refs ───────────────────────────────────────────────────────────────
 const dropZone        = document.getElementById('dropZone');
 const dropZoneInner   = document.getElementById('dropZoneInner');
@@ -3156,14 +3176,49 @@ function setupClipFinder() {
   const cfStartOffset  = document.getElementById('cfStartOffset');
   const cfFindBtn      = document.getElementById('cfFindBtn');
   const cfDownloadAllBtn = document.getElementById('cfDownloadAllBtn');
+  const cfPresetVtuber = document.getElementById('cfPresetVtuber');
+  const cfPresetClear  = document.getElementById('cfPresetClear');
 
   // Enable/disable find button
   function updateFindBtn() {
     cfFindBtn.disabled = !cfUrl.value.trim();
   }
   cfUrl.addEventListener('input', updateFindBtn);
-  cfInstructions.addEventListener('input', updateFindBtn);
+  cfInstructions.addEventListener('input', () => {
+    updateFindBtn();
+    // Show Clear button when textarea has content
+    const hasContent = cfInstructions.value.trim().length > 0;
+    cfPresetClear.classList.toggle('hidden', !hasContent);
+    // Deactivate preset chip if user manually edits
+    if (cfInstructions.value !== VTUBER_HIGHLIGHTS_PRESET) {
+      cfPresetVtuber.classList.remove('active');
+    }
+  });
   updateFindBtn();
+
+  // VTuber Highlights preset chip
+  cfPresetVtuber.addEventListener('click', () => {
+    const isActive = cfPresetVtuber.classList.contains('active');
+    if (isActive) {
+      // Toggle off — clear the field
+      cfInstructions.value = '';
+      cfPresetVtuber.classList.remove('active');
+      cfPresetClear.classList.add('hidden');
+    } else {
+      cfInstructions.value = VTUBER_HIGHLIGHTS_PRESET;
+      cfPresetVtuber.classList.add('active');
+      cfPresetClear.classList.remove('hidden');
+    }
+    cfInstructions.dispatchEvent(new Event('input'));
+  });
+
+  // Clear preset chip
+  cfPresetClear.addEventListener('click', () => {
+    cfInstructions.value = '';
+    cfPresetVtuber.classList.remove('active');
+    cfPresetClear.classList.add('hidden');
+    cfInstructions.dispatchEvent(new Event('input'));
+  });
 
   // Find Clips button — triggers Phase 1 (transcript + AI analysis)
   cfFindBtn.addEventListener('click', async () => {
@@ -3442,6 +3497,32 @@ async function cfLoadResults(jobId) {
  * Shown after Phase 1 (analysis) before user clicks Download.
  * Each card has an individual download button.
  */
+/**
+ * Return a styled HTML badge string for a VTuber highlight type.
+ * Returns empty string when type is absent or 'other'.
+ */
+function cfHighlightBadge(type) {
+  const labels = {
+    karma_arc:        '🎭 Karma Arc',
+    genuine_reaction: '😂 Genuine Reaction',
+    clutch_play:      '🎮 Clutch Play',
+    chaotic_plea:     '😱 Chaotic Plea',
+  };
+  const label = labels[type];
+  if (!label) return '';
+  return `<span class="cf-clip-badge cf-clip-badge--${escapeHtml(type)}">${label}</span>`;
+}
+
+/**
+ * Return a dead-air note HTML string if the clip has flagged silence timestamps.
+ */
+function cfDeadAirNote(clip) {
+  const ts = clip.dead_air_timestamps;
+  if (!Array.isArray(ts) || ts.length === 0) return '';
+  const times = ts.map(t => cfFmtTime(t)).join(', ');
+  return `<div class="cf-dead-air-note">✂ Edit points (silence &gt;5s): ${escapeHtml(times)}</div>`;
+}
+
 function cfRenderClipsInfoOnly(job) {
   const grid = document.getElementById('cfClipsGrid');
   grid.innerHTML = '';
@@ -3456,6 +3537,9 @@ function cfRenderClipsInfoOnly(job) {
     const durFmt   = duration >= 60
       ? Math.floor(duration / 60) + 'm ' + Math.floor(duration % 60) + 's'
       : Math.floor(duration) + 's';
+
+    const badge    = cfHighlightBadge(clip.highlight_type);
+    const deadAir  = cfDeadAirNote(clip);
 
     // Check if this clip is already downloaded
     const isDownloaded = job.clip_files && job.clip_files[idx];
@@ -3476,9 +3560,11 @@ function cfRenderClipsInfoOnly(job) {
         </div>
         <div class="cf-clip-info">
           <div class="cf-clip-number">#${idx + 1}</div>
+          ${badge}
           <div class="cf-clip-title">${escapeHtml(clip.title || 'Clip ' + (idx + 1))}</div>
           <div class="cf-clip-time">${startFmt} - ${endFmt}</div>
           ${clip.reason ? `<div class="cf-clip-reason">${escapeHtml(clip.reason)}</div>` : ''}
+          ${deadAir}
         </div>
         <div class="cf-clip-actions">
           <a class="cf-clip-download" href="/api/clip-finder/clips/${job.id}/${idx}" download>
@@ -3515,9 +3601,11 @@ function cfRenderClipsInfoOnly(job) {
         </div>
         <div class="cf-clip-info">
           <div class="cf-clip-number">#${idx + 1}</div>
+          ${badge}
           <div class="cf-clip-title">${escapeHtml(clip.title || 'Clip ' + (idx + 1))}</div>
           <div class="cf-clip-time">${startFmt} - ${endFmt} (${durFmt})</div>
           ${clip.reason ? `<div class="cf-clip-reason">${escapeHtml(clip.reason)}</div>` : ''}
+          ${deadAir}
         </div>
         <div class="cf-clip-actions">
           <button class="cf-clip-download cf-clip-dl-single" data-clip-idx="${idx}">
@@ -3560,6 +3648,9 @@ function cfRenderClips(job) {
       ? Math.floor(duration / 60) + 'm ' + Math.floor(duration % 60) + 's'
       : Math.floor(duration) + 's';
 
+    const badge   = cfHighlightBadge(clip.highlight_type);
+    const deadAir = cfDeadAirNote(clip);
+
     card.innerHTML = `
       <div class="cf-clip-video-wrap">
         <video class="cf-clip-video" preload="metadata"
@@ -3574,9 +3665,11 @@ function cfRenderClips(job) {
       </div>
       <div class="cf-clip-info">
         <div class="cf-clip-number">#${idx + 1}</div>
+        ${badge}
         <div class="cf-clip-title">${escapeHtml(clip.title || 'Clip ' + (idx + 1))}</div>
         <div class="cf-clip-time">${startFmt} - ${endFmt}</div>
         ${clip.reason ? `<div class="cf-clip-reason">${escapeHtml(clip.reason)}</div>` : ''}
+        ${deadAir}
       </div>
       <div class="cf-clip-actions">
         <a class="cf-clip-download" href="/api/clip-finder/clips/${job.id}/${idx}" download>
@@ -3653,7 +3746,7 @@ async function cfDownloadSingleClip(btn, jobId) {
     }
 
     // Poll until this clip is downloaded
-    for (let attempt = 0; attempt < 120; attempt++) {
+    for (let attempt = 0; attempt < 600; attempt++) {
       await new Promise(r => setTimeout(r, 2000));
       const pollRes = await fetch(`/api/clip-finder/jobs/${jobId}`);
       if (!pollRes.ok) continue;
@@ -3670,7 +3763,7 @@ async function cfDownloadSingleClip(btn, jobId) {
       }
     }
 
-    throw new Error('Download timed out');
+    throw new Error('Download timed out (>20 menit)');
   } catch (err) {
     alert('Error: ' + err.message);
     btn.disabled = false;

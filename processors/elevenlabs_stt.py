@@ -77,6 +77,21 @@ class ElevenLabsSTTProcessor:
         segments = self._parse_response(raw_result, speaker_detection)
         logger.info("Parsed {} segments from ElevenLabs response", len(segments))
 
+        # Log actual vs requested speaker count for transparency
+        actual_speakers = set(seg.speaker for seg in segments)
+        logger.info(
+            "ElevenLabs detected {} unique speaker(s): {}",
+            len(actual_speakers),
+            sorted(actual_speakers),
+        )
+        if num_speakers is not None and len(actual_speakers) < num_speakers:
+            logger.warning(
+                "Requested max {} speakers but ElevenLabs only detected {}. "
+                "This is normal — num_speakers sets the maximum, not exact count.",
+                num_speakers,
+                len(actual_speakers),
+            )
+
         # Step 3.5: Sanitize timestamps — fix broken word/segment end times
         # that cause subtitles to linger on screen after the speaker stops.
         segments = sanitize_timestamps(segments)

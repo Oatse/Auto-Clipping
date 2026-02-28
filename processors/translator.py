@@ -16,7 +16,7 @@ import httpx
 from loguru import logger
 
 import config
-from models.transcript import TranscriptSegment, WordTimestamp
+from models.transcript import TranscriptSegment, WordTimestamp, sanitize_timestamps
 from utils.file_utils import ensure_dir
 
 # Language name mapping for clearer prompts
@@ -106,6 +106,10 @@ class TranslatorProcessor:
                 translated = self._local_group_from_segments(segments)
             else:
                 translated = segments
+
+        # Sanitize timestamps to fix any same-speaker overlaps introduced
+        # during translation/regrouping.
+        translated = sanitize_timestamps(translated)
 
         json_path = output_dir / "translated_transcript.json"
         self._save_json(translated, json_path)

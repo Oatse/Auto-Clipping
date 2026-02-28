@@ -400,7 +400,7 @@ async function cfDownloadSingleClip(btn, jobId) {
       return;
     }
 
-    for (let attempt = 0; attempt < 120; attempt++) {
+    for (let attempt = 0; attempt < 600; attempt++) {
       await new Promise(r => setTimeout(r, 2000));
       const pollRes = await fetch(`/api/clip-finder/jobs/${jobId}`);
       if (!pollRes.ok) continue;
@@ -416,7 +416,7 @@ async function cfDownloadSingleClip(btn, jobId) {
       }
     }
 
-    throw new Error('Download timed out');
+    throw new Error('Download timed out (>20 menit)');
   } catch (err) {
     alert('Error: ' + err.message);
     btn.disabled = false;

@@ -395,6 +395,37 @@ def _build_ass_content(
 
     all_fields = [_seg_fields(s) for s in segments]
 
+    # ── Fix same-speaker overlaps before building dialogue lines ──────────
+    # Sort segments by (speaker, start) and trim any same-speaker overlaps
+    # so subtitles for one speaker never stack on top of each other.
+    _speaker_groups: dict[str, list[int]] = {}
+    for _i, (_, _, _sp) in enumerate(all_fields):
+        _speaker_groups.setdefault(_sp, []).append(_i)
+
+    for _sp, _indices in _speaker_groups.items():
+        # Sort indices by start time
+        _indices.sort(key=lambda _j: all_fields[_j][0])
+        for _k in range(len(_indices) - 1):
+            cur_idx = _indices[_k]
+            nxt_idx = _indices[_k + 1]
+            cur_start, cur_end, _ = all_fields[cur_idx]
+            nxt_start, nxt_end, _ = all_fields[nxt_idx]
+            if cur_end > nxt_start:
+                # Trim current segment's end to avoid overlap
+                new_end = max(cur_start + 0.05, nxt_start - 0.01)
+                all_fields[cur_idx] = (cur_start, new_end, _sp)
+                # Also update the actual segment object
+                _seg_obj = segments[cur_idx]
+                if isinstance(_seg_obj, dict):
+                    _seg_obj["end"] = new_end
+                else:
+                    _seg_obj.end = new_end
+                logger.debug(
+                    "ASS: trimmed same-speaker overlap for {} seg#{}: "
+                    "end {:.3f} → {:.3f}",
+                    _sp, cur_idx, cur_end, new_end,
+                )
+
     # Build dialogue lines with dynamic per-line MarginV
     dialogue_lines = []
     for idx, seg in enumerate(segments):
@@ -518,14 +549,16 @@ class SubtitleRendererProcessor:
         output_path: Path | str,
         style_config: dict | None = None,
         segments: list | None = None,
+        speaker_detection: bool = True,
     ) -> Path:
         """
         Render subtitles onto the video.
 
-        Single-speaker: uses Pycaps CapsPipelineBuilder (supports animations).
-        Multi-speaker:  generates an ASS subtitle file and burns it via FFmpeg
-                        (ASS natively supports simultaneous multi-line subtitles
-                        with per-speaker colors and vertical stacking).
+        Single-speaker with speaker_detection=True: uses Pycaps CapsPipelineBuilder
+            (supports animations).
+        Multi-speaker OR speaker_detection=False: generates an ASS subtitle file
+            and burns it via FFmpeg (ASS natively supports simultaneous multi-line
+            subtitles with per-speaker colors and vertical stacking).
 
         Parameters
         ----------
@@ -543,6 +576,10 @@ class SubtitleRendererProcessor:
             TranscriptSegment list used for speaker diarization (multi-speaker
             detection). When more than one unique speaker is found the render
             falls back to the ASS/FFmpeg path.
+        speaker_detection:
+            When False (speaker detection was disabled at transcription time),
+            force the ASS/FFmpeg render path regardless of speaker count so
+            rendering behaviour is consistent with the multi-speaker path.
 
         Returns
         -------
@@ -561,8 +598,6 @@ class SubtitleRendererProcessor:
             (getattr(s, "speaker", None) or "SPEAKER_00")
             for s in segs
         ))
-        is_multi_speaker = len(unique_speakers) > 1
-
         logger.info(
             "Rendering subtitles: {} → {} (style: font={}, anim={}, speakers={})",
             video_path.name,
@@ -572,7 +607,9 @@ class SubtitleRendererProcessor:
             len(unique_speakers) if unique_speakers else 1,
         )
 
-        if is_multi_speaker and segs:
+        # Always use ASS/FFmpeg path for all cases (single-speaker, multi-speaker,
+        # speaker detection on or off) for consistent rendering behaviour.
+        if segs:
             return self._render_ass(video_path, output_path, segs, style)
 
         # ── Single-speaker path: Pycaps ───────────────────────────────────────

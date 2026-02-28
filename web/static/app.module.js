@@ -10,9 +10,10 @@ import { setupTimeline } from './js/timeline.js';
 import { setupJobs, loadJobs, loadSystemInfo } from './js/jobs.js';
 import { setupClipFinder } from './js/clipfinder.js';
 import { setupRender } from './js/render.js';
+import { setupShortMaker } from './js/shortmaker.js';
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Navigation tabs (subtitle / clipfinder)
+  // Navigation tabs (subtitle / clipfinder / shortmaker)
   setupNavTabs();
 
   // Upload screen: drag-drop, form, advanced options, clip picker
@@ -32,6 +33,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Render: options modal, AE export
   setupRender();
+
+  // Short Maker: convert to YouTube Shorts format
+  setupShortMaker();
 
   // Apply default subtitle style preset
   applyPreset('vtuber-pop');

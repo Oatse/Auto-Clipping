@@ -52,9 +52,12 @@ ELEVENLABS_API_KEY: str = ELEVENLABS_API_KEYS[0] if ELEVENLABS_API_KEYS else ""
 
 
 # ─── yt-dlp ──────────────────────────────────────────────────────────────────
-YTDLP_PATH: str = os.getenv("YTDLP_PATH", "./bin/yt-dlp.exe")
 YTDLP_COOKIES_BROWSER: str = os.getenv("YTDLP_COOKIES_BROWSER", "")  # e.g. "edge", "chrome", "firefox"
-YTDLP_COOKIES_FILE: str = os.getenv("YTDLP_COOKIES_FILE", "")        # path to cookies.txt file (takes priority over browser)
+_default_cookies_file = os.path.join(os.path.dirname(__file__), "cookies.txt")
+YTDLP_COOKIES_FILE: str = os.getenv(
+    "YTDLP_COOKIES_FILE",
+    _default_cookies_file if os.path.isfile(_default_cookies_file) else "",
+)  # path to cookies.txt file (takes priority over browser)
 
 
 # ─── WhisperX ─────────────────────────────────────────────────────────────────

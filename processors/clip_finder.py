@@ -3,13 +3,13 @@ processors/clip_finder.py — YouTube Clip Finder using yt-dlp + Gemini AI.
 
 Flow (2-phase):
   Phase 1 (auto — on "Find Clips"):
-    1. yt-dlp --skip-download → extract transcript via write-auto-sub / write-sub
+    1. yt-dlp Python API (skip_download) → extract transcript via writeautosub / writesubtitles
        (tries: auto-subs in lang → manual subs in lang → auto-subs any lang → manual subs any lang)
     2. Gemini AI analyzes transcript → returns list of clips
     3. Results displayed to user
 
   Phase 2 (on-demand — user clicks "Download Clips"):
-    4. yt-dlp --download-sections → download only the relevant sections
+    4. yt-dlp Python API (download_ranges) → download only the relevant sections
     5. Clips ready for preview / download
 """
 
@@ -18,11 +18,12 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-import shutil
 from pathlib import Path
 from typing import Callable
 
 import httpx
+import yt_dlp
+import yt_dlp.utils
 from loguru import logger
 
 import config
@@ -33,43 +34,91 @@ class ClipFinderError(RuntimeError):
     pass
 
 
+class _YtdlpLogger:
+    """Redirects yt-dlp log output to a log_fn callback."""
+
+    def __init__(self, log_fn: Callable[[str], None]):
+        self._log = log_fn
+
+    def debug(self, msg: str) -> None:
+        # Skip verbose debug lines; only pass through meaningful output
+        if not msg.startswith("[debug]"):
+            self._log(f"  yt-dlp: {msg}")
+
+    def warning(self, msg: str) -> None:
+        self._log(f"  yt-dlp: {msg}")
+
+    def error(self, msg: str) -> None:
+        self._log(f"  yt-dlp: {msg}")
+
+
 class ClipFinder:
     """Orchestrates transcript extraction, AI analysis, and selective clip download."""
 
     def __init__(self):
-        self.ytdlp_path = self._resolve_ytdlp()
         self._cookies_file = getattr(config, "YTDLP_COOKIES_FILE", "")
         self._cookies_browser = getattr(config, "YTDLP_COOKIES_BROWSER", "")
 
-    def _base_ytdlp_cmd(self) -> list[str]:
-        """Return common yt-dlp flags (js-runtime, cookies)."""
-        cmd = [self.ytdlp_path, "--js-runtimes", "node"]
-        if self._cookies_file and Path(self._cookies_file).is_file():
-            cmd += ["--cookies", self._cookies_file]
+    def _base_ytdlp_opts(
+        self,
+        log_fn: Callable[[str], None] | None = None,
+    ) -> dict:
+        """Return common yt-dlp options.
+
+        NOTE: Cookies are intentionally NOT passed here.  The
+        ``android_vr`` player client — which is the only client that
+        reliably works without a JavaScript runtime — does not support
+        cookies.  When cookies are present yt-dlp silently skips
+        ``android_vr`` and falls back to clients that require a JS
+        runtime for the n-parameter challenge, causing "Only images are
+        available for download" errors.
+
+        Public YouTube videos (including livestream archives) do not
+        need cookies for downloading or subtitle extraction.
+        """
+        opts: dict = {
+            "quiet": True,
+            "no_warnings": False,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["default", "android_vr"],
+                },
+            },
+        }
+        if log_fn:
+            opts["logger"] = _YtdlpLogger(log_fn)
+        return opts
+
+    def _cookie_opts(self) -> dict:
+        """Return yt-dlp cookie options when cookies are configured.
+
+        These are intended for actual video *downloads* (not subtitle
+        extraction).  When cookies are supplied we use the ``ios``
+        client instead of ``android_vr`` (which doesn't support
+        cookie auth) or ``default``/``web_safari`` (which require a
+        JavaScript runtime to solve the n-parameter challenge and
+        fail with "Only images are available for download" when no
+        JS runtime is installed).
+
+        The ``ios`` client:
+          - Accepts cookie-based authentication.
+          - Does NOT require a JS runtime for the n-parameter challenge.
+          - Works reliably for VODs, livestream archives, and regular videos.
+
+        Fallback chain: ios → android → mweb (no JS needed for any of them).
+        """
+        opts: dict = {}
+        if self._cookies_file:
+            opts["cookiefile"] = self._cookies_file
+            opts["extractor_args"] = {
+                "youtube": {"player_client": ["ios", "android", "mweb"]}
+            }
         elif self._cookies_browser:
-            cmd += ["--cookies-from-browser", self._cookies_browser]
-        return cmd
-
-    # ── Resolve yt-dlp binary ────────────────────────────────────────────────
-
-    @staticmethod
-    def _resolve_ytdlp() -> str:
-        """Find yt-dlp binary from config, ./bin/, or system PATH."""
-        env_path = getattr(config, "YTDLP_PATH", "")
-        if env_path and Path(env_path).is_file():
-            return str(Path(env_path).resolve())
-
-        bin_path = config.BASE_DIR / "bin" / "yt-dlp.exe"
-        if bin_path.is_file():
-            return str(bin_path)
-
-        which = shutil.which("yt-dlp")
-        if which:
-            return which
-
-        raise EnvironmentError(
-            "yt-dlp not found. Place yt-dlp.exe in ./bin/ or set YTDLP_PATH in .env"
-        )
+            opts["cookiesfrombrowser"] = (self._cookies_browser,)
+            opts["extractor_args"] = {
+                "youtube": {"player_client": ["ios", "android", "mweb"]}
+            }
+        return opts
 
     # ── 1. Extract Transcript (no video download) ────────────────────────────
 
@@ -94,25 +143,25 @@ class ClipFinder:
         strategies = [
             {
                 "label": f"auto-subs ({lang})",
-                "flags": ["--write-auto-sub", "--sub-lang", lang],
+                "opts": {"writeautomaticsub": True, "subtitleslangs": [lang]},
             },
             {
                 "label": f"manual subs ({lang})",
-                "flags": ["--write-sub", "--sub-lang", lang],
+                "opts": {"writesubtitles": True, "subtitleslangs": [lang]},
             },
             {
                 "label": "auto-subs (any language)",
-                "flags": ["--write-auto-sub", "--sub-lang", "all"],
+                "opts": {"writeautomaticsub": True, "subtitleslangs": ["all", "-live_chat"]},
             },
             {
                 "label": "manual subs (any language)",
-                "flags": ["--write-sub", "--sub-lang", "all"],
+                "opts": {"writesubtitles": True, "subtitleslangs": ["all", "-live_chat"]},
             },
         ]
 
         for strategy in strategies:
             label = strategy["label"]
-            flags = strategy["flags"]
+            base_opts = strategy["opts"]
 
             if log_fn:
                 log_fn(f"Trying {label}...")
@@ -121,7 +170,7 @@ class ClipFinder:
             result = await self._try_subtitle_download(
                 url=url,
                 output_dir=output_dir,
-                extra_flags=flags + ["--sub-format", "json3"],
+                extra_opts={**base_opts, "subtitlesformat": "json3"},
                 log_fn=log_fn,
             )
             if result is not None:
@@ -133,7 +182,7 @@ class ClipFinder:
             result = await self._try_subtitle_download(
                 url=url,
                 output_dir=output_dir,
-                extra_flags=flags + ["--sub-format", "srt/vtt/best"],
+                extra_opts={**base_opts, "subtitlesformat": "srt/vtt/best"},
                 log_fn=log_fn,
             )
             if result is not None:
@@ -149,7 +198,7 @@ class ClipFinder:
         self,
         url: str,
         output_dir: Path,
-        extra_flags: list[str],
+        extra_opts: dict,
         log_fn: Callable[[str], None] | None = None,
     ) -> list[dict] | None:
         """Run a single yt-dlp subtitle download attempt and parse the result."""
@@ -158,40 +207,39 @@ class ClipFinder:
             old.unlink(missing_ok=True)
 
         sub_file = str(output_dir / "subs")
-        cmd = [
-            *self._base_ytdlp_cmd(),
-            *extra_flags,
-            "--skip-download",
-            "-o", sub_file,
-            url,
-        ]
+        ydl_opts = {
+            **self._base_ytdlp_opts(log_fn),
+            **extra_opts,
+            "skip_download": True,
+            "ignore_no_formats_error": True,
+            "outtmpl": sub_file,
+        }
 
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
+        def _run() -> None:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                try:
+                    ydl.download([url])
+                except yt_dlp.utils.DownloadError:
+                    pass
 
-        # Log yt-dlp output for debugging
-        if stderr and log_fn:
-            stderr_text = stderr.decode("utf-8", errors="replace").strip()
-            if stderr_text:
-                for line in stderr_text.splitlines()[-5:]:  # last 5 lines
-                    log_fn(f"  yt-dlp: {line}")
-        if proc.returncode != 0 and log_fn:
-            log_fn(f"  yt-dlp exited with code {proc.returncode}")
+        await asyncio.to_thread(_run)
 
-        # Check for JSON3
+        # Check for JSON3 (skip live_chat — it's chat replay, not subtitles)
         for p in output_dir.glob("subs*.json3"):
+            if "live_chat" in p.name:
+                continue
             return self._parse_json3_subs(p)
 
         # Check for SRT
         for p in output_dir.glob("subs*.srt"):
+            if "live_chat" in p.name:
+                continue
             return self._parse_srt_subs(p)
 
         # Check for VTT
         for p in output_dir.glob("subs*.vtt"):
+            if "live_chat" in p.name:
+                continue
             return self._parse_vtt_subs(p)
 
         return None
@@ -241,6 +289,53 @@ class ClipFinder:
             "moments, and anything a viewer would want to clip and share."
         )
 
+        # Detect VTuber/streamer highlight mode — enables extra structured output fields
+        is_vtuber_mode = self._is_vtuber_mode(effective_instructions)
+
+        # Extra schema fields injected when VTuber mode is active
+        vtuber_schema_extra = (
+            '- "highlight_type": category of this highlight — one of: '
+            '"karma_arc" (overconfidence → fail), '
+            '"genuine_reaction" (non-scripted scare/laughter/rant), '
+            '"clutch_play" (epic play or epic fail), '
+            '"chaotic_plea" (screaming/begging/panic), '
+            '"other"\n'
+            '- "dead_air_timestamps": list of video timestamps (in seconds) where '
+            "silence longer than 5 seconds occurs INSIDE this clip's time range, "
+            "so the editor can cut them out. Empty list [] if none.\n"
+        ) if is_vtuber_mode else ""
+
+        # Extra strict rules injected when VTuber mode is active
+        vtuber_rules_extra = (
+            "- BUILDUP: Each clip MUST start 15–45 seconds before the peak moment "
+            "(the 'calm before the storm'). If the VTuber is setting a goal or telling "
+            "a story, include that narrative hook so viewers feel invested.\n"
+            "- FULL CYCLE: Each clip MUST include the Aftermath — the VTuber's reaction "
+            "AFTER the peak event (speechless moment, reading funny chat, making excuses). "
+            "NEVER cut during the climax. End only when the topic changes or energy settles.\n"
+            "- DEAD AIR: Flag any gap/silence longer than 5 seconds inside the clip as a "
+            "potential edit point in dead_air_timestamps.\n"
+            "- HIGHLIGHT TYPE: Tag each clip with its highlight_type.\n"
+        ) if is_vtuber_mode else ""
+
+        # Build example JSON (extended when VTuber mode is active)
+        if is_vtuber_mode:
+            example_json = (
+                f'[{{"start": 82.0, "end": {82.0 + min_clip}, "title": "Epic moment", '
+                '"reason": "Player makes an incredible play", '
+                '"highlight_type": "clutch_play", "dead_air_timestamps": []}, '
+                f'{{"start": 350.0, "end": {350.0 + min_clip}, "title": "Karma moment", '
+                '"reason": "VTuber brags then immediately fails", '
+                '"highlight_type": "karma_arc", "dead_air_timestamps": [420.5, 455.0]}}]'
+            )
+        else:
+            example_json = (
+                f'[{{"start": 82.0, "end": {82.0 + min_clip}, "title": "Epic moment", '
+                '"reason": "Player makes an incredible play"}, '
+                f'{{"start": 350.0, "end": {350.0 + min_clip}, "title": "Funny reaction", '
+                '"reason": "Streamer has hilarious reaction to jumpscare"}}]'
+            )
+
         prompt = (
             "You are a video clip finder AI. You are given a transcript of a video "
             "with timestamps (in seconds), and instructions about what clips to find.\n\n"
@@ -256,8 +351,9 @@ class ClipFinder:
             '- "start": start time in SECONDS as a number (e.g. 82.0, NOT "1:22")\n'
             '- "end": end time in SECONDS as a number (e.g. 262.0, NOT "4:22")\n'
             '- "title": a short UNIQUE descriptive title (string, max 50 chars)\n'
-            '- "reason": why this clip matches the instructions (string, max 100 chars)\n\n'
-            "STRICT RULES:\n"
+            '- "reason": why this clip matches the instructions (string, max 100 chars)\n'
+            f"{vtuber_schema_extra}"
+            "\nSTRICT RULES:\n"
             f"- Each clip MUST be between {min_clip} and {max_clip} seconds long\n"
             "- start and end are in SECONDS (total seconds from video start)\n"
             "- Ensure start < end\n"
@@ -267,12 +363,10 @@ class ClipFinder:
             "- Include context: start a few seconds before and end a few seconds "
             "after the key moment\n"
             "- Sort by start time\n"
-            "- Find as many DISTINCT matching clips as possible\n\n"
-            "Example response (note: start/end are in seconds):\n"
-            f'[{{"start": 82.0, "end": {82.0 + min_clip}, "title": "Epic moment", '
-            '"reason": "Player makes an incredible play"}, '
-            f'{{"start": 350.0, "end": {350.0 + min_clip}, "title": "Funny reaction", '
-            '"reason": "Streamer has hilarious reaction to jumpscare"}]'
+            "- Find as many DISTINCT matching clips as possible\n"
+            f"{vtuber_rules_extra}"
+            "\nExample response (note: start/end are in seconds):\n"
+            f"{example_json}"
         )
 
         payload = {
@@ -354,7 +448,7 @@ class ClipFinder:
         index_offset: int = 0,
     ) -> list[Path]:
         """
-        Download only the relevant video sections using yt-dlp --download-sections.
+        Download only the relevant video sections using yt-dlp download_ranges.
         Each clip is downloaded separately — no need to download the full video.
 
         index_offset: added to loop index for file naming (useful for single-clip download).
@@ -372,10 +466,6 @@ class ClipFinder:
             safe_title = safe_title.strip().replace(" ", "_") or f"clip_{i}"
             output_file = output_dir / f"clip_{i + 1:03d}_{safe_title}.mp4"
 
-            # Format time for yt-dlp: *SS-SS or *HH:MM:SS-HH:MM:SS
-            start_fmt = self._fmt_time_hhmmss(start)
-            end_fmt = self._fmt_time_hhmmss(end)
-
             if log_fn:
                 log_fn(
                     f"Downloading clip {i + 1}/{len(clips)}: "
@@ -383,30 +473,80 @@ class ClipFinder:
                     f'"{clip.get("title", "")}"'
                 )
 
-            cmd = [
-                *self._base_ytdlp_cmd(),
-                "--concurrent-fragments", "4",
-                "--download-sections", f"*{start_fmt}-{end_fmt}",
-                "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
-                "--merge-output-format", "mp4",
-                "--no-playlist",
-                "-o", str(output_file),
-                "--force-keyframes-at-cuts",
-                "--ppa", "ffmpeg:-c:v h264_nvenc -preset p4 -cq 23",
-                url,
-            ]
+            # Base download opts — intentionally NO cookies so that android_vr
+            # (the most reliable client) is not skipped.  Passing a cookiefile
+            # causes yt-dlp to skip android_vr/ios/android clients, leaving
+            # only mweb which requires a GVS PO Token and falls back to
+            # "Only images are available".
+            _common_opts = {
+                "concurrent_fragment_downloads": 4,
+                "download_ranges": yt_dlp.utils.download_range_func(
+                    None, [(start, end)]
+                ),
+                "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+                "merge_output_format": "mp4",
+                "noplaylist": True,
+                "outtmpl": str(output_file),
+                "force_keyframes_at_cuts": True,
+                "socket_timeout": 60,
+                "retries": 10,
+                "fragment_retries": 10,
+                "file_access_retries": 5,
+                "retry_sleep_functions": {"http": lambda n: 2 ** n},
+                "postprocessor_args": {
+                    "ffmpeg": ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"]
+                },
+            }
 
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            _, stderr = await proc.communicate()
+            # Attempt 1: android_vr client — no cookies (works for public videos)
+            ydl_opts = {
+                **self._base_ytdlp_opts(log_fn),
+                **_common_opts,
+            }
 
-            if proc.returncode != 0:
-                err = stderr.decode(errors="replace")
+            err_holder: list[str] = []
+
+            def _run(opts: dict = ydl_opts) -> None:
+                with yt_dlp.YoutubeDL(opts) as ydl:
+                    try:
+                        ydl.download([url])
+                    except yt_dlp.utils.DownloadError as exc:
+                        err_holder.append(str(exc))
+
+            await asyncio.to_thread(_run)
+
+            # Attempt 2 (fallback): use cookies with tv_embedded/web_creator
+            # clients which accept cookie auth without a JS runtime requirement.
+            if err_holder and self._cookie_opts():
                 if log_fn:
-                    log_fn(f"Warning: Failed to download clip {i + 1}: {err[:200]}")
+                    log_fn(
+                        f"Clip {i + 1}: first attempt failed, retrying with cookies..."
+                    )
+                cookie_fallback_opts = {
+                    **self._base_ytdlp_opts(log_fn),
+                    **self._cookie_opts(),
+                    **_common_opts,
+                    # Override extractor_args to use clients that accept cookies
+                    "extractor_args": {
+                        "youtube": {
+                            "player_client": ["tv_embedded", "web_creator", "mweb"],
+                        }
+                    },
+                }
+                err_holder.clear()
+
+                def _run_fallback(opts: dict = cookie_fallback_opts) -> None:
+                    with yt_dlp.YoutubeDL(opts) as ydl:
+                        try:
+                            ydl.download([url])
+                        except yt_dlp.utils.DownloadError as exc:
+                            err_holder.append(str(exc))
+
+                await asyncio.to_thread(_run_fallback)
+
+            if err_holder:
+                if log_fn:
+                    log_fn(f"Warning: Failed to download clip {i + 1}: {err_holder[0][:200]}")
                 continue
 
             # yt-dlp might add suffix — find the actual file
@@ -583,6 +723,18 @@ class ClipFinder:
                     clip["end"] = self._to_seconds(clip["end"])
                     clip["title"] = str(clip.get("title", "Clip"))[:60]
                     clip["reason"] = str(clip.get("reason", ""))[:150]
+                    # Preserve VTuber-specific fields when present
+                    ht = clip.get("highlight_type", "")
+                    valid_types = {"karma_arc", "genuine_reaction", "clutch_play", "chaotic_plea", "other"}
+                    clip["highlight_type"] = str(ht) if ht in valid_types else ""
+                    raw_dts = clip.get("dead_air_timestamps", [])
+                    if isinstance(raw_dts, list):
+                        clip["dead_air_timestamps"] = [
+                            float(t) for t in raw_dts
+                            if isinstance(t, (int, float)) or (isinstance(t, str) and t.replace(".", "").isdigit())
+                        ]
+                    else:
+                        clip["dead_air_timestamps"] = []
                     duration = clip["end"] - clip["start"]
                     if duration < 1.0:
                         # Skip clips shorter than 1 second (clearly invalid)
@@ -768,6 +920,28 @@ class ClipFinder:
         return min_clip, max_clip
 
     @staticmethod
+    def _is_vtuber_mode(instructions: str) -> bool:
+        """Return True if the instructions request VTuber-specific structured output.
+
+        Triggered by keywords from the VTuber Highlights preset or similar criteria.
+        When active, the Gemini prompt requests extra fields: highlight_type and
+        dead_air_timestamps.
+        """
+        text = instructions.lower()
+        return any(kw in text for kw in (
+            "vtuber",
+            "highlight_type",
+            "dead_air",
+            "karma arc",
+            "karma_arc",
+            "chaotic plea",
+            "genuine reaction",
+            "full cycle",
+            "clutch play",
+            "peak moment",
+        ))
+
+    @staticmethod
     def filter_transcript_by_offset(
         transcript: list[dict], start_offset: float
     ) -> list[dict]:
@@ -877,14 +1051,6 @@ class ClipFinder:
             return int(parts[0]) * 60 + float(parts[1])
 
         raise ValueError(f"Cannot convert {value!r} to seconds")
-
-    @staticmethod
-    def _fmt_time_hhmmss(secs: float) -> str:
-        """Format as HH:MM:SS.mm for yt-dlp --download-sections."""
-        h = int(secs // 3600)
-        m = int((secs % 3600) // 60)
-        s = secs % 60
-        return f"{h:02d}:{m:02d}:{s:05.2f}"
 
     @staticmethod
     def _fmt_duration(secs: float) -> str:

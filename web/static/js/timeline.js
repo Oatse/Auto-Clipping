@@ -220,8 +220,58 @@ export function setupTimeline() {
     }
   });
 
+  // ── Wheel Zoom (Ctrl+Scroll) — like After Effects / Premiere Pro ──────────
+  // Zooms timeline content width without changing the card/panel size.
+  // Zoom anchor = mouse cursor position so the point under the cursor stays fixed.
+  timelineScrollArea.addEventListener('wheel', (e) => {
+    if (!S.videoDuration) return;
+
+    if (e.ctrlKey) {
+      // Ctrl + Wheel → zoom in / out
+      e.preventDefault();
+      const ZOOM_STEP   = 1.18;
+      const zoomFactor  = e.deltaY < 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+      const newZoom     = Math.max(0.3, Math.min(40, S.timelineZoom * zoomFactor));
+
+      // Keep the timeline point under the mouse cursor stationary
+      const rect           = timelineScrollArea.getBoundingClientRect();
+      const mouseX         = e.clientX - rect.left;
+      const oldContentW    = timelineScrollArea.clientWidth * S.timelineZoom;
+      const cursorRatio    = (timelineScrollArea.scrollLeft + mouseX) / oldContentW;
+
+      S.setTimelineZoom(newZoom);
+      renderTimeline();
+
+      const newContentW    = timelineScrollArea.clientWidth * newZoom;
+      timelineScrollArea.scrollLeft = Math.max(0, cursorRatio * newContentW - mouseX);
+
+      updateZoomDisplay();
+    } else if (!e.shiftKey) {
+      // Plain vertical wheel → horizontal pan (no Ctrl, no Shift)
+      e.preventDefault();
+      timelineScrollArea.scrollLeft += e.deltaY * 1.2;
+    }
+    // Shift + Wheel: browser handles as horizontal scroll natively
+  }, { passive: false });
+
+  // Click zoom badge → reset zoom to 1×
+  const tlZoomBadge = document.getElementById('tlZoomBadge');
+  if (tlZoomBadge) {
+    tlZoomBadge.addEventListener('click', () => {
+      S.setTimelineZoom(1.0);
+      renderTimeline();
+      updateZoomDisplay();
+    });
+  }
+
   // Split dialog
   setupSplitDialog();
+}
+
+// Update the zoom % badge in the toolbar
+function updateZoomDisplay() {
+  const badge = document.getElementById('tlZoomBadge');
+  if (badge) badge.textContent = Math.round(S.timelineZoom * 100) + '%';
 }
 
 function getTrackWidth() {
