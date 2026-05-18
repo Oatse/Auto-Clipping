@@ -485,7 +485,19 @@ export async function loadClipJobsList() {
   const clipJobsList = document.getElementById('clipJobsList');
   if (!clipJobsList) return;
 
-  clipJobsList.innerHTML = '<div class="clip-picker-loading">Loading clips...</div>';
+  // Skeleton placeholders mirror the real .clip-job-card layout so the
+  // panel doesn't snap from "empty" to "filled".
+  clipJobsList.innerHTML = Array.from({ length: 3 }, () => `
+    <div class="skeleton-job-card" style="display:grid;grid-template-columns:132px 1fr auto;gap:12px;">
+      <div class="skeleton" style="aspect-ratio:16/9;width:132px;border-radius:9px;"></div>
+      <div style="display:flex;flex-direction:column;gap:8px;justify-content:center;">
+        <div class="skeleton skeleton-line title"></div>
+        <div class="skeleton skeleton-line meta"></div>
+      </div>
+      <div class="skeleton skeleton-line badge" style="align-self:center;"></div>
+    </div>
+  `).join('');
+
   try {
     const data = await apiFetch('/api/clip-finder/available-clips');
 
@@ -493,7 +505,8 @@ export async function loadClipJobsList() {
       clipJobsList.innerHTML = `
         <div class="empty-state">
           <div class="empty-icon">◻</div>
-          <p>No clips available. Use Clip Finder to download clips first.</p>
+          <p class="empty-title">No clips downloaded</p>
+          <p class="empty-sub">Use Clip Finder to detect highlights from a YouTube video, then download the clips you want to caption.</p>
         </div>`;
       return;
     }

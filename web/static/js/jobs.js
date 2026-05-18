@@ -138,12 +138,34 @@ function switchJobsPanelTab(tab) {
 
 // ── Jobs List ──────────────────────────────────────────────────────────────
 export async function loadJobs() {
+  // Show skeleton placeholders during the first paint so the panel
+  // doesn't snap from "empty" to "filled".  Reusing renderJobs would
+  // require ferrying state, so we paint inline once and let the API
+  // response replace the markup.
+  if (jobsList && !jobsList.dataset.jobsHydrated) {
+    jobsList.innerHTML = _renderJobsSkeleton();
+  }
   try {
     const jobs = await apiFetch('/api/jobs');
+    if (jobsList) jobsList.dataset.jobsHydrated = '1';
     renderJobs(jobs);
   } catch (e) {
     console.error('Load jobs failed:', e);
   }
+}
+
+function _renderJobsSkeleton(count = 3) {
+  const card = `
+    <div class="skeleton-job-card">
+      <div class="skeleton-row">
+        <div class="skeleton skeleton-line title"></div>
+        <div class="skeleton skeleton-line badge"></div>
+      </div>
+      <div class="skeleton skeleton-line meta"></div>
+      <div class="skeleton skeleton-line bar"></div>
+    </div>
+  `;
+  return Array.from({ length: count }, () => card).join('');
 }
 
 function renderJobs(jobs) {
@@ -151,7 +173,8 @@ function renderJobs(jobs) {
     jobsList.innerHTML = `
       <div class="empty-state">
         <div class="empty-icon">📋</div>
-        <p>No jobs yet. Upload a video to get started.</p>
+        <p class="empty-title">No jobs yet</p>
+        <p class="empty-sub">Upload a video below to start your first transcription. Jobs you create will show up here for resume + edit.</p>
       </div>`;
     return;
   }
