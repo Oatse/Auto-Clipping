@@ -1,0 +1,335 @@
+/* ─────────────────────────────────────────────────────────────────────
+ * polish.css — Final layer of UI polish.
+ *
+ * Imported last so its rules take precedence without rewriting the
+ * existing module CSS.  Touches the four areas surfaced by the audit:
+ *
+ *   1. Motion tokens (custom easing curves + standard durations)
+ *   2. Yellow / warning state contrast fixes
+ *   3. Press feedback + focus-visible across primary controls
+ *   4. Clip-finder card — fixed shape, internal scroll
+ *
+ * Conventions follow Emil Kowalski's design-engineering checklist:
+ * specify exact transition properties, never animate from scale(0),
+ * use ease-out (not ease-in) on entrances, keep UI animations under
+ * 300ms, and add subtle scale(0.97) press feedback on every clickable.
+ * ───────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Motion tokens — strong custom curves beat the built-in CSS easings. */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+  /* Standard UI durations (Emil Kowalski's framework). */
+  --dur-press: 120ms;
+  --dur-fast: 160ms;
+  --dur-base: 200ms;
+  --dur-slow: 280ms;
+
+  /* Surface tokens for the new "soft warning" state.  ``--yellow`` on
+     its own is too saturated to use as a foreground colour against the
+     dark background in places like the split-seam separator. */
+  --warn: #fbbf24;                  /* amber-400, ~6.5:1 on var(--bg) */
+  --warn-soft: rgba(251, 191, 36, 0.16);
+  --warn-border: rgba(251, 191, 36, 0.45);
+  --warn-on-bg: #fde68a;            /* amber-200 — for fg-on-warn-bg */
+}
+
+/* ────────── Focus-visible (keyboard accessibility) ─────────────────── */
+/* Adds an unmistakable ring without leaking onto mouse-hover users.
+   ``:focus-visible`` only fires after Tab, not after click. */
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible,
+[role="button"]:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent-3);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ────────── Press feedback (transient scale) ───────────────────────── */
+/* Cap to interactive surfaces so list rows and cards don't scale on
+   stray clicks.  Touch devices skip it (no ``hover``). */
+@media (hover: hover) and (pointer: fine) {
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger,
+  .btn-success,
+  .btn-icon-only,
+  .cf-clip-download,
+  .cf-clip-play-btn,
+  .seg-btn,
+  .jobs-toggle-btn,
+  .download-btn {
+    transition:
+      transform var(--dur-press) var(--ease-out),
+      box-shadow var(--dur-base) var(--ease-out),
+      background-color var(--dur-base) var(--ease-out),
+      border-color var(--dur-base) var(--ease-out),
+      color var(--dur-base) var(--ease-out);
+  }
+
+  .btn-primary:active,
+  .btn-secondary:active,
+  .btn-danger:active,
+  .btn-success:active,
+  .btn-icon-only:active,
+  .cf-clip-download:active,
+  .seg-btn:active,
+  .jobs-toggle-btn:active,
+  .download-btn:active {
+    transform: scale(0.97);
+  }
+
+  /* Play-button keeps its translate(-50%, -50%) — append the press scale. */
+  .cf-clip-play-btn:active {
+    transform: translate(-50%, -50%) scale(0.95);
+  }
+}
+
+/* ────────── Replace `transition: all` on hot paths ─────────────────── */
+/* `all` triggers paint on every changing property.  Specify only what
+   actually animates so the browser can hardware-accelerate the rest. */
+.btn-primary {
+  transition:
+    transform var(--dur-press) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out);
+}
+
+.btn-secondary,
+.btn-danger,
+.btn-success {
+  transition:
+    transform var(--dur-press) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    color var(--dur-base) var(--ease-out);
+}
+
+.cf-clip-card {
+  transition:
+    border-color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cf-clip-card:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* ────────── Yellow / warning contrast fixes ────────────────────────── */
+/*
+ * Three problem cases the audit found:
+ *   A. .split-seam — yellow text on dark; readable but harsh.  Soften
+ *      to amber-200 (var(--warn-on-bg)).
+ *   B. .seg-split-btn:hover — yellow text + yellow border on a button
+ *      whose default state is also low-contrast; ringing borders.
+ *      Switch to a chip-style soft background so the icon stays legible.
+ *   C. .log-line.warn — keep var(--yellow) text but bump weight so it
+ *      reads as a warning, not as decoration.
+ */
+
+.split-seam {
+  color: var(--warn-on-bg);
+  font-weight: 800;
+  text-shadow: 0 0 6px rgba(251, 191, 36, 0.35);
+}
+
+.seg-split-btn:hover {
+  background: var(--warn-soft);
+  color: var(--warn-on-bg);
+  border-color: var(--warn-border);
+}
+
+.log-line.warn {
+  color: var(--warn-on-bg);
+  font-weight: 600;
+}
+
+/* The system status dot keeps var(--yellow) but gets a halo so the
+   warning state reads at-a-glance instead of looking like decoration. */
+.status-dot.warn {
+  box-shadow: 0 0 6px var(--yellow), 0 0 12px rgba(245, 158, 11, 0.4);
+}
+.sys-item.warn .dot {
+  box-shadow: 0 0 4px var(--yellow);
+}
+
+/* ────────── Clip Finder card — fixed shape + internal scroll ───────── */
+/*
+ * The card used to grow with content (score breakdown + signal pills +
+ * hunter chips on top of the title block), making rows misaligned in
+ * the grid.  Lock the card to a predictable maximum, then make the
+ * info column scrollable.  The 16:9 video stays full-width at the top.
+ */
+
+.cf-clips-grid {
+  /* Keep auto-fill but make every cell stretch to the same height. */
+  align-items: stretch;
+  /* Slightly tighter min so 3 cards fit on a 1280px screen. */
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+}
+
+.cf-clip-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  /* Cap so a card with 4 score bars + 6 signal pills + a long reason
+     doesn't dwarf its neighbours.  Internal scroll handles overflow. */
+  max-height: 520px;
+}
+
+/* The video-wrap (16:9) is already shrink-protected by aspect-ratio.
+   Make it not flex-shrink so info area takes the slack instead. */
+.cf-clip-video-wrap {
+  flex: 0 0 auto;
+}
+
+.cf-clip-info {
+  /* Take the rest of the card, scroll inside if content overflows. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
+  padding-bottom: 12px;
+}
+
+.cf-clip-info::-webkit-scrollbar {
+  width: 6px;
+}
+.cf-clip-info::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 999px;
+}
+.cf-clip-info::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Action row pinned at the bottom regardless of info length. */
+.cf-clip-actions {
+  flex: 0 0 auto;
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.18));
+}
+
+/* ────────── Score breakdown — make the headline number unmissable ─── */
+/* The numeric total used to share weight with the bars.  Promote it to
+   a chip with a coloured background so the user sees "this clip is a
+   78" before parsing the four sub-bars. */
+.cf-clip-score {
+  background: linear-gradient(
+    135deg,
+    rgba(99, 102, 241, 0.10),
+    rgba(139, 92, 246, 0.10)
+  );
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  padding: 8px 12px;
+  border-radius: 8px;
+}
+.cf-clip-score-total {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: white;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 14px;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+  min-width: 0;
+  /* Don't let the chip stretch to the column's full width. */
+  align-self: flex-start;
+}
+.cf-clip-score-total small {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+/* Active bar fill should track score quality.  Apply a subtle gradient
+   so a 90 looks visibly stronger than a 30 instead of identical width. */
+.cf-clip-score-bar-fill {
+  background: linear-gradient(
+    90deg,
+    var(--accent) 0%,
+    var(--accent-2) 60%,
+    var(--accent-3) 100%
+  );
+}
+
+/* ────────── CF Instructions textarea — give it presence ────────────── */
+/* The free-form prompt is the single most important input on the Clip
+   Finder page.  Default styling let it disappear into the surrounding
+   form.  Add a subtle gradient border + focus ring + helper hint. */
+.cf-instructions {
+  border: 1px solid var(--border-2);
+  background: rgba(255, 255, 255, 0.02);
+  transition:
+    border-color var(--dur-base) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+.cf-instructions:focus,
+.cf-instructions:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.05);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}
+
+/* ────────── Render-options modal — scroll cap + spacing ────────────── */
+/* Two transcript-source cards stack vertically inside a small modal;
+   on short viewports the modal currently exceeds the screen.  Cap and
+   scroll so the action row stays visible. */
+.render-options-overlay .render-options-card {
+  max-height: min(80vh, 720px);
+  display: flex;
+  flex-direction: column;
+}
+.render-options-overlay .render-options-body {
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ────────── Stagger entries on the Clip Finder grid ────────────────── */
+/* Cards used to all animate in together; cascade them so the grid
+   feels alive without slowing first-paint.  60 ms between cards, capped
+   at 6 cards so a 24-clip dashboard doesn't take 1.4 s to settle. */
+@media (prefers-reduced-motion: no-preference) {
+  .cf-clips-grid > .cf-clip-card {
+    opacity: 0;
+    transform: translateY(8px);
+    animation: cf-card-in var(--dur-slow) var(--ease-out) forwards;
+  }
+  .cf-clips-grid > .cf-clip-card:nth-child(1) { animation-delay: 0ms; }
+  .cf-clips-grid > .cf-clip-card:nth-child(2) { animation-delay: 60ms; }
+  .cf-clips-grid > .cf-clip-card:nth-child(3) { animation-delay: 120ms; }
+  .cf-clips-grid > .cf-clip-card:nth-child(4) { animation-delay: 180ms; }
+  .cf-clips-grid > .cf-clip-card:nth-child(5) { animation-delay: 240ms; }
+  .cf-clips-grid > .cf-clip-card:nth-child(n + 6) { animation-delay: 300ms; }
+}
+
+@keyframes cf-card-in {
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ────────── Reduced-motion safety net ──────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

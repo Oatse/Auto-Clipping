@@ -1,0 +1,278 @@
+﻿/* â”€â”€ Header â”€â”€ */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgba(8, 11, 20, 0.92);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.14);
+}
+.header-inner {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 0 24px;
+  height: 68px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.logo-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+}
+.logo-text {
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.logo-accent {
+  color: var(--accent-3);
+}
+
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-2);
+}
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+  transition: background 0.3s;
+}
+.status-dot.ok {
+  background: var(--green);
+  box-shadow: 0 0 8px var(--green);
+}
+.status-dot.warn {
+  background: var(--yellow);
+}
+.status-dot.error {
+  background: var(--red);
+}
+
+/* â”€â”€ Main â”€â”€ */
+.main {
+  position: relative;
+  z-index: 1;
+  margin: 0 auto;
+  max-width: 1360px;
+  padding: 32px 24px 72px;
+}
+
+/* No outer scroll when preview screen is active */
+body.preview-active {
+  overflow: hidden;
+}
+body.preview-active .main {
+  padding: 12px 24px;
+  height: calc(100vh - 64px);
+  overflow: hidden;
+  max-width: none;
+}
+
+/* â”€â”€ Hero â”€â”€ */
+.hero {
+  margin-bottom: 28px;
+}
+.hero-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 24px;
+  align-items: stretch;
+}
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  color: #c7d2fe;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 5px 12px;
+  border-radius: 100px;
+  margin-bottom: 14px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.hero-title {
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 800;
+  line-height: 1.14;
+  letter-spacing: -1px;
+  margin-bottom: 10px;
+}
+.gradient-text {
+  background: linear-gradient(135deg, var(--accent), var(--accent-3), #ec4899);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.hero-subtitle {
+  font-size: 15px;
+  color: var(--text-2);
+  max-width: 700px;
+}
+
+.hero-steps {
+  background: rgba(13, 17, 32, 0.92);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.hero-step-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(17, 24, 39, 0.88);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.hero-step-num {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #eef2ff;
+  background: rgba(99, 102, 241, 0.25);
+}
+
+.hero-step-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+@media (max-width: 1100px) {
+  .hero-top {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* â”€â”€ Pipeline Steps â”€â”€ */
+.pipeline-steps {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 48px;
+}
+.step-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  transition: all 0.3s;
+  cursor: default;
+}
+.step-card.active {
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.1);
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.2);
+}
+.step-card.done {
+  border-color: var(--green);
+  background: rgba(16, 185, 129, 0.08);
+}
+.step-icon {
+  font-size: 18px;
+}
+.step-num {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-3);
+  letter-spacing: 0.5px;
+}
+.step-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.step-card.active .step-label {
+  color: var(--accent-3);
+}
+.step-card.done .step-label {
+  color: var(--green);
+}
+.step-arrow {
+  color: var(--text-3);
+  font-size: 14px;
+  padding: 0 2px;
+}
+
+/* â”€â”€ App Screens â”€â”€ */
+.app-screen {
+  display: none;
+}
+.app-screen.active {
+  display: block;
+}
+
+/* Preview screen fills available height when no-outer-scroll is active */
+body.preview-active #screen-preview {
+  height: 100%;
+  overflow: hidden;
+}
+body.preview-active .preview-layout {
+  height: 100%;
+  align-items: stretch;
+}
+body.preview-active .preview-center {
+  overflow: hidden;
+  min-height: 0;
+}
+body.preview-active .preview-left,
+body.preview-active .preview-right {
+  position: relative;
+  top: 0;
+  overflow: hidden;
+  height: 100%;
+}
+body.preview-active .transcript-panel,
+body.preview-active .style-panel {
+  max-height: 100%;
+  height: 100%;
+}
+
+/* â”€â”€ Content Grid â”€â”€ */
+.content-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 460px) minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .content-grid {
+    grid-template-columns: 1fr;
+  }
+}
