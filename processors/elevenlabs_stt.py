@@ -92,6 +92,14 @@ class ElevenLabsSTTProcessor:
                 len(actual_speakers),
             )
 
+        # Step 3.4: Persist the raw, *pre-sanitization* segment data so the
+        # preview UI can display exactly what ElevenLabs reported.  Without
+        # this snapshot the "ElevenLabs Original" toggle would only show the
+        # post-sanitized version (timing mutated by sanitize_timestamps).
+        raw_words_path = output_dir / "elevenlabs_words_raw.json"
+        self._save_json(segments, raw_words_path)
+        logger.info("Raw (pre-sanitization) ElevenLabs words saved: {}", raw_words_path.name)
+
         # Step 3.5: Sanitize timestamps — fix broken word/segment end times
         # that cause subtitles to linger on screen after the speaker stops.
         segments = sanitize_timestamps(segments)
@@ -231,14 +239,16 @@ class ElevenLabsSTTProcessor:
         # ── Step 2: Merge split words (e.g. "ba-" + "d." → "bad.") ──
         cleaned = self._merge_split_words(cleaned)
 
-        # ── Step 3: Group by speaker turn only ──
-        # Gemini will handle subtitle-level grouping during translation.
+        # ── Step 3: Group by speaker turn or sentence boundary ──
+        # Gemini will handle subtitle-level grouping during translation,
+        # but splitting by sentence boundaries helps the UI show manageable blocks.
         segments: list[TranscriptSegment] = []
         current_words: list[dict] = []
         current_speaker: str | None = None
 
         for w in cleaned:
             w_speaker = w.get("speaker_id")
+            w_text = w.get("text", "").strip()
 
             # Speaker change → flush current segment
             if (
@@ -252,6 +262,18 @@ class ElevenLabsSTTProcessor:
                     segments, current_words, current_speaker, speaker_detection
                 )
                 current_words = []
+
+            # Or long pause / sentence boundary → flush current segment
+            elif current_words:
+                prev_w = current_words[-1]
+                prev_text = prev_w.get("text", "").strip()
+                gap = w.get("start", w.get("end", 0.0)) - prev_w.get("end", prev_w.get("start", 0.0))
+                # Split if pause > 1 second, or previous word ends with punctuation and pause > 0.3s
+                if gap > 1.0 or (gap > 0.3 and prev_text.endswith((".", "?", "!"))):
+                    self._flush_speaker_turn(
+                        segments, current_words, current_speaker, speaker_detection
+                    )
+                    current_words = []
 
             if w_speaker:
                 current_speaker = w_speaker

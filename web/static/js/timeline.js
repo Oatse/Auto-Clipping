@@ -4,7 +4,9 @@
 
 import { fmtTime, fmtTimeShort, parseTime } from './utils.js';
 import * as S from './state.js';
-import { renderTranscriptList, setActiveSeg, onStyleChange, scheduleAutoSave } from './preview.js';
+import { pushUndoSnapshot } from './state.js';
+import { renderTranscriptList, setActiveSeg, scheduleAutoSave } from './preview.js';
+import { onStyleChange } from './subtitleEngine.js';
 
 // ── DOM Refs ───────────────────────────────────────────────────────────────
 const previewVideo      = document.getElementById('previewVideo');
@@ -17,6 +19,20 @@ const timelineLabelsCol  = document.getElementById('timelineLabelsCol');
 const tlTimeDisplay     = document.getElementById('tlTimeDisplay');
 const addSegmentBtn     = document.getElementById('addSegmentBtn');
 const deleteSegmentBtn  = document.getElementById('deleteSegmentBtn');
+const duplicateSegmentBtn = document.getElementById('duplicateSegmentBtn');
+const timelineBody       = document.getElementById('timelineBody');
+const timelineResizeHandle = document.getElementById('timelineResizeHandle');
+const videoPreviewWrap   = document.querySelector('.video-preview-wrap');
+
+// ── Timeline Resize State ─────────────────────────────────────────────────
+const TL_HEIGHT_MIN     = 60;
+const TL_HEIGHT_MAX     = 600;
+const TL_HEIGHT_DEFAULT = 180;
+const TL_STORAGE_KEY    = 'clipauto_timeline_height';
+
+let _tlResizing        = false;
+let _tlResizeStartY    = 0;
+let _tlResizeStartH    = 0;
 
 // Segment dialog
 const segmentDialog    = document.getElementById('segmentDialog');
@@ -37,8 +53,64 @@ const splitPart2Text   = document.getElementById('splitPart2Text');
 const cancelSplitSeg   = document.getElementById('cancelSplitSeg');
 const confirmSplitSeg  = document.getElementById('confirmSplitSeg');
 
+// ── Timeline Resize ──────────────────────────────────────────────────────
+function initTimelineResize() {
+  // Restore saved height or use default
+  const saved = parseInt(localStorage.getItem(TL_STORAGE_KEY), 10);
+  const initH = (saved >= TL_HEIGHT_MIN && saved <= TL_HEIGHT_MAX) ? saved : TL_HEIGHT_DEFAULT;
+  timelineBody.style.height = initH + 'px';
+
+  timelineResizeHandle.addEventListener('mousedown', (e) => {
+    _tlResizing = true;
+    _tlResizeStartY = e.clientY;
+    _tlResizeStartH = timelineBody.getBoundingClientRect().height;
+    timelineResizeHandle.classList.add('is-resizing');
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+    e.preventDefault();
+    e.stopPropagation();
+  });
+}
+
+// ── Word-Timestamp Rescaling on Edge Drag ────────────────────────────────
+//
+// When the user drags a segment's left or right edge, the segment box
+// changes (seg.start / seg.end), but seg.words[].start/end are still
+// anchored to the original ElevenLabs timestamps.  Without rescaling, the
+// karaoke / narration-pop highlight drifts out of the segment box because
+// the engine matches words against the ORIGINAL word times.
+//
+// Strategy: linear rescale every word's [start, end] from the original
+// segment span [origStart, origEnd] into the new span [seg.start, seg.end].
+// This is approximate (it doesn't preserve true speech timing inside a
+// shrunk window) but it keeps the visual/audio sync consistent with what
+// the user just edited.  When the user wants exact ElevenLabs timing back
+// they can undo (Ctrl+Z) or reload the original transcript.
+function _rescaleWordsForEdgeDrag(seg, dragState) {
+  if (!Array.isArray(seg.words) || seg.words.length === 0) return;
+  if (!dragState || !Array.isArray(dragState.origWords)) return;
+
+  const origSpan = dragState.origEnd - dragState.origStart;
+  const newSpan  = seg.end - seg.start;
+  if (origSpan <= 0 || newSpan <= 0) return;
+
+  const origStart = dragState.origStart;
+  const newStart  = seg.start;
+
+  seg.words.forEach((w, i) => {
+    const ow = dragState.origWords[i];
+    if (!ow) return;
+    const wsRel = (ow.start - origStart) / origSpan;
+    const weRel = (ow.end   - origStart) / origSpan;
+    w.start = newStart + wsRel * newSpan;
+    w.end   = newStart + weRel * newSpan;
+  });
+}
+
 // ── Setup ──────────────────────────────────────────────────────────────────
 export function setupTimeline() {
+  // Initialize timeline height resize
+  initTimelineResize();
   // Add segment button
   addSegmentBtn.addEventListener('click', () => openSegmentDialog(previewVideo.currentTime));
 
@@ -46,9 +118,11 @@ export function setupTimeline() {
   deleteSegmentBtn.addEventListener('click', () => {
     if (S.selectedSegIdx !== null && S.selectedSegIdx < S.transcriptData.length) {
       if (confirm('Delete this subtitle segment?')) {
+        pushUndoSnapshot();
         S.transcriptData.splice(S.selectedSegIdx, 1);
         S.setSelectedSegIdx(null);
         deleteSegmentBtn.disabled = true;
+        duplicateSegmentBtn.disabled = true;
         renderTimeline();
         renderTranscriptList();
         onStyleChange();
@@ -56,6 +130,9 @@ export function setupTimeline() {
       }
     }
   });
+
+  // Duplicate segment button
+  duplicateSegmentBtn.addEventListener('click', duplicateSelectedSegment);
 
   // Segment dialog
   cancelNewSeg.addEventListener('click', closeSegmentDialog);
@@ -72,7 +149,20 @@ export function setupTimeline() {
       const segEl = e.target.parentElement;
       const segIdx = parseInt(segEl.dataset.idx);
       const edge = e.target.classList.contains('seg-handle-left') ? 'start' : 'end';
-      S.setDraggingSegEdge({ segIdx, edge });
+      pushUndoSnapshot();
+      const seg = S.transcriptData[segIdx];
+      // Capture original boundaries so we can scale words proportionally
+      // during drag.  Without this, only seg.start/end change while
+      // seg.words[].start/end stay frozen, which makes karaoke /
+      // narration-pop highlighting drift out of sync with the segment box
+      // the user just edited.
+      S.setDraggingSegEdge({
+        segIdx,
+        edge,
+        origStart: seg.start,
+        origEnd: seg.end,
+        origWords: (seg.words || []).map(w => ({ start: w.start, end: w.end })),
+      });
       e.preventDefault();
       return;
     }
@@ -86,10 +176,12 @@ export function setupTimeline() {
       const trackWidth = getTrackWidth();
       const clickTime = (x / trackWidth) * S.videoDuration;
       const seg = S.transcriptData[segIdx];
+      pushUndoSnapshot();
       S.setDraggingSegBody({
         segIdx,
         offsetTime: clickTime - seg.start,
         segDuration: seg.end - seg.start,
+        origSpeaker: seg.speaker || 'SPEAKER_00',
       });
       segEl.classList.add('dragging-body');
       e.preventDefault();
@@ -125,6 +217,9 @@ export function setupTimeline() {
       } else {
         seg.end = Math.max(t, seg.start + 0.1);
       }
+      // Linearly rescale word timestamps so the karaoke / narration-pop
+      // highlight stays in sync with the new segment boundaries.
+      _rescaleWordsForEdgeDrag(seg, S.draggingSegEdge);
       renderTimeline();
     }
     if (S.draggingSegBody) {
@@ -134,8 +229,32 @@ export function setupTimeline() {
       const mouseTime = (x / trackWidth) * S.videoDuration;
       const newStart = Math.max(0, Math.min(S.videoDuration - S.draggingSegBody.segDuration, mouseTime - S.draggingSegBody.offsetTime));
       const seg = S.transcriptData[S.draggingSegBody.segIdx];
+      const dt = newStart - seg.start;
       seg.start = newStart;
       seg.end = newStart + S.draggingSegBody.segDuration;
+      // Shift every word by the same delta so word-level timestamps stay
+      // anchored to the segment box being dragged.
+      if (dt !== 0 && Array.isArray(seg.words)) {
+        seg.words.forEach(w => {
+          w.start += dt;
+          w.end += dt;
+        });
+      }
+
+      // Cross-speaker drag: detect which speaker row the mouse Y is over
+      const ROW_HEIGHT = 36;
+      const hasFxTrack = true;
+      const fxRowCount = hasFxTrack ? S.fxLayerCount : 0;
+      const speakerYOffset = fxRowCount * ROW_HEIGHT;
+      const y = e.clientY - trackRect.top;
+      const speakerRowIdx = Math.floor((y - speakerYOffset) / ROW_HEIGHT);
+      if (speakerRowIdx >= 0 && speakerRowIdx < S.timelineSpeakers.length) {
+        const targetSpeaker = S.timelineSpeakers[speakerRowIdx];
+        if (seg.speaker !== targetSpeaker) {
+          seg.speaker = targetSpeaker;
+        }
+      }
+
       renderTimeline();
     }
     if (S.subtitleDragState) {
@@ -156,6 +275,12 @@ export function setupTimeline() {
         lineEl.style.left = newPosX + '%';
         lineEl.style.top = newPosY + '%';
       }
+    }
+    // Timeline vertical resize
+    if (_tlResizing) {
+      const dy = _tlResizeStartY - e.clientY; // drag UP = positive = taller
+      const newH = Math.max(TL_HEIGHT_MIN, Math.min(TL_HEIGHT_MAX, _tlResizeStartH + dy));
+      timelineBody.style.height = newH + 'px';
     }
   });
 
@@ -179,6 +304,15 @@ export function setupTimeline() {
       S.setSubtitleDragState(null);
       onStyleChange();
     }
+    if (_tlResizing) {
+      _tlResizing = false;
+      timelineResizeHandle.classList.remove('is-resizing');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      // Persist height preference
+      const h = Math.round(timelineBody.getBoundingClientRect().height);
+      localStorage.setItem(TL_STORAGE_KEY, h);
+    }
   });
 
   // Keyboard shortcuts
@@ -200,14 +334,19 @@ export function setupTimeline() {
     } else if (e.key === 'Delete' || e.key === 'Backspace') {
       if (S.selectedSegIdx !== null && S.selectedSegIdx < S.transcriptData.length) {
         e.preventDefault();
+        pushUndoSnapshot();
         S.transcriptData.splice(S.selectedSegIdx, 1);
         S.setSelectedSegIdx(null);
         deleteSegmentBtn.disabled = true;
+        duplicateSegmentBtn.disabled = true;
         renderTimeline();
         renderTranscriptList();
         onStyleChange();
         scheduleAutoSave();
       }
+    } else if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
+      e.preventDefault();
+      duplicateSelectedSegment();
     } else if (e.key === 'f' || e.key === 'F') {
       e.preventDefault();
       // Fullscreen handled in preview.js
@@ -281,6 +420,7 @@ function getTrackWidth() {
 export function selectSegment(idx) {
   S.setSelectedSegIdx(idx);
   deleteSegmentBtn.disabled = false;
+  duplicateSegmentBtn.disabled = false;
   timelineTrack.querySelectorAll('.timeline-segment').forEach(el => {
     el.classList.toggle('selected', parseInt(el.dataset.idx) === idx);
   });
@@ -307,15 +447,29 @@ export function renderTimeline() {
   if (speakers.length === 0) speakers.push('SPEAKER_00');
   speakers.sort();
 
-  const rowCount    = speakers.length;
+  // Cache speakers in state for cross-speaker drag detection
+  S.setTimelineSpeakers(speakers);
+
+  // Total rows: N FX track layers + speaker rows
+  const hasFxTrack = true;
+  const fxRowCount = hasFxTrack ? S.fxLayerCount : 0;
+  const rowCount   = fxRowCount + speakers.length;
   const trackHeight = rowCount * ROW_HEIGHT;
 
   timelineTrackArea.style.height = trackHeight + 'px';
   timelineTrack.style.height     = trackHeight + 'px';
 
-  // Update labels column
+  // Update labels column — FX labels first, then speaker labels
   if (timelineLabelsCol) {
     timelineLabelsCol.innerHTML = '<div class="timeline-ruler-spacer"></div>';
+    if (hasFxTrack) {
+      for (let li = 0; li < S.fxLayerCount; li++) {
+        const fxLabel = document.createElement('div');
+        fxLabel.className = 'timeline-label-row fx-label';
+        fxLabel.innerHTML = `<span>\uD83C\uDFAC FX ${li + 1}</span>`;
+        timelineLabelsCol.appendChild(fxLabel);
+      }
+    }
     speakers.forEach(sp => {
       const spIdx = parseInt((sp.match(/\d+$/) || ['0'])[0], 10);
       const color = S.getSpeakerColor(sp);
@@ -330,15 +484,60 @@ export function renderTimeline() {
   timelineTrack.innerHTML = '';
   timelineRuler.innerHTML = '';
 
-  // Draw row separator lines
-  speakers.forEach((_sp, rowIdx) => {
-    if (rowIdx > 0) {
+  // ── FX Tracks (one per layer, all are drop zones) ────────────────
+  if (hasFxTrack) {
+    for (let li = 0; li < S.fxLayerCount; li++) {
+      const fxTrack = document.createElement('div');
+      fxTrack.className = 'timeline-fx-track';
+      // First layer keeps the legacy id for backward compat; all get data-layer
+      if (li === 0) fxTrack.id = 'timelineFxTrack';
+      fxTrack.dataset.fxLayer = li;
+      fxTrack.style.height = ROW_HEIGHT + 'px';
+      fxTrack.style.position = 'absolute';
+      fxTrack.style.top = (li * ROW_HEIGHT) + 'px';
+      fxTrack.style.left = '0';
+      fxTrack.style.width = '100%';
+
+      // Render FX blocks belonging to this layer
+      S.effectsData.forEach(fx => {
+        const fxLayer = fx.layer || 0;
+        if (fxLayer !== li) return;
+
+        const left  = (fx.start / S.videoDuration) * trackWidth;
+        const width = Math.max(20, ((fx.end - fx.start) / S.videoDuration) * trackWidth);
+        const block = document.createElement('div');
+        block.className = 'fx-block' + (S.selectedFxId === fx.id ? ' selected' : '');
+        block.dataset.fxId = fx.id;
+        block.dataset.fxType = fx.type;
+        block.dataset.fxLayer = fxLayer;
+        block.style.left  = left + 'px';
+        block.style.width = width + 'px';
+        block.title = `${fx.label} [${fmtTime(fx.start)} - ${fmtTime(fx.end)}] Layer ${fxLayer + 1}`;
+        block.textContent = width > 40 ? fx.label : '';
+
+        const hL = document.createElement('div');
+        hL.className = 'fx-handle fx-handle-left';
+        block.appendChild(hL);
+        const hR = document.createElement('div');
+        hR.className = 'fx-handle fx-handle-right';
+        block.appendChild(hR);
+
+        fxTrack.appendChild(block);
+      });
+
+      timelineTrack.appendChild(fxTrack);
+    }
+  }
+
+  // Draw row separator lines (including after FX track)
+  for (let i = 0; i < rowCount; i++) {
+    if (i > 0) {
       const sep = document.createElement('div');
       sep.className = 'timeline-row-line';
-      sep.style.top = (rowIdx * ROW_HEIGHT) + 'px';
+      sep.style.top = (i * ROW_HEIGHT) + 'px';
       timelineTrack.appendChild(sep);
     }
-  });
+  }
 
   // Draw ruler ticks
   const pxPerSec = trackWidth / S.videoDuration;
@@ -370,11 +569,12 @@ export function renderTimeline() {
     }
   }
 
-  // Draw segment blocks
+  // Draw segment blocks — offset Y by fxRowCount
+  const speakerYOffset = fxRowCount * ROW_HEIGHT;
   S.transcriptData.forEach((seg, idx) => {
     const sp     = seg.speaker || 'SPEAKER_00';
     const rowIdx = speakers.indexOf(sp);
-    const top    = rowIdx * ROW_HEIGHT + ROW_PADDING;
+    const top    = speakerYOffset + rowIdx * ROW_HEIGHT + ROW_PADDING;
     const height = ROW_HEIGHT - ROW_PADDING * 2;
 
     const left  = (seg.start / S.videoDuration) * trackWidth;
@@ -466,6 +666,7 @@ function confirmAddSegment() {
 
   let insertIdx = S.transcriptData.findIndex(s => s.start > start);
   if (insertIdx === -1) insertIdx = S.transcriptData.length;
+  pushUndoSnapshot();
   S.transcriptData.splice(insertIdx, 0, newSeg);
 
   closeSegmentDialog();
@@ -475,21 +676,13 @@ function confirmAddSegment() {
   scheduleAutoSave();
 }
 
-// Timeline-local parseTime (slightly different from the one in utils.js)
-function parseTimeTL(str) {
-  str = str.trim();
-  const parts = str.split(':');
-  if (parts.length === 2) {
-    const m = parseInt(parts[0]) || 0;
-    const s = parseFloat(parts[1]) || 0;
-    return m * 60 + s;
-  }
-  return parseFloat(str) || 0;
-}
+// parseTimeTL replaced by parseTime from utils.js
+const parseTimeTL = parseTime;
 
 // ── Merge & Split ──────────────────────────────────────────────────────────
 export function mergeSegmentWithNext(idx) {
   if (idx >= S.transcriptData.length - 1) return;
+  pushUndoSnapshot();
   const seg  = S.transcriptData[idx];
   const next = S.transcriptData[idx + 1];
 
@@ -580,6 +773,7 @@ function computeSplitTime(seg, wordIdx) {
 
 function confirmSplit() {
   if (S.splitDialogIdx === null) return;
+  pushUndoSnapshot();
   const seg   = S.transcriptData[S.splitDialogIdx];
   const words = seg.text.trim().split(/\s+/).filter(Boolean);
 
@@ -620,4 +814,20 @@ function confirmSplit() {
 function setupSplitDialog() {
   cancelSplitSeg.addEventListener('click', closeSplitDialog);
   confirmSplitSeg.addEventListener('click', confirmSplit);
+}
+
+// ── Duplicate Segment ──────────────────────────────────────────────────────
+function duplicateSelectedSegment() {
+  if (S.selectedSegIdx === null || S.selectedSegIdx >= S.transcriptData.length) return;
+  pushUndoSnapshot();
+  const original = S.transcriptData[S.selectedSegIdx];
+  const clone = JSON.parse(JSON.stringify(original));
+  // Place the duplicate right after the original (same timing)
+  const insertIdx = S.selectedSegIdx + 1;
+  S.transcriptData.splice(insertIdx, 0, clone);
+  renderTimeline();
+  renderTranscriptList();
+  selectSegment(insertIdx);
+  onStyleChange();
+  scheduleAutoSave();
 }

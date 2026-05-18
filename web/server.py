@@ -451,13 +451,27 @@ async def update_transcript(job_id: str, req: TranscriptUpdateRequest):
 
 @app.get("/api/jobs/{job_id}/transcript/original")
 async def get_original_transcript(job_id: str):
-    """Return the original ElevenLabs transcript (before Gemini regrouping/translation)."""
+    """Return the original ElevenLabs transcript (pre-sanitization, pre-Gemini).
+
+    Preference order:
+      1. ``elevenlabs_words_raw.json`` — saved BEFORE sanitize_timestamps runs;
+         this is the closest representation of what the ElevenLabs API actually
+         reported (only structural reshaping into segments, no timing mutation).
+      2. ``elevenlabs_original_transcript.json`` — legacy file, saved AFTER the
+         in-processor sanitize ran but BEFORE Gemini regrouping/translation.
+         Kept as a fallback for jobs created before the raw-file change.
+    """
     job = _get_job_or_404(job_id)
 
     output_dir = Path("./output") / job_id
-    original_file = output_dir / "phase1_transcription" / "elevenlabs_original_transcript.json"
+    raw_file = output_dir / "phase1_transcription" / "elevenlabs_words_raw.json"
+    legacy_file = output_dir / "phase1_transcription" / "elevenlabs_original_transcript.json"
 
-    if not original_file.exists():
+    if raw_file.exists():
+        original_file = raw_file
+    elif legacy_file.exists():
+        original_file = legacy_file
+    else:
         raise HTTPException(
             status_code=404,
             detail="Original ElevenLabs transcript not available for this job.",
@@ -704,7 +718,7 @@ async def _run_transcription_only(
                     output_dir=output_dir / "phase2_translation",
                     regroup=True,
                 )
-                log(f"✓ Auto-translate selesai: {len(segments)} segmen → '{target_language}'")
+                log(f"✓ Auto-translate + word-level recheck selesai: {len(segments)} segmen → '{target_language}'")
             elif not config.GEMINI_API_KEYS:
                 log("⚠ No GEMINI_API_KEYS configured — skipping auto-translate")
 
@@ -870,6 +884,12 @@ async def _run_render_pipeline(
         log(f"Memulai render pipeline: {video_path.name}")
         if style_config:
             log(f"Style: font={style_config.get('fontFamily','default')}, anim={style_config.get('animStyle','word-pop')}")
+            fx_list = style_config.get("effects", [])
+            if fx_list:
+                log(f"Effects: {len(fx_list)} effect(s) on timeline")
+            flt = style_config.get("filter", {})
+            if flt and flt.get("name", "none") != "none":
+                log(f"Color filter: {flt.get('name')}")
 
         pipeline = VideoSubtitlePipeline(
             input_video=video_path,
@@ -959,11 +979,66 @@ async def _run_render_pipeline(
             )
             log(f"✓ Terjemahan: {len(translated_segments)} segmen ke '{target_language}'")
 
+        # ── Recheck word-level alignment before rendering ────────────────
+        # Only run recheck when segments came from the Gemini translation
+        # path (Phase 2), where word timestamps are preserved from Phase 1
+        # and recheck can match them by (start, end) to the ElevenLabs source.
+        #
+        # When using the user-edited transcript from preview (user_transcript
+        # branch), _sync_segment_words_with_text has already redistributed
+        # word timestamps proportionally.  These new timestamps will NOT
+        # match the original ElevenLabs timestamps, causing recheck to treat
+        # ALL ElevenLabs words as "missing" and stuff them back into segments
+        # — shifting subtitle timing dramatically.
+        _skip_recheck = bool(
+            user_transcript and isinstance(user_transcript, list) and len(user_transcript) > 0
+        )
+        el_original_path = output_dir / "phase1_transcription" / "elevenlabs_original_transcript.json"
+        if el_original_path.exists() and not _skip_recheck:
+            try:
+                import json as _json
+                from processors.translator import TranslatorProcessor as _TP
+                from models.transcript import WordTimestamp as _WT
+
+                with el_original_path.open("r", encoding="utf-8") as _f:
+                    _el_data = _json.load(_f)
+
+                _el_words: list = []
+                _el_speakers: list = []
+                for _seg_d in _el_data.get("segments", []):
+                    _sp = _seg_d.get("speaker", "SPEAKER_00")
+                    for _wd in _seg_d.get("words", []):
+                        _el_words.append(_WT(
+                            word=_wd.get("word", ""),
+                            start=_wd.get("start", 0),
+                            end=_wd.get("end", 0),
+                        ))
+                        _el_speakers.append(_sp)
+
+                if _el_words and any(s.words for s in translated_segments):
+                    log(f"Running word-level recheck: {len(translated_segments)} segments vs {len(_el_words)} ElevenLabs words")
+                    translated_segments = _TP.recheck_word_level_alignment(
+                        translated_segments, _el_words, _el_speakers,
+                    )
+                    log("✓ Word-level recheck selesai")
+            except Exception as _exc:
+                log(f"⚠ Word-level recheck skipped: {_exc}")
+        elif _skip_recheck:
+            log("✓ Word-level recheck di-skip (user-edited transcript sudah di-sync)")
+
         # ── Sanitize timestamps before rendering ─────────────────────────
         # Fix any same-speaker subtitle overlaps that survive after
         # translation, regrouping, or user edits in the preview.
+        # When using user-edited transcript (_skip_recheck=True), word
+        # timestamps have been artificially redistributed by
+        # _sync_segment_words_with_text and must NOT be subjected to
+        # per-word duration caps (which would shrink segments drastically).
+        # Only fix segment-level overlaps in that case.
         from models.transcript import sanitize_timestamps as _sanitize_ts
-        translated_segments = _sanitize_ts(translated_segments)
+        translated_segments = _sanitize_ts(
+            translated_segments,
+            segment_level_only=_skip_recheck,
+        )
 
         # Phase 3 — Subtitle Rendering
         set_phase(3)
@@ -1068,14 +1143,18 @@ class ClipFinderJob(BaseModel):
     instructions: str
     lang: str = "en"
     start_offset: float = 0.0     # Skip first N seconds (for livestreams)
-    status: str = "queued"          # queued|transcribing|analyzing|analyzed|downloading|completed|failed
+    mode: str = "single-shot"     # "single-shot" | "multi-stage"
+    enable_audio_signals: bool = True
+    enable_chat_signals: bool = True
+    status: str = "queued"          # queued|transcribing|signals|analyzing|analyzed|downloading|completed|failed
     progress_pct: float = 0.0
     phase_label: str = "Queued"
     error: str | None = None
     created_at: float = 0.0
     video_title: str | None = None
-    clips: list[dict] = []          # [{start, end, title, reason}]
+    clips: list[dict] = []          # serialized Clip.to_dict()
     clip_files: list[str] = []      # file paths of cut clips
+    signals_summary: dict = {}      # { audio_peak: N, chat_spike: M, ... } for UI badges
     log_lines: list[str] = []
     transcript: list[dict] = []     # Full YouTube auto-sub transcript (preserved for double-check)
 
@@ -1091,7 +1170,75 @@ class ClipFinderRequest(BaseModel):
     url: str
     instructions: str
     lang: str = "en"
-    start_offset: float = 0.0  # Skip first N seconds (for livestreams)
+    start_offset: float = 0.0      # Skip first N seconds (for livestreams)
+    mode: str | None = None         # override config default
+    enable_audio_signals: bool | None = None
+    enable_chat_signals: bool | None = None
+
+
+def _build_clip_finder():
+    """Construct a ClipFinder instance using current config values."""
+    from processors.clip_finder import ClipFinder
+    return ClipFinder(
+        cookies_file=getattr(config, "YTDLP_COOKIES_FILE", ""),
+        cookies_browser=getattr(config, "YTDLP_COOKIES_BROWSER", ""),
+        gemini_model=getattr(config, "CLIP_FINDER_GEMINI_MODEL", "gemini-3-flash-preview"),
+        cache_dir=getattr(config, "CLIP_FINDER_CACHE_DIR", None),
+        ffmpeg_path=getattr(config, "FFMPEG_PATH", "ffmpeg"),
+    )
+
+
+def _persist_cf_job(job: ClipFinderJob) -> None:
+    """Save clip-finder job metadata so it survives server restarts."""
+    job_dir = CLIP_FINDER_DIR / job.id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    meta_file = job_dir / "job_meta.json"
+    try:
+        with meta_file.open("w", encoding="utf-8") as f:
+            json.dump(
+                job.model_dump(exclude={"log_lines"}),
+                f, ensure_ascii=False, indent=2,
+            )
+    except Exception as exc:
+        logger.warning("[ClipFinder {}] could not persist meta: {}", job.id[:8], exc)
+
+
+@app.on_event("startup")
+async def restore_clip_finder_jobs() -> None:
+    """Re-hydrate clip-finder jobs from disk on server start."""
+    if not CLIP_FINDER_DIR.exists():
+        return
+
+    restored = 0
+    for job_dir in sorted(CLIP_FINDER_DIR.iterdir(), reverse=True):
+        if not job_dir.is_dir():
+            continue
+        meta_file = job_dir / "job_meta.json"
+        if not meta_file.exists():
+            continue
+        if job_dir.name in _cf_jobs:
+            continue
+        try:
+            with meta_file.open("r", encoding="utf-8") as f:
+                meta = json.load(f)
+            valid_keys = set(ClipFinderJob.model_fields.keys())
+            filtered = {k: v for k, v in meta.items() if k in valid_keys}
+            cf_job = ClipFinderJob(**filtered)
+            # If clips were downloaded but server died mid-flight, downgrade
+            # to the safe "analyzed" state so the UI shows resumed download
+            # button instead of an in-progress spinner forever.
+            if cf_job.status in ("downloading", "transcribing", "analyzing", "signals"):
+                cf_job.status = "analyzed" if cf_job.clips else "failed"
+                cf_job.phase_label = (
+                    f"Found {len(cf_job.clips)} clip(s) — Resume from disk"
+                    if cf_job.clips else "Server restarted before completion"
+                )
+            _cf_jobs[cf_job.id] = cf_job
+            restored += 1
+        except Exception as exc:
+            logger.warning("[ClipFinder] could not restore {}: {}", job_dir.name, exc)
+    if restored:
+        logger.info("[ClipFinder] restored {} job(s) from disk", restored)
 
 
 @app.get("/api/clip-finder/available-clips")
@@ -1124,12 +1271,19 @@ async def list_available_clips():
                 "path": str(clip_file),
                 "size": clip_file.stat().st_size,
             }
-            # Attach title/reason from job data if available
+            # Attach metadata from job data if available
             if cf_job and i < len(cf_job.clips):
-                clip_info["title"] = cf_job.clips[i].get("title", "")
-                clip_info["reason"] = cf_job.clips[i].get("reason", "")
-                clip_info["start"] = cf_job.clips[i].get("start", 0)
-                clip_info["end"] = cf_job.clips[i].get("end", 0)
+                src = cf_job.clips[i]
+                clip_info["title"] = src.get("title", "")
+                clip_info["reason"] = src.get("reason", "")
+                clip_info["start"] = src.get("start", 0)
+                clip_info["end"] = src.get("end", 0)
+                if "score" in src:
+                    clip_info["score"] = src["score"]
+                if "highlight_type" in src:
+                    clip_info["highlight_type"] = src["highlight_type"]
+                if "hunter" in src:
+                    clip_info["hunter"] = src["hunter"]
             else:
                 clip_info["title"] = clip_file.stem
             clips_list.append(clip_info)
@@ -1212,6 +1366,21 @@ async def create_clip_finder_job(req: ClipFinderRequest):
     if not gemini_keys:
         raise HTTPException(status_code=400, detail="No GEMINI_API_KEY set in .env")
 
+    mode = req.mode or getattr(config, "CLIP_FINDER_MODE", "single-shot")
+    if mode not in ("single-shot", "multi-stage"):
+        raise HTTPException(status_code=400, detail=f"Invalid mode '{mode}'")
+
+    enable_audio = (
+        req.enable_audio_signals
+        if req.enable_audio_signals is not None
+        else getattr(config, "CLIP_FINDER_ENABLE_AUDIO_SIGNALS", True)
+    )
+    enable_chat = (
+        req.enable_chat_signals
+        if req.enable_chat_signals is not None
+        else getattr(config, "CLIP_FINDER_ENABLE_CHAT_SIGNALS", True)
+    )
+
     job_id = uuid.uuid4().hex[:12]
     job = ClipFinderJob(
         id=job_id,
@@ -1219,9 +1388,13 @@ async def create_clip_finder_job(req: ClipFinderRequest):
         instructions=req.instructions.strip() if req.instructions.strip() else "",
         lang=req.lang,
         start_offset=max(0.0, req.start_offset),
+        mode=mode,
+        enable_audio_signals=bool(enable_audio),
+        enable_chat_signals=bool(enable_chat),
         created_at=time.time(),
     )
     _cf_jobs[job_id] = job
+    _persist_cf_job(job)
 
     task = asyncio.create_task(_run_clip_finder_phase1(job_id, gemini_keys))
     _cf_tasks[job_id] = task
@@ -1365,7 +1538,7 @@ async def start_single_clip_download(job_id: str, clip_idx: int):
 
 
 async def _run_clip_finder_phase1(job_id: str, gemini_keys: list[str]) -> None:
-    """Phase 1: Extract transcript from YouTube via yt-dlp auto-subs + Gemini AI analysis."""
+    """Phase 1: transcript + multimodal signals + AI analysis."""
     job = _cf_jobs[job_id]
     job_dir = CLIP_FINDER_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -1375,15 +1548,15 @@ async def _run_clip_finder_phase1(job_id: str, gemini_keys: list[str]) -> None:
         logger.info("[ClipFinder {}] {}", job_id[:8], msg)
 
     try:
-        from processors.clip_finder import ClipFinder, ClipFinderError
+        from processors.clip_finder import ClipFinderError  # noqa: F401
 
-        cf = ClipFinder()
+        cf = _build_clip_finder()
 
-        # ── Step 1: Extract transcript via yt-dlp (no video download) ──
+        # ── Step 1: Extract transcript via yt-dlp ──
         job.status = "transcribing"
         job.phase_label = "Extracting transcript..."
-        job.progress_pct = 15.0
-        log("Step 1/2: Extracting transcript from YouTube (no video download)...")
+        job.progress_pct = 10.0
+        log(f"Step 1/4: Extracting transcript (mode={job.mode})...")
 
         transcript = await cf.extract_subtitles(
             url=job.url,
@@ -1392,7 +1565,7 @@ async def _run_clip_finder_phase1(job_id: str, gemini_keys: list[str]) -> None:
             log_fn=log,
         )
 
-        if not transcript or len(transcript) == 0:
+        if not transcript:
             log("No subtitles found after trying all strategies.")
             job.status = "failed"
             job.phase_label = "Failed — No subtitles available"
@@ -1401,11 +1574,12 @@ async def _run_clip_finder_phase1(job_id: str, gemini_keys: list[str]) -> None:
                 "Tried auto-generated and manual subtitles in multiple languages. "
                 "The video may not have any captions available."
             )
+            _persist_cf_job(job)
             return
 
         log(f"Transcript extracted: {len(transcript)} segments")
 
-        # ── Apply start offset (for livestreams with waiting time) ──
+        # ── Apply start offset (livestream waiting time) ──
         if job.start_offset > 0:
             original_count = len(transcript)
             transcript = cf.filter_transcript_by_offset(transcript, job.start_offset)
@@ -1421,38 +1595,76 @@ async def _run_clip_finder_phase1(job_id: str, gemini_keys: list[str]) -> None:
                     f"No transcript segments found after the {job.start_offset}s "
                     "start offset. Try a smaller offset value."
                 )
+                _persist_cf_job(job)
                 return
 
-        # ── Step 2: Gemini AI analysis ──
-        job.status = "analyzing"
-        job.phase_label = "AI analyzing transcript..."
-        job.progress_pct = 45.0
-        log(f"Step 2/2: Analyzing with Gemini AI ({len(gemini_keys)} key(s) available)...")
+        # ── Step 2: Multimodal signals (audio + chat) ──
+        job.status = "signals"
+        job.phase_label = "Extracting multimodal signals..."
+        job.progress_pct = 30.0
+        log("Step 2/4: Extracting multimodal signals (audio + chat)...")
 
-        clips = await cf.find_clips_with_gemini(
+        signals = await cf.extract_signals(
+            url=job.url,
+            output_dir=job_dir / "signals",
+            log_fn=log,
+            enable_audio=job.enable_audio_signals,
+            enable_chat=job.enable_chat_signals,
+        )
+
+        # Drop signals that fall before start_offset (after the trim above)
+        if job.start_offset > 0 and signals:
+            signals = [s for s in signals if s.end > job.start_offset]
+
+        # Build summary for UI badges
+        from collections import Counter
+        kinds = Counter(s.kind.value for s in signals)
+        job.signals_summary = dict(kinds)
+
+        # ── Step 3: AI clip detection ──
+        job.status = "analyzing"
+        job.phase_label = (
+            f"AI analyzing ({job.mode})..."
+        )
+        job.progress_pct = 55.0
+        log(
+            f"Step 3/4: Analyzing with Gemini AI "
+            f"(mode={job.mode}, {len(gemini_keys)} key(s))..."
+        )
+
+        max_count = getattr(config, "CLIP_FINDER_MAX_CLIPS", 12)
+        scored_clips = await cf.find_clips(
             transcript=transcript,
             instructions=job.instructions,
             api_keys=gemini_keys,
+            mode=job.mode,
+            signals=signals,
             log_fn=log,
+            max_count=max_count if job.mode == "multi-stage" else None,
         )
 
-        if not clips:
+        if not scored_clips:
             log("No clips matched your instructions.")
             job.status = "analyzed"
             job.phase_label = "Analysis complete — No matching clips found"
             job.progress_pct = 100.0
             job.clips = []
+            _persist_cf_job(job)
             return
 
-        job.clips = clips
-        job.transcript = transcript  # Preserve for Phase 2 auto-sub slicing (double-check)
+        # Step 4: serialize for API/UI
+        job.clips = [c.to_dict() for c in scored_clips]
+        job.transcript = list(transcript)
 
-        # ── Phase 1 done — clips found, ready for user to review & download ──
         job.status = "analyzed"
-        job.phase_label = f"Found {len(clips)} clips — Ready to download"
+        job.phase_label = f"Found {len(scored_clips)} clip(s) — Ready to download"
         job.progress_pct = 100.0
-        log(f"Analysis complete! Found {len(clips)} clips matching your instructions.")
-        log("Click 'Download Clips' to download the video sections.")
+        log(
+            f"Analysis complete! Found {len(scored_clips)} clip(s). "
+            f"Top score: {max((c.score.total for c in scored_clips), default=0):.2f}/10"
+        )
+        log("Click 'Download Clips' to fetch the video sections.")
+        _persist_cf_job(job)
 
     except Exception as exc:
         job.status = "failed"
@@ -1460,6 +1672,7 @@ async def _run_clip_finder_phase1(job_id: str, gemini_keys: list[str]) -> None:
         job.error = str(exc)
         log(f"Error: {exc}")
         logger.exception("[ClipFinder {}] Phase 1 failed", job_id[:8])
+        _persist_cf_job(job)
 
 
 async def _run_clip_download(job_id: str) -> None:
@@ -1472,9 +1685,7 @@ async def _run_clip_download(job_id: str) -> None:
         logger.info("[ClipFinder {}] {}", job_id[:8], msg)
 
     try:
-        from processors.clip_finder import ClipFinder
-
-        cf = ClipFinder()
+        cf = _build_clip_finder()
 
         log(f"Downloading {len(job.clips)} clip sections from YouTube...")
 
@@ -1517,6 +1728,7 @@ async def _run_clip_download(job_id: str) -> None:
         job.phase_label = f"Completed — {len(clip_paths)} clips ready"
         job.progress_pct = 100.0
         log(f"Done! {len(clip_paths)} clips are ready for download.")
+        _persist_cf_job(job)
 
     except Exception as exc:
         job.status = "failed"
@@ -1524,6 +1736,7 @@ async def _run_clip_download(job_id: str) -> None:
         job.error = str(exc)
         log(f"Error: {exc}")
         logger.exception("[ClipFinder {}] Download failed", job_id[:8])
+        _persist_cf_job(job)
 
 
 async def _run_single_clip_download(job_id: str, clip_idx: int) -> None:
@@ -1536,9 +1749,7 @@ async def _run_single_clip_download(job_id: str, clip_idx: int) -> None:
         logger.info("[ClipFinder {}] {}", job_id[:8], msg)
 
     try:
-        from processors.clip_finder import ClipFinder
-
-        cf = ClipFinder()
+        cf = _build_clip_finder()
         clip = job.clips[clip_idx]
 
         log(f"Downloading clip {clip_idx + 1}/{len(job.clips)}: \"{clip.get('title', '')}\"...")
@@ -1583,9 +1794,12 @@ async def _run_single_clip_download(job_id: str, clip_idx: int) -> None:
         else:
             log(f"Failed to download clip {clip_idx + 1}.")
 
+        _persist_cf_job(job)
+
     except Exception as exc:
         log(f"Error downloading clip {clip_idx + 1}: {exc}")
         logger.exception("[ClipFinder {}] Single clip download failed", job_id[:8])
+        _persist_cf_job(job)
 
 
 # ─── Double-Check Helpers ────────────────────────────────────────────────────

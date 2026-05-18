@@ -3,8 +3,11 @@
 venv/
 venv_python311/
 
-# Models
-models/
+# Models — only ignore binary weights, not the Python source modules
+models/whisper-anime/
+models/*.bin
+models/*.pt
+models/*.safetensors
 
 # Outputs
 output/
@@ -24,3 +27,6 @@ cookies.txt
 thumbs.db
 desktop.ini
 nul
+
+#Folder
+.kiro
