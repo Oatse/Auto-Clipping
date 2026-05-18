@@ -2,9 +2,9 @@
  * jobs.js — Job list, job detail modal, SSE log streaming, system info
  */
 
-import { apiFetch, timeAgo, escHtml, showScreen } from './utils.js';
+import { apiFetch, timeAgo, escHtml, showScreen, formatClipDuration } from './utils.js';
 import * as S from './state.js';
-import { fetchTranscript } from './upload.js';
+import { fetchTranscript, loadClipJobsList } from './upload.js';
 import { openPreviewScreen } from './preview.js';
 
 // ── DOM Refs ───────────────────────────────────────────────────────────────
@@ -41,17 +41,29 @@ export async function loadSystemInfo() {
     const dot  = systemStatus.querySelector('.status-dot');
     const text = systemStatus.querySelector('.status-text');
 
-    const allOk = data.packages.ffmpeg && data.packages.whisperx;
+    const ffmpegOk     = !!data.packages.ffmpeg;
+    const elevenlabsOk = !!data.packages.elevenlabs;
+    const allOk        = ffmpegOk && elevenlabsOk;
     dot.className = 'status-dot ' + (allOk ? 'ok' : 'warn');
-    text.textContent = allOk
-      ? `Ready · ${data.cuda_available ? data.gpu_name || 'GPU' : 'CPU'} · Torch ${data.torch_version}`
-      : 'Setup required — FFmpeg or WhisperX missing';
+    if (allOk) {
+      const gpuLabel = data.cuda_available
+        ? (data.gpu_name || 'GPU')
+        : 'CPU';
+      const torchPart = data.torch_version
+        ? ` · Torch ${data.torch_version}`
+        : '';
+      text.textContent = `Ready · ${gpuLabel}${torchPart}`;
+    } else if (!elevenlabsOk) {
+      text.textContent = 'Setup required — ELEVENLABS_API_KEY missing';
+    } else {
+      text.textContent = 'Setup required — FFmpeg missing';
+    }
 
     const items = [
-      { label: 'FFmpeg',    ok: data.packages.ffmpeg },
-      { label: 'WhisperX', ok: data.packages.whisperx },
-      { label: 'Pycaps',   ok: data.packages.pycaps },
-      { label: 'CUDA',     ok: data.cuda_available, warn: !data.cuda_available },
+      { label: 'FFmpeg',     ok: ffmpegOk },
+      { label: 'ElevenLabs', ok: elevenlabsOk },
+      { label: 'Pycaps',     ok: !!data.packages.pycaps },
+      { label: 'GPU',        ok: !!data.cuda_available, warn: !data.cuda_available },
     ];
     sysGrid.innerHTML = items.map(i => `
       <div class="sys-item ${i.ok ? 'ok' : i.warn ? 'warn' : 'err'}">
@@ -59,16 +71,20 @@ export async function loadSystemInfo() {
       </div>
     `).join('');
 
-    // Populate whisper model selector dynamically from server
-    if (data.whisper_models && whisperModel) {
+    // Populate transcription engine dropdown.
+    // The server now returns a single ElevenLabs entry, but we keep the
+    // populate-from-server logic so future engines can be added without
+    // changing the frontend.
+    const engines = data.stt_engines || data.whisper_models;
+    if (engines && whisperModel) {
       const currentVal = whisperModel.value;
       whisperModel.innerHTML = '';
-      const modelIcons = { 'whisperx': '🧠', 'faster-whisper': '🎌', 'elevenlabs': '🔊' };
-      for (const [key, m] of Object.entries(data.whisper_models)) {
+      const engineIcons = { 'elevenlabs': '🔊' };
+      for (const [key, m] of Object.entries(engines)) {
         const opt = document.createElement('option');
         opt.value = key;
-        const icon = modelIcons[m.type] || '🧠';
-        opt.textContent = `${icon} ${m.label} — ${m.description}`;
+        const icon = engineIcons[m.type] || '🔊';
+        opt.textContent = `${icon} ${m.label}${m.description ? ' — ' + m.description : ''}`;
         whisperModel.appendChild(opt);
       }
       if ([...whisperModel.options].some(o => o.value === currentVal)) {
@@ -209,101 +225,9 @@ async function resumeJob(jobId) {
 }
 
 // ── Clip Jobs List ─────────────────────────────────────────────────────────
-async function loadClipJobsList() {
-  if (!clipJobsList) return;
+// loadClipJobsList imported from upload.js
 
-  clipJobsList.innerHTML = '<div class="clip-picker-loading">Loading clips...</div>';
-  try {
-    const data = await apiFetch('/api/clip-finder/available-clips');
-
-    if (!data || data.length === 0) {
-      clipJobsList.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">◻</div>
-          <p>No clips available. Use Clip Finder to download clips first.</p>
-        </div>`;
-      return;
-    }
-
-    const clipCards = [];
-    data.forEach(job => {
-      (job.clips || []).forEach(clip => {
-        const start = typeof clip.start === 'number' ? clip.start : 0;
-        const end = typeof clip.end === 'number' ? clip.end : 0;
-        const duration = Math.max(0, end - start);
-        const durationLabel = duration > 0 ? formatClipDuration(duration) : '--';
-
-        const title = clip.title || clip.filename || `Clip ${clip.index + 1}`;
-        const sourceTitle = job.video_title || job.url || job.job_id;
-
-        clipCards.push(`
-          <div class="clip-job-card">
-            <div class="clip-job-video-wrap">
-              <video class="clip-job-video" preload="metadata" muted playsinline
-                src="/api/clip-finder/clips/${encodeURIComponent(job.job_id)}/${clip.index}/stream"></video>
-              <span class="clip-job-duration">${durationLabel}</span>
-            </div>
-            <div class="clip-job-info">
-              <div class="clip-job-title">${escHtml(title)}</div>
-              <div class="clip-job-meta">${escHtml(sourceTitle)}</div>
-              <div class="clip-job-meta">${escHtml(clip.filename || '')}</div>
-            </div>
-            <button class="clip-job-use" data-path="${escHtml(clip.path)}" data-file="${escHtml(clip.filename || title)}">Use clip</button>
-          </div>
-        `);
-      });
-    });
-
-    if (clipCards.length === 0) {
-      clipJobsList.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-icon">◻</div>
-          <p>No clips available. Use Clip Finder to download clips first.</p>
-        </div>`;
-      return;
-    }
-
-    clipJobsList.innerHTML = clipCards.join('');
-
-    clipJobsList.querySelectorAll('.clip-job-card').forEach(card => {
-      const video = card.querySelector('.clip-job-video');
-      const durationEl = card.querySelector('.clip-job-duration');
-      if (video) {
-        video.addEventListener('loadedmetadata', () => {
-          if (!durationEl) return;
-          const seconds = Number(video.duration);
-          if (Number.isFinite(seconds) && seconds > 0) {
-            durationEl.textContent = formatClipDuration(seconds);
-          }
-        });
-        video.addEventListener('mouseenter', () => {
-          video.play().catch(() => {});
-        });
-        video.addEventListener('mouseleave', () => {
-          video.pause();
-          video.currentTime = 0;
-        });
-      }
-    });
-
-    clipJobsList.querySelectorAll('.clip-job-use').forEach(btn => {
-      btn.addEventListener('click', () => {
-        import('./upload.js').then(m => m.startJobFromClip(btn.dataset.path, btn.dataset.file || 'clip.mp4'));
-      });
-    });
-
-  } catch (err) {
-    clipJobsList.innerHTML = `<div class="clip-picker-empty">Failed to load clips: ${escHtml(err.message)}</div>`;
-  }
-}
-
-function formatClipDuration(seconds) {
-  const total = Math.max(0, Math.floor(seconds));
-  const mins = Math.floor(total / 60);
-  const secs = total % 60;
-  if (mins > 0) return `${mins}m ${secs}s`;
-  return `${secs}s`;
-}
+// formatClipDuration imported from utils.js
 
 // ── Modal ──────────────────────────────────────────────────────────────────
 function setupModal() {

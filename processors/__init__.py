@@ -1,14 +1,12 @@
-"""processors package"""
-from .transcription import TranscriptionProcessor
+"""processors package — STT, translation, subtitle rendering, muxing."""
+from .elevenlabs_stt import ElevenLabsSTTProcessor
 from .translator import TranslatorProcessor
 from .subtitle_renderer import SubtitleRendererProcessor
 from .muxer import MuxerProcessor
-from .double_check import DoubleCheckMerger
 
 __all__ = [
-    "TranscriptionProcessor",
+    "ElevenLabsSTTProcessor",
     "TranslatorProcessor",
     "SubtitleRendererProcessor",
     "MuxerProcessor",
-    "DoubleCheckMerger",
 ]

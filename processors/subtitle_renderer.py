@@ -2,7 +2,7 @@
 processors/subtitle_renderer.py — Phase 3: Pycaps Subtitle Injection.
 
 Responsibilities:
-  1. Build a Pycaps-compatible word-level JSON from WhisperX word timestamps
+  1. Build a Pycaps-compatible word-level JSON from ElevenLabs word timestamps
      + global video segment offsets.
   2. Bypass Pycaps internal transcription entirely.
   3. Apply CSS styling derived from the UI style_config dict.
@@ -11,7 +11,7 @@ Responsibilities:
      (ASS natively supports simultaneous multi-line subtitles + per-speaker colors).
 
 Formula:
-    Global_Word_Start = Segment_Start_Time_In_Video + WhisperX_Word_Start_Time
+    Global_Word_Start = Segment_Start_Time_In_Video + Word_Start_Time
 """
 
 from __future__ import annotations
@@ -100,8 +100,29 @@ def _build_css_from_style(style: dict) -> str:
     NARRATION_ANIMS = {"narration-pop", "zoom-flash", "typewriter", "karaoke"}
     is_narration_anim = anim_style in NARRATION_ANIMS
 
-    # Build text-shadow: stroke (via multi-shadow outline) + glow
+    # Build text-shadow: extra strokes (outermost first) + primary stroke + glow
     shadows = []
+
+    # Extra strokes — outermost (widest) first, then progressively smaller
+    extra_strokes = style.get("extraStrokes", []) or []
+    if stroke_enabled and extra_strokes:
+        sorted_extra = sorted(extra_strokes, key=lambda s: s.get("width", 0), reverse=True)
+        for es in sorted_extra:
+            ew = int(es.get("width", 0))
+            ec = es.get("color", "#000000")
+            if ew > 0:
+                shadows += [
+                    f"{ew}px {ew}px 0 {ec}",
+                    f"-{ew}px {ew}px 0 {ec}",
+                    f"{ew}px -{ew}px 0 {ec}",
+                    f"-{ew}px -{ew}px 0 {ec}",
+                    f"{ew}px 0 0 {ec}",
+                    f"-{ew}px 0 0 {ec}",
+                    f"0 {ew}px 0 {ec}",
+                    f"0 -{ew}px 0 {ec}",
+                ]
+
+    # Primary stroke
     if stroke_enabled and stroke_width > 0:
         w = stroke_width
         c = stroke_color
@@ -226,11 +247,20 @@ def _rgb_to_ass(r: int, g: int, b: int, alpha: int = 0) -> str:
 
 
 def _secs_to_ass_time(secs: float) -> str:
-    """Convert seconds to ASS timestamp h:mm:ss.cc"""
-    h = int(secs // 3600)
-    m = int((secs % 3600) // 60)
-    s = int(secs % 60)
-    cs = int(round((secs % 1) * 100))
+    """Convert seconds to ASS timestamp h:mm:ss.cc
+
+    Rounds to the nearest centisecond first, then derives h/m/s/cs from
+    the integer total so that carry-over (e.g. 99.5 cs → +1 s) is handled
+    correctly.  Previously, rounding was applied after splitting, which
+    could produce invalid centisecond values like '100'.
+    """
+    total_cs = int(round(secs * 100))
+    cs = total_cs % 100
+    total_s = total_cs // 100
+    s = total_s % 60
+    total_m = total_s // 60
+    m = total_m % 60
+    h = total_m // 60
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
@@ -427,6 +457,15 @@ def _build_ass_content(
                 )
 
     # Build dialogue lines with dynamic per-line MarginV
+    # Extra strokes: duplicate each line at lower ASS layers with \bord and \3c overrides
+    extra_strokes = style.get("extraStrokes", []) or []
+    if stroke_enabled and extra_strokes:
+        sorted_extra = sorted(extra_strokes, key=lambda s: s.get("width", 0), reverse=True)
+    else:
+        sorted_extra = []
+    # Layer offset: extra strokes use layers 0..N-1, primary text uses layer N
+    base_layer = len(sorted_extra)
+
     dialogue_lines = []
     for idx, seg in enumerate(segments):
         start, end, sp = all_fields[idx]
@@ -451,8 +490,24 @@ def _build_ass_content(
         # ASS escapes: curly braces are control codes
         text_esc = text.replace("{", "\\\{").replace("}", "\\\}")
         anim_tag = _get_ass_anim_tag(style.get("animStyle", "word-pop"))
+
+        # Extra stroke layers (rendered behind primary text)
+        for es_idx, es in enumerate(sorted_extra):
+            es_w = int(es.get("width", 0))
+            es_c_hex = es.get("color", "#000000")
+            es_r, es_g, es_b = hex_to_rgb(es_c_hex)
+            es_ass_color = _rgb_to_ass(es_r, es_g, es_b)
+            # Override outline: \3c = outline color, \bord = outline width
+            # \4a&HFF = fully transparent shadow for extra stroke layers
+            override = r"{\3c" + es_ass_color + r"\bord" + str(es_w) + r"\4a&HFF&\shad0}"
+            dialogue_lines.append(
+                f"Dialogue: {es_idx},{_secs_to_ass_time(start)},{_secs_to_ass_time(end)},"
+                f"{sp},,0,0,{line_margin_v},,{anim_tag}{override}{text_esc}"
+            )
+
+        # Primary text layer (topmost)
         dialogue_lines.append(
-            f"Dialogue: 0,{_secs_to_ass_time(start)},{_secs_to_ass_time(end)},"
+            f"Dialogue: {base_layer},{_secs_to_ass_time(start)},{_secs_to_ass_time(end)},"
             f"{sp},,0,0,{line_margin_v},,{anim_tag}{text_esc}"
         )
 
@@ -481,7 +536,7 @@ class SubtitleRendererProcessor:
     Phase 3: Build Pycaps-compatible subtitle JSON and render onto video.
 
     Bypasses Pycaps' internal transcription by injecting a pre-built
-    word-level JSON derived from WhisperX word alignment data.
+    word-level JSON derived from ElevenLabs word alignment data.
     """
 
     def build_pycaps_transcript(
@@ -493,13 +548,13 @@ class SubtitleRendererProcessor:
         Build and save the Pycaps-compatible word-level transcript JSON.
 
         For each word in each segment:
-            global_start = segment.start + whisperx_word.start
-            global_end   = segment.start + whisperx_word.end
+            global_start = segment.start + word.start
+            global_end   = segment.start + word.end
 
         Parameters
         ----------
         segments:
-            Transcript segments with WhisperX word timestamps.
+            Transcript segments with ElevenLabs word timestamps.
         output_dir:
             Directory to save the pycaps_transcript.json file.
 
@@ -648,6 +703,12 @@ class SubtitleRendererProcessor:
             pycaps_style["fontSize"]    = max(1, round(int(pycaps_style.get("fontSize", 40)) / _pycaps_dsf))
             pycaps_style["strokeWidth"] = max(0, round(int(pycaps_style.get("strokeWidth", 3)) / _pycaps_dsf))
             pycaps_style["glowBlur"]    = max(0, round(int(pycaps_style.get("glowBlur", 10)) / _pycaps_dsf))
+            # Scale extra stroke widths too
+            if pycaps_style.get("extraStrokes"):
+                pycaps_style["extraStrokes"] = [
+                    {"color": es.get("color", "#000000"), "width": max(0, round(int(es.get("width", 0)) / _pycaps_dsf))}
+                    for es in pycaps_style["extraStrokes"]
+                ]
 
         logger.debug(
             "Pycaps DSF correction: DSF={:.4f}, fontSize {} → {}, strokeWidth {} → {}, glowBlur {} → {}",
@@ -720,8 +781,11 @@ class SubtitleRendererProcessor:
         """
         Burn multi-speaker ASS subtitles onto video using FFmpeg.
 
-        Called automatically by render() when more than one unique speaker
-        is detected in the segment list.
+        Also applies timeline effects (red-flash, zoom, shake, vignette, etc.)
+        and global color filters (brightness/contrast/saturation) when present
+        in the style_config dict.
+
+        Called automatically by render() when segments are available.
         """
         import subprocess
 
@@ -744,18 +808,183 @@ class SubtitleRendererProcessor:
         # FFmpeg subtitles filter requires forward slashes and escaped colons on Windows
         ass_str = str(ass_path).replace("\\", "/").replace(":", "\\:")
 
+        # ── Extract effects & color filter from style config ─────────────
+        effects = style.get("effects", []) or []
+        color_filter = style.get("filter", {}) or {}
+
+        # ── Build video filter chain ─────────────────────────────────────
+        vf_parts: list[str] = []
+
+        # 1. Subtitles — always first so text is burned before overlays
+        vf_parts.append(f"subtitles='{ass_str}'")
+
+        # 2. Per-effect visual overlays (drawbox, vignette)
+        for fx in effects:
+            fx_type = fx.get("type", "")
+            start = float(fx.get("start", 0))
+            end = float(fx.get("end", 0))
+            params = fx.get("params", {}) or {}
+            enable = f"between(t\\,{start:.3f}\\,{end:.3f})"
+
+            if fx_type == "red-flash":
+                alpha = (params.get("intensity", 60) / 100) * 0.6
+                vf_parts.append(
+                    f"drawbox=x=0:y=0:w=iw:h=ih:color=red@{alpha:.2f}:t=fill:enable='{enable}'"
+                )
+            elif fx_type == "flash-white":
+                alpha = (params.get("intensity", 70) / 100) * 0.75
+                vf_parts.append(
+                    f"drawbox=x=0:y=0:w=iw:h=ih:color=white@{alpha:.2f}:t=fill:enable='{enable}'"
+                )
+            elif fx_type == "vignette":
+                # Intensity 10-100 → vignette angle PI/6..PI/2
+                intensity = params.get("intensity", 60)
+                angle = 0.52 + (intensity / 100) * 1.05  # ~PI/6 to ~PI/2
+                vf_parts.append(f"vignette={angle:.2f}:enable='{enable}'")
+
+        # 3. Zoom effects (zoom-in-center, zoom-vtuber)
+        #    Uses per-effect zoomLevel and cropX/cropY (center point) params.
+        zoom_effects = [
+            fx for fx in effects
+            if fx.get("type") in ("zoom-in-center", "zoom-vtuber")
+        ]
+        if zoom_effects:
+            for fx in zoom_effects:
+                start = float(fx.get("start", 0))
+                end = float(fx.get("end", 0))
+                params = fx.get("params", {}) or {}
+                enable = f"between(t\\,{start:.3f}\\,{end:.3f})"
+                zoom_level = params.get("zoomLevel", 130)
+                scale_factor = zoom_level / 100.0
+                vf_parts.append(
+                    f"scale=w=iw*{scale_factor:.2f}:h=ih*{scale_factor:.2f}:enable='{enable}'"
+                )
+            # Crop back to native dimensions using cropX/cropY offsets
+            # Collect all crop center expressions so multiple zooms merge
+            crop_x_parts = []
+            crop_y_parts = []
+            for fx in zoom_effects:
+                start = float(fx.get("start", 0))
+                end = float(fx.get("end", 0))
+                params = fx.get("params", {}) or {}
+                en = f"between(t\\,{start:.3f}\\,{end:.3f})"
+                cx = params.get("cropX", 0.5)
+                cy = params.get("cropY", 0.5)
+                zoom_level = params.get("zoomLevel", 130)
+                sf = zoom_level / 100.0
+                # When zoom is active: offset from center based on cropX/cropY
+                x_off = (cx - 0.5) * vid_w * (sf - 1)
+                y_off = (cy - 0.5) * vid_h * (sf - 1)
+                crop_x_parts.append(f"{x_off:.1f}*{en}")
+                crop_y_parts.append(f"{y_off:.1f}*{en}")
+
+            cx_expr = "+".join(crop_x_parts) if crop_x_parts else "0"
+            cy_expr = "+".join(crop_y_parts) if crop_y_parts else "0"
+            vf_parts.append(
+                f"crop={vid_w}:{vid_h}:"
+                f"(in_w-{vid_w})/2+{cx_expr}:"
+                f"(in_h-{vid_h})/2+{cy_expr}"
+            )
+
+        # 4. Shake effects — per-effect intensity controls displacement
+        shake_effects = [
+            fx for fx in effects if fx.get("type") == "shake"
+        ]
+        if shake_effects:
+            pad = 20  # pixels of room on each side
+            vf_parts.append(
+                f"scale={vid_w + pad * 2}:{vid_h + pad * 2}"
+            )
+            sx_parts = []
+            sy_parts = []
+            for fx in shake_effects:
+                start = float(fx.get("start", 0))
+                end = float(fx.get("end", 0))
+                params = fx.get("params", {}) or {}
+                en = f"between(t\\,{start:.3f}\\,{end:.3f})"
+                intensity = params.get("intensity", 50)
+                amp = 4 + (intensity / 100) * 12  # 4-16 pixels displacement
+                sx_parts.append(f"{amp:.0f}*sin(t*45)*{en}")
+                sy_parts.append(f"{amp:.0f}*cos(t*37)*{en}")
+            sx_expr = "+".join(sx_parts)
+            sy_expr = "+".join(sy_parts)
+            vf_parts.append(
+                f"crop={vid_w}:{vid_h}:"
+                f"(in_w-{vid_w})/2+{sx_expr}:"
+                f"(in_h-{vid_h})/2+{sy_expr}"
+            )
+
+        # 5. Global color grading (eq filter)
+        filter_name = color_filter.get("name", "none")
+        br = float(color_filter.get("brightness", 0))
+        co = float(color_filter.get("contrast", 0))
+        sa = float(color_filter.get("saturation", 0))
+        has_eq = filter_name != "none" or br != 0 or co != 0 or sa != 0
+
+        if has_eq:
+            # FFmpeg eq: brightness [-1,1], contrast centered at 1, saturation centered at 1
+            eq_b = br / 100.0        # UI  -50..50  → FFmpeg -0.5..0.5
+            eq_c = 1.0 + co / 100.0  # UI  -50..50  → FFmpeg  0.5..1.5
+            eq_s = 1.0 + sa / 100.0  # UI  -50..50  → FFmpeg  0.5..1.5
+            vf_parts.append(
+                f"eq=brightness={eq_b:.4f}:contrast={eq_c:.4f}:saturation={eq_s:.4f}"
+            )
+
+        vf_str = ",".join(vf_parts)
+
+        # ── Build audio filter chain ─────────────────────────────────────
+        af_parts: list[str] = []
+        for fx in effects:
+            fx_type = fx.get("type", "")
+            start = float(fx.get("start", 0))
+            end = float(fx.get("end", 0))
+            params = fx.get("params", {}) or {}
+            enable = f"between(t\\,{start:.3f}\\,{end:.3f})"
+
+            if fx_type == "volume-boost":
+                gain = params.get("gain", 2.0)
+                af_parts.append(f"volume={gain:.1f}:enable='{enable}'")
+            elif fx_type == "bass-boost":
+                gain = params.get("gain", 6)
+                af_parts.append(
+                    f"equalizer=f=80:t=h:w=200:g={gain:.1f}:enable='{enable}'"
+                )
+        af_str = ",".join(af_parts) if af_parts else None
+
+        # ── Log effects info ─────────────────────────────────────────────
+        if effects:
+            logger.info("Applying {} timeline effect(s) to render", len(effects))
+            for fx in effects:
+                logger.debug(
+                    "  FX: {} @ {:.2f}s–{:.2f}s params={}",
+                    fx.get("type"),
+                    float(fx.get("start", 0)),
+                    float(fx.get("end", 0)),
+                    fx.get("params", {}),
+                )
+        if has_eq:
+            logger.info(
+                "Applying color filter '{}': brightness={}, contrast={}, saturation={}",
+                filter_name, br, co, sa,
+            )
+
         def _build_cmd(use_nvenc: bool) -> list[str]:
             cmd = [FFMPEG_BIN, "-y"]
             if use_nvenc:
                 cmd += ["-hwaccel", "cuda"]
             cmd += ["-i", str(video_path)]
-            cmd += ["-vf", f"subtitles=\'{ass_str}\'"]
+            cmd += ["-vf", vf_str]
+            if af_str:
+                cmd += ["-af", af_str]
             if use_nvenc:
                 # NVENC encoder — p4 = balanced quality/speed, cq 23 ≈ libx264 crf 23
                 cmd += ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "23"]
             # Always encode audio to AAC: -c:a copy can silently drop audio when
             # the source codec (e.g. Opus in MKV) is not valid inside MP4.
             cmd += ["-c:a", "aac", "-b:a", "192k"]
+            # Strip any embedded subtitle streams from the source video so
+            # they don't leak through (briefly showing original-language text).
+            cmd += ["-sn"]
             cmd += [str(output_path)]
             return cmd
 

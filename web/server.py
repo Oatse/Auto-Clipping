@@ -30,7 +30,16 @@ from enum import Enum
 from pathlib import Path
 from typing import AsyncGenerator
 
-import torch
+# torch is optional — only used for surfacing GPU info on /api/system.
+# Removing whisperx makes torch a hard-to-install transitive dependency we
+# no longer need at the runtime path, so import it defensively.
+try:
+    import torch  # type: ignore
+    _HAS_TORCH = True
+except ImportError:  # pragma: no cover
+    torch = None  # type: ignore
+    _HAS_TORCH = False
+
 from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -175,7 +184,6 @@ class Job(BaseModel):
     transcribe_only: bool = False          # Jika True, pipeline berhenti setelah phase 1
     num_speakers: int | None = None        # Manual speaker count override (None = auto)
     speaker_detection: bool = True         # False = skip gap detection, semua SPEAKER_00
-    whisper_model: str = "large-v2"        # Whisper model key from config.WHISPER_MODELS
 
     class Config:
         use_enum_values = True
@@ -190,30 +198,38 @@ _job_tasks: dict[str, asyncio.Task] = {}
 
 @app.get("/api/system")
 async def get_system_info():
-    cuda_available = torch.cuda.is_available()
-    gpu_name = torch.cuda.get_device_name(0) if cuda_available else None
+    if _HAS_TORCH and torch is not None:
+        cuda_available = torch.cuda.is_available()
+        gpu_name = torch.cuda.get_device_name(0) if cuda_available else None
+        torch_version = torch.__version__
+    else:
+        cuda_available = False
+        gpu_name = None
+        torch_version = None
     return {
         "cuda_available": cuda_available,
         "gpu_name": gpu_name,
-        "torch_version": torch.__version__,
+        "torch_version": torch_version,
         "python_version": sys.version.split()[0],
         "packages": {
-            "whisperx": _check_package("whisperx"),
+            "elevenlabs": bool(config.ELEVENLABS_API_KEYS),
             "pycaps": _check_package("pycaps"),
             "ffmpeg": _check_ffmpeg(),
         },
         "env": {
-            "hf_token_set": bool(config.HF_TOKEN),
             "elevenlabs_key_set": bool(config.ELEVENLABS_API_KEY),
             "gemini_keys_set": bool(config.GEMINI_API_KEYS),
+            "deepl_key_set": bool(getattr(config, "DEEPL_API_KEY", "")),
         },
-        "whisper_models": {
-            key: {
-                "label": m["label"],
-                "description": m.get("description", ""),
-                "type": m.get("type", "whisperx"),
-            }
-            for key, m in config.WHISPER_MODELS.items()
+        # Always ElevenLabs — kept as a single-entry dict so existing UI
+        # code that expects a model dropdown still works (it will simply
+        # render one option).
+        "stt_engines": {
+            "elevenlabs": {
+                "label": "ElevenLabs Speech-to-Text",
+                "description": "Cloud-based STT — auto-translate via Gemini to target language",
+                "type": "elevenlabs",
+            },
         },
     }
 
@@ -333,7 +349,6 @@ async def create_job(
     transcribe_only: bool = Form(False),
     num_speakers: int | None = Form(None),
     speaker_detection: bool = Form(True),
-    whisper_model: str = Form("large-v2"),
 ):
     # Validate file type
     if not video.filename.lower().endswith((".mp4", ".mov", ".mkv", ".avi")):
@@ -361,7 +376,6 @@ async def create_job(
         transcribe_only=transcribe_only,
         num_speakers=num_speakers,
         speaker_detection=speaker_detection,
-        whisper_model=whisper_model,
     )
     _jobs[job_id] = job
 
@@ -631,7 +645,7 @@ async def _run_transcription_only(
     target_language: str,
 ) -> None:
     """
-    Jalankan HANYA Phase 1 (WhisperX transcription).
+    Jalankan HANYA Phase 1 (ElevenLabs Speech-to-Text).
     Pipeline berhenti disini — user akan review di preview screen sebelum render.
     """
     job = _jobs[job_id]
@@ -651,93 +665,72 @@ async def _run_transcription_only(
         log(f"▶ Phase {phase}/4: {job.phase_label}")
 
     try:
-        from main import VideoSubtitlePipeline
-
         log(f"Memulai transkripsi: {video_path.name}")
         if job.num_speakers:
             log(f"Max speakers hint: {job.num_speakers} (actual may be lower)")
         if not job.speaker_detection:
             log("Speaker detection: OFF (single-speaker mode)")
 
-        # Log which whisper model is being used
-        model_key = job.whisper_model or "large-v2"
-        model_info = config.WHISPER_MODELS.get(model_key, {})
-        model_type = model_info.get("type", "whisperx")
-        log(f"Model: {model_info.get('label', model_key)}")
+        log("Model: ElevenLabs Speech-to-Text")
 
         set_phase(1)
 
-        if model_type == "elevenlabs":
-            # ── ElevenLabs Speech-to-Text path ──
-            from processors.elevenlabs_stt import ElevenLabsSTTProcessor
+        # ── ElevenLabs Speech-to-Text ─────────────────────────────────────
+        from processors.elevenlabs_stt import ElevenLabsSTTProcessor
 
-            if not config.ELEVENLABS_API_KEYS:
-                raise ValueError("ELEVENLABS_API_KEY is not set in .env")
+        if not config.ELEVENLABS_API_KEYS:
+            raise ValueError("ELEVENLABS_API_KEY is not set in .env")
 
-            log("Using ElevenLabs Speech-to-Text API...")
-            el_processor = ElevenLabsSTTProcessor()
-            segments, _ = await el_processor.transcribe(
-                video_path=video_path,
-                output_dir=output_dir / "phase1_transcription",
-                speaker_detection=job.speaker_detection,
-                num_speakers=job.num_speakers,
+        log("Using ElevenLabs Speech-to-Text API...")
+        el_processor = ElevenLabsSTTProcessor()
+        segments, _ = await el_processor.transcribe(
+            video_path=video_path,
+            output_dir=output_dir / "phase1_transcription",
+            speaker_detection=job.speaker_detection,
+            num_speakers=job.num_speakers,
+        )
+        log(f"✓ ElevenLabs transkripsi selesai: {len(segments)} segmen (bahasa asal)")
+
+        # ── Save original ElevenLabs transcript before Gemini regrouping ──
+        # NOTE: the truly raw pre-sanitization snapshot is saved by the STT
+        # processor itself (elevenlabs_words_raw.json).  This file is the
+        # post-sanitize, pre-translate snapshot used by older clients.
+        el_original_dir = output_dir / "phase1_transcription"
+        el_original_dir.mkdir(parents=True, exist_ok=True)
+        el_original_path = el_original_dir / "elevenlabs_original_transcript.json"
+        el_original_data = []
+        for seg in segments:
+            seg_d = {
+                "start": seg.start,
+                "end": seg.end,
+                "text": seg.text,
+                "speaker": getattr(seg, "speaker", "SPEAKER_00"),
+            }
+            if hasattr(seg, "words") and seg.words:
+                seg_d["words"] = [
+                    {"word": getattr(w, "word", ""), "start": getattr(w, "start", 0), "end": getattr(w, "end", 0)}
+                    for w in seg.words
+                ]
+            el_original_data.append(seg_d)
+        with el_original_path.open("w", encoding="utf-8") as f:
+            json.dump({"segments": el_original_data}, f, ensure_ascii=False, indent=2)
+        log(f"✓ ElevenLabs original transcript saved: {el_original_path.name}")
+
+        # ── Auto-translate via Gemini if target language differs ──
+        # ElevenLabs transcribes in the original language, so we translate
+        # to the selected target language using Gemini.
+        if target_language and config.GEMINI_API_KEYS:
+            log(f"Auto-translating to '{target_language}' via Gemini...")
+            from processors.translator import TranslatorProcessor
+            translator = TranslatorProcessor(target_language=target_language)
+            segments, _ = await translator.translate(
+                segments=segments,
+                output_dir=output_dir / "phase2_translation",
+                regroup=True,
             )
-            log(f"✓ ElevenLabs transkripsi selesai: {len(segments)} segmen (bahasa asal)")
-
-            # ── Save original ElevenLabs transcript before Gemini regrouping ──
-            el_original_dir = output_dir / "phase1_transcription"
-            el_original_dir.mkdir(parents=True, exist_ok=True)
-            el_original_path = el_original_dir / "elevenlabs_original_transcript.json"
-            el_original_data = []
-            for seg in segments:
-                seg_d = {
-                    "start": seg.start,
-                    "end": seg.end,
-                    "text": seg.text,
-                    "speaker": getattr(seg, "speaker", "SPEAKER_00"),
-                }
-                if hasattr(seg, "words") and seg.words:
-                    seg_d["words"] = [
-                        {"word": getattr(w, "word", ""), "start": getattr(w, "start", 0), "end": getattr(w, "end", 0)}
-                        for w in seg.words
-                    ]
-                el_original_data.append(seg_d)
-            with el_original_path.open("w", encoding="utf-8") as f:
-                json.dump({"segments": el_original_data}, f, ensure_ascii=False, indent=2)
-            log(f"✓ ElevenLabs original transcript saved: {el_original_path.name}")
-
-            # ── Auto-translate via Gemini if target language differs ──
-            # ElevenLabs transcribes in the original language, so we translate
-            # to the selected target language using Gemini.
-            if target_language and config.GEMINI_API_KEYS:
-                log(f"Auto-translating to '{target_language}' via Gemini...")
-                from processors.translator import TranslatorProcessor
-                translator = TranslatorProcessor(target_language=target_language)
-                segments, _ = await translator.translate(
-                    segments=segments,
-                    output_dir=output_dir / "phase2_translation",
-                    regroup=True,
-                )
-                log(f"✓ Auto-translate + word-level recheck selesai: {len(segments)} segmen → '{target_language}'")
-            elif not config.GEMINI_API_KEYS:
-                log("⚠ No GEMINI_API_KEYS configured — skipping auto-translate")
-
-        else:
-            # ── Standard WhisperX / faster-whisper path ──
-            pipeline = VideoSubtitlePipeline(
-                input_video=video_path,
-                output_dir=output_dir,
-                target_language=target_language,
-            )
-
-            segments, _ = await pipeline.transcriber.transcribe(
-                video_path=video_path,
-                output_dir=output_dir / "phase1_transcription",
-                num_speakers=job.num_speakers,
-                speaker_detection=job.speaker_detection,
-                model_key=model_key,
-            )
-            log(f"✓ Transkripsi selesai: {len(segments)} segmen ditemukan")
+            log(f"✓ Auto-translate + word-level recheck selesai: {len(segments)} segmen → '{target_language}'")
+        elif not config.GEMINI_API_KEYS:
+            log("⚠ No GEMINI_API_KEYS configured — skipping auto-translate")
 
         # Simpan transkripsi ke file JSON
         transcript_output_dir = output_dir / "phase1_transcription"
@@ -961,13 +954,11 @@ async def _run_render_pipeline(
             else:
                 log("Tidak ada cache Phase 1, menjalankan transkripsi...")
                 set_phase(1)
-                model_key = job.whisper_model or "large-v2"
                 segments, _ = await pipeline.transcriber.transcribe(
                     video_path=video_path,
                     output_dir=output_dir / "phase1_transcription",
                     num_speakers=job.num_speakers,
                     speaker_detection=job.speaker_detection,
-                    model_key=model_key,
                 )
                 log(f"✓ Phase 1 selesai: {len(segments)} segmen")
 
@@ -1306,8 +1297,6 @@ async def create_job_from_clip(
     target_language: str = Form("en"),
     num_speakers: int | None = Form(None),
     speaker_detection: bool = Form(True),
-    whisper_model: str = Form("large-v2"),
-    double_check: bool = Form(True),
 ):
     """Create an auto-subtitle job from an existing clip finder video file."""
     clip_file = Path(clip_path)
@@ -1333,23 +1322,12 @@ async def create_job_from_clip(
         transcribe_only=True,
         num_speakers=num_speakers,
         speaker_detection=speaker_detection,
-        whisper_model=whisper_model,
     )
     _jobs[job_id] = job
 
-    # Check for adjacent auto-sub file for double-check merge
-    autosub_path = _find_autosub_for_clip(clip_file) if double_check else None
-
-    if autosub_path:
-        task = asyncio.create_task(
-            _run_double_check_transcription(
-                job_id, clip_file, target_language, autosub_path
-            )
-        )
-    else:
-        task = asyncio.create_task(
-            _run_transcription_only(job_id, clip_file, target_language)
-        )
+    task = asyncio.create_task(
+        _run_transcription_only(job_id, clip_file, target_language)
+    )
     _job_tasks[job_id] = task
 
     return job.model_dump(exclude={"log_lines"})
@@ -1821,176 +1799,6 @@ def _find_autosub_for_clip(clip_path: Path) -> Path | None:
             return candidate
 
     return None
-
-
-async def _run_double_check_transcription(
-    job_id: str,
-    video_path: Path,
-    target_language: str,
-    autosub_path: Path,
-) -> None:
-    """Run WhisperX transcription, then merge with auto-subs using Double-Check."""
-    job = _jobs[job_id]
-    job.status = JobStatus.RUNNING
-    job.started_at = time.time()
-
-    output_dir = Path("./output") / job_id
-
-    def log(msg: str):
-        job.log_lines.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
-        logger.info("[Job {}] {}", job_id[:8], msg)
-
-    def set_phase(phase: int):
-        job.current_phase = phase
-        job.phase_label = PHASE_LABELS.get(phase, f"Phase {phase}")
-        job.progress_pct = round((phase - 1) / 4 * 100, 1)
-
-    try:
-        from main import VideoSubtitlePipeline
-        from processors.double_check import DoubleCheckMerger
-        from models.transcript import sanitize_timestamps
-
-        log(f"Starting Double-Check transcription: {video_path.name}")
-
-        # ── Step 1: Load auto-subs ──
-        log("Step 1/4: Loading auto-sub transcript...")
-        autosub_segments = DoubleCheckMerger.load_autosub_json(autosub_path)
-        log(f"  Loaded {len(autosub_segments)} auto-sub segments from {autosub_path.name}")
-
-        # ── Step 2: Run WhisperX ──
-        log("Step 2/4: Running WhisperX transcription...")
-        set_phase(1)
-
-        model_key = job.whisper_model or "large-v2"
-        model_info = config.WHISPER_MODELS.get(model_key, {})
-        log(f"  Whisper model: {model_info.get('label', model_key)}")
-
-        pipeline = VideoSubtitlePipeline(
-            input_video=video_path,
-            output_dir=output_dir,
-            target_language=target_language,
-        )
-
-        whisperx_segments, _ = await pipeline.transcriber.transcribe(
-            video_path=video_path,
-            output_dir=output_dir / "phase1_transcription",
-            num_speakers=job.num_speakers,
-            speaker_detection=job.speaker_detection,
-            model_key=model_key,
-        )
-        log(f"  WhisperX produced {len(whisperx_segments)} segments")
-
-        # ── Step 3: Double-Check merge ──
-        log("Step 3/4: Running Double-Check merge...")
-        merger = DoubleCheckMerger()
-        merged_segments, stats = merger.merge(
-            autosub_segments=autosub_segments,
-            whisperx_segments=whisperx_segments,
-        )
-
-        log(
-            f"  Double-Check complete: {stats.total_words} words — "
-            f"{stats.both_agree} agreed, {stats.autosub_only} autosub-only, "
-            f"{stats.whisperx_only} whisperx-only, "
-            f"{stats.autosub_preferred} autosub-preferred, "
-            f"{stats.whisperx_preferred} whisperx-preferred, "
-            f"{stats.interpolated} interpolated"
-        )
-
-        # ── Step 4: LLM review (optional) ──
-        debug_dir = output_dir / "double_check_debug"
-        if config.GEMINI_API_KEYS:
-            log("Step 4/4: LLM reviewing conflict words...")
-            merged_segments, llm_corrected = await merger.llm_review(
-                merged_segments=merged_segments,
-                api_keys=config.GEMINI_API_KEYS,
-                log_fn=log,
-                debug_dir=debug_dir,
-            )
-            stats.llm_corrected = llm_corrected
-            log(f"  LLM corrected {llm_corrected} words")
-        else:
-            log("Step 4/4: Skipped LLM review (no Gemini API keys)")
-
-        # ── Sanitize merged timestamps ──
-        merged_segments = sanitize_timestamps(merged_segments)
-
-        # ── Save merged transcript ──
-        transcript_output_dir = output_dir / "phase1_transcription"
-        transcript_output_dir.mkdir(parents=True, exist_ok=True)
-        transcript_file = transcript_output_dir / "source_transcript.json"
-
-        segments_data = []
-        for seg in merged_segments:
-            seg_dict = {
-                "start": seg.start,
-                "end": seg.end,
-                "text": seg.text,
-                "speaker": getattr(seg, "speaker", "SPEAKER_00"),
-            }
-            if hasattr(seg, "words") and seg.words:
-                seg_dict["words"] = [
-                    {
-                        "word": getattr(w, "word", getattr(w, "text", str(w))),
-                        "start": getattr(w, "start", 0),
-                        "end": getattr(w, "end", 0),
-                        "score": getattr(w, "score", 0),
-                        "source": getattr(w, "source", ""),
-                    }
-                    for w in seg.words
-                ]
-            segments_data.append(seg_dict)
-
-        with transcript_file.open("w", encoding="utf-8") as f:
-            json.dump({"segments": segments_data}, f, ensure_ascii=False, indent=2)
-
-        # ── Save debug info ──
-        debug_dir.mkdir(parents=True, exist_ok=True)
-
-        with (debug_dir / "autosub_input.json").open("w", encoding="utf-8") as f:
-            json.dump(autosub_segments, f, ensure_ascii=False, indent=2)
-        with (debug_dir / "whisperx_input.json").open("w", encoding="utf-8") as f:
-            whisperx_data = [s.to_dict() for s in whisperx_segments]
-            json.dump(whisperx_data, f, ensure_ascii=False, indent=2)
-        with (debug_dir / "merge_stats.json").open("w", encoding="utf-8") as f:
-            import dataclasses as _dc
-            json.dump(_dc.asdict(stats), f, indent=2)
-
-        log(f"  Debug files saved to {debug_dir}")
-
-        # ── Done ──
-        job.transcript_path = str(transcript_file)
-        job.status = JobStatus.COMPLETED
-        job.current_phase = 1
-        job.progress_pct = 25.0
-        job.phase_label = "Double-Check transcription complete — Ready for preview"
-        job.completed_at = time.time()
-        elapsed = round(job.completed_at - job.started_at, 1)
-        log(f"Double-Check transcription complete in {elapsed}s → Siap untuk preview")
-
-        # ── Persist metadata ──
-        try:
-            meta_path = output_dir / "job_meta.json"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            with meta_path.open("w", encoding="utf-8") as f:
-                json.dump(
-                    job.model_dump(exclude={"log_lines"}),
-                    f, ensure_ascii=False, indent=2,
-                )
-        except Exception as meta_exc:
-            logger.warning("[Job {}] Could not save job_meta.json: {}", job_id[:8], meta_exc)
-
-    except asyncio.CancelledError:
-        job.status = JobStatus.CANCELLED
-        job.phase_label = "Cancelled"
-        log("Job dibatalkan")
-
-    except Exception as exc:
-        job.status = JobStatus.FAILED
-        job.phase_label = "Failed"
-        job.error = str(exc)
-        log(f"Error: {exc}")
-        logger.exception("[Job {}] Double-check transcription failed", job_id[:8])
 
 
 # ─── Short Maker ─────────────────────────────────────────────────────────────

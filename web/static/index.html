@@ -93,12 +93,9 @@
                 >Faster and Cleaner</span
               >
             </h1>
-            <p class="hero-subtitle">
-              Upload video, pilih bahasa target, lalu lanjutkan ke preview
-              subtitle untuk edit sebelum render final.
-            </p>
+            
           </div>
-          <div class="hero-steps" aria-label="Workflow steps">
+          <!-- <div class="hero-steps" aria-label="Workflow steps">
             <div class="hero-step-item">
               <span class="hero-step-num">1</span>
               <span class="hero-step-label">Upload Video</span>
@@ -111,7 +108,7 @@
               <span class="hero-step-num">3</span>
               <span class="hero-step-label">Render Output</span>
             </div>
-          </div>
+          </div> -->
         </div>
       </section>
 
@@ -130,7 +127,7 @@
                   transkripsi.
                 </p>
               </div>
-              <span class="panel-badge">Step 1</span>
+              
             </div>
 
             <form id="uploadForm" class="upload-form">
@@ -196,59 +193,19 @@
                 />
               </div>
 
-              <!-- Or pick from Clip Finder -->
-              <div class="clip-picker-section" id="clipPickerSection">
-                <div class="clip-picker-divider">
-                  <span class="clip-picker-divider-line"></span>
-                  <span class="clip-picker-divider-text">or</span>
-                  <span class="clip-picker-divider-line"></span>
-                </div>
-                <button
-                  type="button"
-                  class="btn-clip-picker"
-                  id="clipPickerBtn"
-                >
-                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                    <rect
-                      x="2"
-                      y="4"
-                      width="14"
-                      height="10"
-                      rx="2"
-                      stroke="currentColor"
-                      stroke-width="1.5"
-                    />
-                    <path d="M7 7.5l4.5 2.5-4.5 2.5v-5z" fill="currentColor" />
-                  </svg>
-                  <span>Pick from Clip Finder</span>
-                </button>
-                <div class="clip-picker-list hidden" id="clipPickerList">
-                  <!-- Clip items rendered by JS -->
-                </div>
-              </div>
-
               <!-- Settings -->
               <div class="settings-grid">
                 <div class="setting-group">
-                  <label class="setting-label">Transcription Model</label>
+                  <label class="setting-label">Transcription Engine</label>
                   <p class="setting-help">
-                    Model yang digunakan untuk speech-to-text transcription.
+                    Cloud-based ElevenLabs Speech-to-Text. Auto-translate via Gemini ke Target Language.
                   </p>
                   <select
                     class="setting-select"
                     id="whisperModel"
                     name="whisper_model"
                   >
-                    <option value="large-v2" selected>
-                      🧠 WhisperX Large-V2 — General content
-                    </option>
-                    <option value="large-v3">
-                      🧠 WhisperX Large-V3 — Improved accuracy
-                    </option>
-                    <option value="anime">
-                      🎌 Anime Whisper — Optimized for anime/Japanese
-                    </option>
-                    <option value="elevenlabs">
+                    <option value="elevenlabs" selected>
                       🔊 ElevenLabs STT — Cloud-based, auto-translate via Gemini
                     </option>
                   </select>
@@ -531,7 +488,7 @@
             </div>
             <h2 class="transcribing-title">Transcribing Voice...</h2>
             <p class="transcribing-sub" id="transcribingStatus">
-              Running WhisperX speech-to-text on your video
+              Running ElevenLabs speech-to-text on your video
             </p>
             <div class="transcribing-file" id="transcribingFile"></div>
             <div class="transcribing-progress">
@@ -595,6 +552,10 @@
 
             <!-- Timeline Component -->
             <div class="timeline-panel" id="timelinePanel">
+              <!-- Drag handle to resize timeline height -->
+              <div class="timeline-resize-handle" id="timelineResizeHandle">
+                <div class="timeline-resize-handle-grip"></div>
+              </div>
               <div class="timeline-toolbar">
                 <div class="timeline-playback-btns">
                   <button class="btn-secondary btn-sm" id="previewPlayBtn">
@@ -628,6 +589,14 @@
                   >
                     Del
                   </button>
+                  <button
+                    class="btn-secondary btn-sm"
+                    id="duplicateSegmentBtn"
+                    title="Duplicate selected segment (Ctrl+D)"
+                    disabled
+                  >
+                    Dup
+                  </button>
                   <span
                     class="tl-zoom-badge"
                     id="tlZoomBadge"
@@ -640,7 +609,7 @@
                 </div>
               </div>
               <!-- Timeline body: labels column + scrollable ruler+tracks -->
-              <div class="timeline-body">
+              <div class="timeline-body" id="timelineBody">
                 <!-- Speaker labels column (fixed, does not scroll horizontally) -->
                 <div class="timeline-labels-col" id="timelineLabelsCol">
                   <div class="timeline-ruler-spacer"></div>
@@ -753,395 +722,553 @@
             </div>
           </div>
 
-          <!-- Right: Font & Style Controls -->
+          <!-- Right: Style / Effects / Filters Controls -->
           <div class="preview-right">
             <div class="style-panel">
-              <div class="style-panel-header">
-                <span class="style-panel-title">Subtitle Style</span>
-                <span class="panel-badge">Design</span>
+              <!-- Tab Bar (horizontal scroll when overflow) -->
+              <div class="style-panel-tabs" id="stylePanelTabs">
+                <button class="sp-tab active" data-sp-tab="subtitle-style">Subtitle Style</button>
+                <button class="sp-tab" data-sp-tab="effects">Effects</button>
+                <button class="sp-tab" data-sp-tab="filters">Filters</button>
               </div>
 
-              <!-- Preset Styles -->
-              <div class="style-section">
-                <label class="style-label">Quick Presets</label>
-                <div class="preset-grid" id="presetGrid">
-                  <button
-                    class="preset-btn active"
-                    data-preset="vtuber-pop"
-                    title="VTuber Pop"
-                  >
-                    <span
-                      class="preset-preview"
-                      style="
-                        font-family: &quot;Bangers&quot;, cursive;
-                        color: #fff;
-                        -webkit-text-stroke: 2px #ff006e;
-                        font-size: 14px;
-                      "
-                      >Pop!</span
+              <!-- ═══ TAB: Subtitle Style ═══ -->
+              <div class="sp-tab-pane active" id="spPane-subtitle-style">
+
+                <!-- Preset Styles -->
+                <div class="style-section">
+                  <label class="style-label">Quick Presets</label>
+                  <div class="preset-grid" id="presetGrid">
+                    <button
+                      class="preset-btn active"
+                      data-preset="vtuber-pop"
+                      title="VTuber Pop"
                     >
-                    <span class="preset-name">VTuber Pop</span>
-                  </button>
-                  <button
-                    class="preset-btn"
-                    data-preset="vtuber-neon"
-                    title="Neon Glow"
-                  >
-                    <span
-                      class="preset-preview"
-                      style="
-                        font-family: &quot;Orbitron&quot;, sans-serif;
-                        color: #00f5ff;
-                        text-shadow: 0 0 8px #00f5ff;
-                        font-size: 10px;
-                      "
-                      >NEON</span
+                      <span
+                        class="preset-preview"
+                        style="
+                          font-family: &quot;Bangers&quot;, cursive;
+                          color: #fff;
+                          -webkit-text-stroke: 2px #ff006e;
+                          font-size: 14px;
+                        "
+                        >Pop!</span
+                      >
+                      <span class="preset-name">VTuber Pop</span>
+                    </button>
+                    <button
+                      class="preset-btn"
+                      data-preset="vtuber-neon"
+                      title="Neon Glow"
                     >
-                    <span class="preset-name">Neon</span>
-                  </button>
-                  <button
-                    class="preset-btn"
-                    data-preset="anime-bold"
-                    title="Anime Bold"
-                  >
-                    <span
-                      class="preset-preview"
-                      style="
-                        font-family: &quot;Fredoka One&quot;, cursive;
-                        color: #ffe600;
-                        -webkit-text-stroke: 2px #000;
-                        font-size: 13px;
-                      "
-                      >Anime</span
+                      <span
+                        class="preset-preview"
+                        style="
+                          font-family: &quot;Orbitron&quot;, sans-serif;
+                          color: #00f5ff;
+                          text-shadow: 0 0 8px #00f5ff;
+                          font-size: 10px;
+                        "
+                        >NEON</span
+                      >
+                      <span class="preset-name">Neon</span>
+                    </button>
+                    <button
+                      class="preset-btn"
+                      data-preset="anime-bold"
+                      title="Anime Bold"
                     >
-                    <span class="preset-name">Anime Bold</span>
-                  </button>
-                  <button
-                    class="preset-btn"
-                    data-preset="clean-white"
-                    title="Clean White"
-                  >
-                    <span
-                      class="preset-preview"
-                      style="
-                        font-family: &quot;Inter&quot;, sans-serif;
-                        color: #fff;
-                        text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
-                        font-size: 12px;
-                      "
-                      >Clean</span
+                      <span
+                        class="preset-preview"
+                        style="
+                          font-family: &quot;Fredoka One&quot;, cursive;
+                          color: #ffe600;
+                          -webkit-text-stroke: 2px #000;
+                          font-size: 13px;
+                        "
+                        >Anime</span
+                      >
+                      <span class="preset-name">Anime Bold</span>
+                    </button>
+                    <button
+                      class="preset-btn"
+                      data-preset="clean-white"
+                      title="Clean White"
                     >
-                    <span class="preset-name">Clean</span>
-                  </button>
-                  <button
-                    class="preset-btn"
-                    data-preset="retro-game"
-                    title="Retro Game"
-                  >
-                    <span
-                      class="preset-preview"
-                      style="
-                        font-family: &quot;Press Start 2P&quot;, monospace;
-                        color: #00ff41;
-                        font-size: 7px;
-                      "
-                      >GAME</span
+                      <span
+                        class="preset-preview"
+                        style="
+                          font-family: &quot;Inter&quot;, sans-serif;
+                          color: #fff;
+                          text-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+                          font-size: 12px;
+                        "
+                        >Clean</span
+                      >
+                      <span class="preset-name">Clean</span>
+                    </button>
+                    <button
+                      class="preset-btn"
+                      data-preset="retro-game"
+                      title="Retro Game"
                     >
-                    <span class="preset-name">Retro</span>
-                  </button>
-                  <button
-                    class="preset-btn"
-                    data-preset="idol-pink"
-                    title="Idol Pink"
-                  >
-                    <span
-                      class="preset-preview"
-                      style="
-                        font-family: &quot;Righteous&quot;, cursive;
-                        color: #ff85c2;
-                        -webkit-text-stroke: 1px #fff;
-                        font-size: 12px;
-                      "
-                      >Idol✦</span
+                      <span
+                        class="preset-preview"
+                        style="
+                          font-family: &quot;Press Start 2P&quot;, monospace;
+                          color: #00ff41;
+                          font-size: 7px;
+                        "
+                        >GAME</span
+                      >
+                      <span class="preset-name">Retro</span>
+                    </button>
+                    <button
+                      class="preset-btn"
+                      data-preset="idol-pink"
+                      title="Idol Pink"
                     >
-                    <span class="preset-name">Idol</span>
-                  </button>
+                      <span
+                        class="preset-preview"
+                        style="
+                          font-family: &quot;Righteous&quot;, cursive;
+                          color: #ff85c2;
+                          -webkit-text-stroke: 1px #fff;
+                          font-size: 12px;
+                        "
+                        >Idol✦</span
+                      >
+                      <span class="preset-name">Idol</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <!-- Font Family -->
-              <div class="style-section">
-                <label class="style-label">Font Family</label>
-                <select class="setting-select" id="fontFamily">
-                  <option value="'Inter', sans-serif">Inter (Default)</option>
-                  <option value="'Bangers', cursive">
-                    Bangers (VTuber Pop)
-                  </option>
-                  <option value="'Fredoka One', cursive">
-                    Fredoka One (Anime)
-                  </option>
-                  <option value="'Bebas Neue', cursive">
-                    Bebas Neue (Bold)
-                  </option>
-                  <option value="'Righteous', cursive">Righteous (Idol)</option>
-                  <option value="'Orbitron', sans-serif">
-                    Orbitron (Sci-Fi)
-                  </option>
-                  <option value="'Press Start 2P', monospace">
-                    Press Start 2P (Retro)
-                  </option>
-                  <option value="'JetBrains Mono', monospace">
-                    JetBrains Mono (Code)
-                  </option>
-                  <option value="Impact, sans-serif">Impact (Meme)</option>
-                  <option value="Arial, sans-serif">Arial</option>
-                </select>
-              </div>
+                <!-- Font Family -->
+                <div class="style-section">
+                  <label class="style-label">Font Family</label>
+                  <select class="setting-select" id="fontFamily">
+                    <option value="'Inter', sans-serif">Inter (Default)</option>
+                    <option value="'Bangers', cursive">
+                      Bangers (VTuber Pop)
+                    </option>
+                    <option value="'Fredoka One', cursive">
+                      Fredoka One (Anime)
+                    </option>
+                    <option value="'Bebas Neue', cursive">
+                      Bebas Neue (Bold)
+                    </option>
+                    <option value="'Righteous', cursive">Righteous (Idol)</option>
+                    <option value="'Orbitron', sans-serif">
+                      Orbitron (Sci-Fi)
+                    </option>
+                    <option value="'Press Start 2P', monospace">
+                      Press Start 2P (Retro)
+                    </option>
+                    <option value="'JetBrains Mono', monospace">
+                      JetBrains Mono (Code)
+                    </option>
+                    <option value="Impact, sans-serif">Impact (Meme)</option>
+                    <option value="Arial, sans-serif">Arial</option>
+                  </select>
+                </div>
 
-              <!-- Font Size -->
-              <div class="style-section">
-                <label class="style-label"
-                  >Font Size
-                  <span class="style-value" id="fontSizeVal">42</span>px</label
-                >
-                <input
-                  type="range"
-                  class="style-range"
-                  id="fontSize"
-                  min="20"
-                  max="90"
-                  value="42"
-                  step="1"
-                />
-              </div>
-
-              <!-- Font Color -->
-              <div class="style-section">
-                <label class="style-label">Text Color</label>
-                <div class="color-row">
+                <!-- Font Size -->
+                <div class="style-section">
+                  <label class="style-label"
+                    >Font Size
+                    <span class="style-value" id="fontSizeVal">42</span>px</label
+                  >
                   <input
-                    type="color"
-                    class="color-input"
-                    id="fontColor"
-                    value="#ffffff"
+                    type="range"
+                    class="style-range"
+                    id="fontSize"
+                    min="20"
+                    max="90"
+                    value="42"
+                    step="1"
                   />
-                  <div class="color-swatches" id="colorSwatches">
-                    <button
-                      class="swatch active"
-                      data-color="#ffffff"
-                      style="background: #ffffff"
-                      title="White"
-                    ></button>
-                    <button
-                      class="swatch"
-                      data-color="#ffe600"
-                      style="background: #ffe600"
-                      title="Yellow"
-                    ></button>
-                    <button
-                      class="swatch"
-                      data-color="#ff006e"
-                      style="background: #ff006e"
-                      title="Pink"
-                    ></button>
-                    <button
-                      class="swatch"
-                      data-color="#00f5ff"
-                      style="background: #00f5ff"
-                      title="Cyan"
-                    ></button>
-                    <button
-                      class="swatch"
-                      data-color="#00ff41"
-                      style="background: #00ff41"
-                      title="Green"
-                    ></button>
-                    <button
-                      class="swatch"
-                      data-color="#ff8c00"
-                      style="background: #ff8c00"
-                      title="Orange"
-                    ></button>
+                </div>
+
+                <!-- Font Color -->
+                <div class="style-section">
+                  <label class="style-label">Text Color</label>
+                  <div class="color-row">
+                    <input
+                      type="color"
+                      class="color-input"
+                      id="fontColor"
+                      value="#ffffff"
+                    />
+                    <div class="color-swatches" id="colorSwatches">
+                      <button
+                        class="swatch active"
+                        data-color="#ffffff"
+                        style="background: #ffffff"
+                        title="White"
+                      ></button>
+                      <button
+                        class="swatch"
+                        data-color="#ffe600"
+                        style="background: #ffe600"
+                        title="Yellow"
+                      ></button>
+                      <button
+                        class="swatch"
+                        data-color="#ff006e"
+                        style="background: #ff006e"
+                        title="Pink"
+                      ></button>
+                      <button
+                        class="swatch"
+                        data-color="#00f5ff"
+                        style="background: #00f5ff"
+                        title="Cyan"
+                      ></button>
+                      <button
+                        class="swatch"
+                        data-color="#00ff41"
+                        style="background: #00ff41"
+                        title="Green"
+                      ></button>
+                      <button
+                        class="swatch"
+                        data-color="#ff8c00"
+                        style="background: #ff8c00"
+                        title="Orange"
+                      ></button>
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <!-- Stroke -->
-              <div class="style-section">
-                <label class="style-label">
-                  <span>Stroke (Outline)</span>
-                  <label class="toggle toggle-sm">
-                    <input type="checkbox" id="strokeEnabled" checked />
-                    <span class="toggle-slider"></span>
+                <!-- Stroke -->
+                <div class="style-section">
+                  <label class="style-label">
+                    <span>Stroke (Outline)</span>
+                    <label class="toggle toggle-sm">
+                      <input type="checkbox" id="strokeEnabled" checked />
+                      <span class="toggle-slider"></span>
+                    </label>
                   </label>
-                </label>
-                <div class="stroke-controls" id="strokeControls">
-                  <div class="stroke-row">
-                    <div class="stroke-field">
-                      <span class="stroke-sublabel">Color</span>
-                      <input
-                        type="color"
-                        class="color-input"
-                        id="strokeColor"
-                        value="#000000"
-                      />
+                  <div class="stroke-controls" id="strokeControls">
+                    <div class="stroke-row">
+                      <div class="stroke-field">
+                        <span class="stroke-sublabel">Color</span>
+                        <input
+                          type="color"
+                          class="color-input"
+                          id="strokeColor"
+                          value="#000000"
+                        />
+                      </div>
+                      <div class="stroke-field">
+                        <span class="stroke-sublabel"
+                          >Width
+                          <span class="style-value" id="strokeWidthVal">3</span
+                          >px</span
+                        >
+                        <input
+                          type="range"
+                          class="style-range"
+                          id="strokeWidth"
+                          min="0"
+                          max="12"
+                          value="3"
+                          step="1"
+                        />
+                      </div>
                     </div>
-                    <div class="stroke-field">
-                      <span class="stroke-sublabel"
-                        >Width
-                        <span class="style-value" id="strokeWidthVal">3</span
-                        >px</span
-                      >
-                      <input
-                        type="range"
-                        class="style-range"
-                        id="strokeWidth"
-                        min="0"
-                        max="12"
-                        value="3"
-                        step="1"
-                      />
-                    </div>
+                    <!-- Extra strokes container -->
+                    <div id="extraStrokesContainer"></div>
+                    <button type="button" class="add-stroke-btn" id="addStrokeBtn" title="Add another stroke layer">
+                      + Add Stroke
+                    </button>
                   </div>
                 </div>
-              </div>
 
-              <!-- Text Shadow / Glow -->
-              <div class="style-section">
-                <label class="style-label">
-                  <span>Glow / Shadow</span>
-                  <label class="toggle toggle-sm">
-                    <input type="checkbox" id="glowEnabled" />
-                    <span class="toggle-slider"></span>
+                <!-- Text Shadow / Glow -->
+                <div class="style-section">
+                  <label class="style-label">
+                    <span>Glow / Shadow</span>
+                    <label class="toggle toggle-sm">
+                      <input type="checkbox" id="glowEnabled" />
+                      <span class="toggle-slider"></span>
+                    </label>
                   </label>
-                </label>
-                <div class="glow-controls hidden" id="glowControls">
-                  <div class="stroke-row">
-                    <div class="stroke-field">
-                      <span class="stroke-sublabel">Color</span>
-                      <input
-                        type="color"
-                        class="color-input"
-                        id="glowColor"
-                        value="#ff006e"
-                      />
-                    </div>
-                    <div class="stroke-field">
-                      <span class="stroke-sublabel"
-                        >Blur
-                        <span class="style-value" id="glowBlurVal">12</span
-                        >px</span
-                      >
-                      <input
-                        type="range"
-                        class="style-range"
-                        id="glowBlur"
-                        min="0"
-                        max="40"
-                        value="12"
-                        step="1"
-                      />
+                  <div class="glow-controls hidden" id="glowControls">
+                    <div class="stroke-row">
+                      <div class="stroke-field">
+                        <span class="stroke-sublabel">Color</span>
+                        <input
+                          type="color"
+                          class="color-input"
+                          id="glowColor"
+                          value="#ff006e"
+                        />
+                      </div>
+                      <div class="stroke-field">
+                        <span class="stroke-sublabel"
+                          >Blur
+                          <span class="style-value" id="glowBlurVal">12</span
+                          >px</span
+                        >
+                        <input
+                          type="range"
+                          class="style-range"
+                          id="glowBlur"
+                          min="0"
+                          max="40"
+                          value="12"
+                          step="1"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <!-- Animation Style -->
-              <div class="style-section">
-                <label class="style-label">Animation Style</label>
-                <div class="anim-grid" id="animGrid">
-                  <button class="anim-btn active" data-anim="word-pop">
-                    Word Pop
-                  </button>
-                  <button class="anim-btn" data-anim="narration-pop">
-                    Narration Pop
-                  </button>
-                  <button class="anim-btn" data-anim="bounce-in">
-                    Bounce In
-                  </button>
-                  <button class="anim-btn" data-anim="slide-up">
-                    Slide Up
-                  </button>
-                  <button class="anim-btn" data-anim="zoom-flash">
-                    Zoom Flash
-                  </button>
-                  <button class="anim-btn" data-anim="typewriter">
-                    Typewriter
-                  </button>
-                  <button class="anim-btn" data-anim="karaoke">
-                    Karaoke HL
-                  </button>
+                <!-- Animation Style -->
+                <div class="style-section">
+                  <label class="style-label">Animation Style</label>
+                  <div class="anim-grid" id="animGrid">
+                    <button class="anim-btn active" data-anim="word-pop">
+                      Word Pop
+                    </button>
+                    <button class="anim-btn" data-anim="narration-pop">
+                      Narration Pop
+                    </button>
+                    <button class="anim-btn" data-anim="bounce-in">
+                      Bounce In
+                    </button>
+                    <button class="anim-btn" data-anim="slide-up">
+                      Slide Up
+                    </button>
+                    <button class="anim-btn" data-anim="zoom-flash">
+                      Zoom Flash
+                    </button>
+                    <button class="anim-btn" data-anim="typewriter">
+                      Typewriter
+                    </button>
+                    <button class="anim-btn" data-anim="karaoke">
+                      Karaoke HL
+                    </button>
+                  </div>
                 </div>
-              </div>
 
-              <!-- Subtitle Position -->
-              <div class="style-section">
-                <label class="style-label">Subtitle Position</label>
-                <div class="position-grid" id="positionGrid">
-                  <button class="pos-btn" data-pos="top">Top</button>
-                  <button class="pos-btn active" data-pos="bottom">
-                    Bottom
-                  </button>
-                  <button class="pos-btn" data-pos="center">Center</button>
+                <!-- Subtitle Position -->
+                <div class="style-section">
+                  <label class="style-label">Subtitle Position</label>
+                  <div class="position-grid" id="positionGrid">
+                    <button class="pos-btn" data-pos="top">Top</button>
+                    <button class="pos-btn active" data-pos="bottom">
+                      Bottom
+                    </button>
+                    <button class="pos-btn" data-pos="center">Center</button>
+                  </div>
                 </div>
-              </div>
 
-              <!-- Background Box -->
-              <div class="style-section">
-                <label class="style-label">
-                  <span>Background Box</span>
-                  <label class="toggle toggle-sm">
-                    <input type="checkbox" id="bgBoxEnabled" />
-                    <span class="toggle-slider"></span>
+                <!-- Background Box -->
+                <div class="style-section">
+                  <label class="style-label">
+                    <span>Background Box</span>
+                    <label class="toggle toggle-sm">
+                      <input type="checkbox" id="bgBoxEnabled" />
+                      <span class="toggle-slider"></span>
+                    </label>
                   </label>
-                </label>
-                <div class="bgbox-controls hidden" id="bgBoxControls">
-                  <div class="stroke-row">
-                    <div class="stroke-field">
-                      <span class="stroke-sublabel">Color</span>
-                      <input
-                        type="color"
-                        class="color-input"
-                        id="bgBoxColor"
-                        value="#000000"
-                      />
-                    </div>
-                    <div class="stroke-field">
-                      <span class="stroke-sublabel"
-                        >Opacity
-                        <span class="style-value" id="bgOpacityVal">60</span
-                        >%</span
-                      >
-                      <input
-                        type="range"
-                        class="style-range"
-                        id="bgOpacity"
-                        min="0"
-                        max="100"
-                        value="60"
-                        step="5"
-                      />
+                  <div class="bgbox-controls hidden" id="bgBoxControls">
+                    <div class="stroke-row">
+                      <div class="stroke-field">
+                        <span class="stroke-sublabel">Color</span>
+                        <input
+                          type="color"
+                          class="color-input"
+                          id="bgBoxColor"
+                          value="#000000"
+                        />
+                      </div>
+                      <div class="stroke-field">
+                        <span class="stroke-sublabel"
+                          >Opacity
+                          <span class="style-value" id="bgOpacityVal">60</span
+                          >%</span
+                        >
+                        <input
+                          type="range"
+                          class="style-range"
+                          id="bgOpacity"
+                          min="0"
+                          max="100"
+                          value="60"
+                          step="5"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
-              <!-- Per-Speaker Colors -->
-              <div
-                class="style-section"
-                id="speakerStylesSection"
-                style="display: none"
-              >
-                <label class="style-label">
-                  Per-Speaker Colors
-                  <span class="speaker-style-hint">Multi-speaker detected</span>
-                </label>
-                <div class="speaker-styles-panel" id="speakerStylesPanel">
-                  <!-- Rows injected dynamically by app.js -->
+                <!-- Per-Speaker Colors -->
+                <div
+                  class="style-section"
+                  id="speakerStylesSection"
+                  style="display: none"
+                >
+                  <label class="style-label">
+                    Per-Speaker Colors
+                    <span class="speaker-style-hint">Multi-speaker detected</span>
+                  </label>
+                  <div class="speaker-styles-panel" id="speakerStylesPanel">
+                    <!-- Rows injected dynamically by app.js -->
+                  </div>
                 </div>
-              </div>
 
-              <!-- Actions -->
+              </div><!-- /spPane-subtitle-style -->
+
+              <!-- ═══ TAB: Effects ═══ -->
+              <div class="sp-tab-pane" id="spPane-effects">
+                <p class="fx-tab-hint">Drag an effect preset onto the timeline effects track to apply it.</p>
+
+                <!-- ── Effect Settings Panel (shown when FX selected) ── -->
+                <div class="fx-settings-panel" id="fxSettingsPanel" style="display:none;">
+                  <div class="fx-settings-header">
+                    <span class="fx-settings-title" id="fxSettingsTitle">Effect Settings</span>
+                    <button class="btn-icon-only fx-settings-close" id="fxSettingsClose" title="Close">✕</button>
+                  </div>
+                  <div class="fx-settings-body" id="fxSettingsBody">
+                    <!-- Dynamic content injected by effects.js -->
+                  </div>
+                </div>
+
+                <div class="style-section">
+                  <label class="style-label">Visual Effects</label>
+                  <div class="fx-preset-grid" id="fxPresetGrid">
+                    <div class="fx-preset-card" draggable="true" data-fx-type="red-flash" title="Red Flash — red overlay + loud voice">
+                      <div class="fx-preset-icon" style="background: rgba(255,0,0,0.25); color: #ff4444;">🔴</div>
+                      <div class="fx-preset-info">
+                        <span class="fx-preset-name">Red Flash</span>
+                        <span class="fx-preset-desc">Red overlay + voice boost</span>
+                      </div>
+                    </div>
+                    <div class="fx-preset-card" draggable="true" data-fx-type="zoom-vtuber" title="Auto Zoom — zoom into VTuber/face area">
+                      <div class="fx-preset-icon" style="background: rgba(99,102,241,0.25); color: #818cf8;">🔍</div>
+                      <div class="fx-preset-info">
+                        <span class="fx-preset-name">Auto Zoom</span>
+                        <span class="fx-preset-desc">Zoom into VTuber area</span>
+                      </div>
+                    </div>
+                    <div class="fx-preset-card" draggable="true" data-fx-type="shake" title="Screen Shake — quick camera shake">
+                      <div class="fx-preset-icon" style="background: rgba(255,165,0,0.25); color: #ffa500;">📳</div>
+                      <div class="fx-preset-info">
+                        <span class="fx-preset-name">Shake</span>
+                        <span class="fx-preset-desc">Camera shake effect</span>
+                      </div>
+                    </div>
+                    <div class="fx-preset-card" draggable="true" data-fx-type="flash-white" title="Flash White — bright flash transition">
+                      <div class="fx-preset-icon" style="background: rgba(255,255,255,0.2); color: #ffffff;">💥</div>
+                      <div class="fx-preset-info">
+                        <span class="fx-preset-name">Flash White</span>
+                        <span class="fx-preset-desc">Bright flash burst</span>
+                      </div>
+                    </div>
+                    <div class="fx-preset-card" draggable="true" data-fx-type="zoom-in-center" title="Zoom Center — slow zoom into center">
+                      <div class="fx-preset-icon" style="background: rgba(34,197,94,0.25); color: #4ade80;">🎯</div>
+                      <div class="fx-preset-info">
+                        <span class="fx-preset-name">Zoom Center</span>
+                        <span class="fx-preset-desc">Slow zoom to center</span>
+                      </div>
+                    </div>
+                    <div class="fx-preset-card" draggable="true" data-fx-type="vignette" title="Vignette — dark edge focus">
+                      <div class="fx-preset-icon" style="background: rgba(0,0,0,0.3); color: #888;">🌑</div>
+                      <div class="fx-preset-info">
+                        <span class="fx-preset-name">Vignette</span>
+                        <span class="fx-preset-desc">Dark edges focus</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="style-section">
+                  <label class="style-label">Audio Effects</label>
+                  <div class="fx-preset-grid" id="fxAudioPresetGrid">
+                    <div class="fx-preset-card" draggable="true" data-fx-type="volume-boost" title="Volume Boost — increase audio volume">
+                      <div class="fx-preset-icon" style="background: rgba(255,230,0,0.25); color: #ffe600;">🔊</div>
+                      <div class="fx-preset-info">
+                        <span class="fx-preset-name">Volume Boost</span>
+                        <span class="fx-preset-desc">Adjustable audio boost</span>
+                      </div>
+                    </div>
+                    <div class="fx-preset-card" draggable="true" data-fx-type="bass-boost" title="Bass Boost — heavier low frequencies">
+                      <div class="fx-preset-icon" style="background: rgba(139,92,246,0.25); color: #a78bfa;">🎵</div>
+                      <div class="fx-preset-info">
+                        <span class="fx-preset-name">Bass Boost</span>
+                        <span class="fx-preset-desc">Adjustable bass frequencies</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="style-section">
+                  <label class="style-label">Timeline Effects</label>
+                  <p class="fx-track-hint">Effects added to timeline: <strong id="fxTrackCount">0</strong></p>
+                  <div class="fx-layer-controls">
+                    <span class="fx-layer-label">Layers: <strong id="fxLayerCountDisplay">1</strong></span>
+                    <button class="btn-icon btn-sm" id="removeFxLayerBtn" title="Remove layer" disabled>−</button>
+                    <button class="btn-icon btn-sm" id="addFxLayerBtn" title="Add layer">+</button>
+                  </div>
+                  <button class="btn-secondary btn-sm" id="clearAllFxBtn">Clear All Effects</button>
+                </div>
+              </div><!-- /spPane-effects -->
+
+              <!-- ═══ TAB: Filters ═══ -->
+              <div class="sp-tab-pane" id="spPane-filters">
+                <div class="style-section">
+                  <label class="style-label">Color Grading</label>
+                  <div class="filter-grid" id="filterGrid">
+                    <button class="filter-btn active" data-filter="none" title="No filter">
+                      <span class="filter-preview" style="background: linear-gradient(135deg, #333, #666);">—</span>
+                      <span class="filter-name">None</span>
+                    </button>
+                    <button class="filter-btn" data-filter="warm" title="Warm tones">
+                      <span class="filter-preview" style="background: linear-gradient(135deg, #b45309, #f59e0b);">☀</span>
+                      <span class="filter-name">Warm</span>
+                    </button>
+                    <button class="filter-btn" data-filter="cool" title="Cool tones">
+                      <span class="filter-preview" style="background: linear-gradient(135deg, #1e40af, #3b82f6);">❄</span>
+                      <span class="filter-name">Cool</span>
+                    </button>
+                    <button class="filter-btn" data-filter="vintage" title="Vintage look">
+                      <span class="filter-preview" style="background: linear-gradient(135deg, #92400e, #d97706);">📷</span>
+                      <span class="filter-name">Vintage</span>
+                    </button>
+                    <button class="filter-btn" data-filter="high-contrast" title="High contrast">
+                      <span class="filter-preview" style="background: linear-gradient(135deg, #000, #fff);">◐</span>
+                      <span class="filter-name">Hi-Con</span>
+                    </button>
+                    <button class="filter-btn" data-filter="anime-boost" title="Anime vivid colors">
+                      <span class="filter-preview" style="background: linear-gradient(135deg, #ec4899, #8b5cf6);">🎌</span>
+                      <span class="filter-name">Anime</span>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="style-section">
+                  <label class="style-label">Brightness
+                    <span class="style-value" id="brightnessVal">0</span></label>
+                  <input type="range" class="style-range" id="brightnessRange" min="-50" max="50" value="0" step="1" />
+                </div>
+
+                <div class="style-section">
+                  <label class="style-label">Contrast
+                    <span class="style-value" id="contrastVal">0</span></label>
+                  <input type="range" class="style-range" id="contrastRange" min="-50" max="50" value="0" step="1" />
+                </div>
+
+                <div class="style-section">
+                  <label class="style-label">Saturation
+                    <span class="style-value" id="saturationVal">0</span></label>
+                  <input type="range" class="style-range" id="saturationRange" min="-100" max="100" value="0" step="1" />
+                </div>
+              </div><!-- /spPane-filters -->
+
+              <!-- Actions (always visible at bottom) -->
               <div class="style-actions">
                 <div class="save-group">
                   <button
@@ -1330,6 +1457,56 @@
               </select>
             </div>
 
+            <!-- Detection Mode -->
+            <div class="cf-field">
+              <label class="setting-label">Detection Mode</label>
+              <div class="cf-mode-toggle" role="radiogroup" aria-label="Detection mode">
+                <button
+                  type="button"
+                  class="cf-mode-option active"
+                  id="cfModeSingle"
+                  data-mode="single-shot"
+                  role="radio"
+                  aria-checked="true"
+                >
+                  <span class="cf-mode-title">Single-Shot</span>
+                  <span class="cf-mode-sub">Fast · 1 LLM call</span>
+                </button>
+                <button
+                  type="button"
+                  class="cf-mode-option"
+                  id="cfModeMulti"
+                  data-mode="multi-stage"
+                  role="radio"
+                  aria-checked="false"
+                >
+                  <span class="cf-mode-title">Multi-Stage</span>
+                  <span class="cf-mode-sub">Higher quality · 8+ LLM calls</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Multimodal Signals -->
+            <div class="cf-field">
+              <label class="setting-label">Multimodal Signals</label>
+              <div class="cf-signal-toggles">
+                <label class="cf-signal-toggle">
+                  <input type="checkbox" id="cfEnableAudio" checked />
+                  <span class="cf-signal-toggle-label">
+                    <span class="cf-signal-toggle-name">Audio</span>
+                    <span class="cf-signal-toggle-hint">RMS peaks &amp; silence</span>
+                  </span>
+                </label>
+                <label class="cf-signal-toggle">
+                  <input type="checkbox" id="cfEnableChat" checked />
+                  <span class="cf-signal-toggle-label">
+                    <span class="cf-signal-toggle-name">Live Chat</span>
+                    <span class="cf-signal-toggle-hint">Spikes, emote storms, superchat</span>
+                  </span>
+                </label>
+              </div>
+            </div>
+
             <!-- Find Clips Button -->
             <button class="btn-primary cf-find-btn" id="cfFindBtn">
               <span class="btn-icon">
@@ -1368,12 +1545,17 @@
                   <span>Transcript</span>
                 </div>
                 <div class="cf-step-line"></div>
-                <div class="cf-step" id="cfStep2" data-label="AI Analysis">
+                <div class="cf-step" id="cfStep2" data-label="Signals">
+                  <div class="cf-step-dot"></div>
+                  <span>Signals</span>
+                </div>
+                <div class="cf-step-line"></div>
+                <div class="cf-step" id="cfStep3" data-label="AI Analysis">
                   <div class="cf-step-dot"></div>
                   <span>AI Analysis</span>
                 </div>
                 <div class="cf-step-line"></div>
-                <div class="cf-step" id="cfStep3" data-label="Results">
+                <div class="cf-step" id="cfStep4" data-label="Results">
                   <div class="cf-step-dot"></div>
                   <span>Results</span>
                 </div>
@@ -1594,12 +1776,9 @@
                   <div class="sm-subtitle-options hidden" id="smSubtitleOptions">
                     <div class="sm-subtitle-row">
                       <div class="sm-subtitle-field">
-                        <label class="sm-subtitle-field-label">Transcription Model</label>
+                        <label class="sm-subtitle-field-label">Transcription Engine</label>
                         <select class="setting-select" id="smWhisperModel">
-                          <option value="large-v2" selected>🧠 WhisperX Large-V2</option>
-                          <option value="large-v3">🧠 WhisperX Large-V3</option>
-                          <option value="anime">🎌 Anime Whisper</option>
-                          <option value="elevenlabs">🔊 ElevenLabs STT</option>
+                          <option value="elevenlabs" selected>🔊 ElevenLabs STT</option>
                         </select>
                       </div>
                       <div class="sm-subtitle-field">

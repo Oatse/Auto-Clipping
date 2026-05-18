@@ -14,12 +14,12 @@ from loguru import logger
 
 @dataclass
 class WordTimestamp:
-    """A single word with its precise start/end timestamps from WhisperX alignment."""
+    """A single word with its precise start/end timestamps from the STT engine."""
     word: str
     start: float
     end: float
     score: float = 0.0  # Alignment confidence score
-    source: str = ""    # Provenance: "whisperx" | "autosub" | "both" | "interpolated"
+    source: str = ""    # Provenance: "elevenlabs" | "interpolated" | ""
 
     @property
     def duration(self) -> float:
@@ -50,7 +50,7 @@ class WordTimestamp:
 @dataclass
 class TranscriptSegment:
     """
-    A single speech segment from WhisperX diarization.
+    A single speech segment from the ElevenLabs STT pipeline.
     Retains start/end/text/speaker through all pipeline phases.
     """
     start: float
@@ -103,8 +103,8 @@ class PycapsWordEntry:
     Uses global video timestamps (not relative to segment).
     """
     word: str
-    global_start: float     # Segment_Start_In_Video + WhisperX_Word_Start
-    global_end: float       # Segment_Start_In_Video + WhisperX_Word_End
+    global_start: float     # Segment_Start_In_Video + Word_Start
+    global_end: float       # Segment_Start_In_Video + Word_End
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -1,14 +1,14 @@
 """
 main.py — Pipeline Orchestrator for the Video Clip Automation System.
 
-Chains all 4 phases in sequence:
-  Phase 1: Transcription (WhisperX)
-  Phase 2: Translation (placeholder / LLM)
-  Phase 3: Subtitle Rendering (Pycaps)
+Chains the 4 phases in sequence:
+  Phase 1: Transcription (ElevenLabs Speech-to-Text)
+  Phase 2: Translation (Gemini, with optional DeepL fallback)
+  Phase 3: Subtitle Rendering (Pycaps / ASS)
   Phase 4: Final Muxing (FFmpeg)
 
 Usage:
-    python main.py --input video.mp4 --output output/final.mp4
+    python main.py --input video.mp4 --output output/final.mp4 --lang id
 """
 
 from __future__ import annotations
@@ -21,9 +21,9 @@ from pathlib import Path
 from loguru import logger
 
 import config
+from processors.elevenlabs_stt import ElevenLabsSTTProcessor
 from processors.muxer import MuxerProcessor
 from processors.subtitle_renderer import SubtitleRendererProcessor
-from processors.transcription import TranscriptionProcessor
 from processors.translator import TranslatorProcessor
 
 
@@ -44,6 +44,9 @@ def setup_logging(output_dir: Path) -> None:
 class VideoSubtitlePipeline:
     """
     Top-level orchestrator for the 4-phase auto-subtitle pipeline.
+
+    The transcriber is always ElevenLabs.  No local Whisper / WhisperX
+    runtime is involved.
     """
 
     def __init__(
@@ -57,12 +60,16 @@ class VideoSubtitlePipeline:
         self.target_language = target_language
 
         # Phase processors
-        self.transcriber = TranscriptionProcessor()
+        self.transcriber = ElevenLabsSTTProcessor()
         self.translator = TranslatorProcessor(target_language=target_language)
         self.subtitle_renderer = SubtitleRendererProcessor()
         self.muxer = MuxerProcessor()
 
-    async def run(self) -> Path:
+    async def run(
+        self,
+        speaker_detection: bool = True,
+        num_speakers: int | None = None,
+    ) -> Path:
         """Execute the full pipeline end-to-end."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
         setup_logging(self.output_dir)
@@ -73,11 +80,13 @@ class VideoSubtitlePipeline:
         logger.info("Output: {}", self.output_dir)
         logger.info("=" * 60)
 
-        # ── Phase 1: Transcription ─────────────────────────────────────────
-        logger.info("[Phase 1/4] Transcription & Diarization")
+        # ── Phase 1: Transcription (ElevenLabs) ────────────────────────────
+        logger.info("[Phase 1/4] Transcription (ElevenLabs Speech-to-Text)")
         segments, _ = await self.transcriber.transcribe(
             video_path=self.input_video,
             output_dir=self.output_dir / "phase1_transcription",
+            speaker_detection=speaker_detection,
+            num_speakers=num_speakers,
         )
 
         # ── Phase 2: Translation ───────────────────────────────────────────
@@ -85,10 +94,11 @@ class VideoSubtitlePipeline:
         translated_segments, _ = await self.translator.translate(
             segments=segments,
             output_dir=self.output_dir / "phase2_translation",
+            regroup=True,
         )
 
         # ── Phase 3: Subtitle Rendering ────────────────────────────────────
-        logger.info("[Phase 3/4] Subtitle Rendering (Pycaps)")
+        logger.info("[Phase 3/4] Subtitle Rendering")
         pycaps_json = self.subtitle_renderer.build_pycaps_transcript(
             segments=translated_segments,
             output_dir=self.output_dir / "phase3_subtitles",
@@ -97,6 +107,8 @@ class VideoSubtitlePipeline:
             video_path=self.input_video,
             pycaps_transcript=pycaps_json,
             output_path=self.output_dir / "phase3_subtitles" / "subtitled.mp4",
+            segments=translated_segments,
+            speaker_detection=speaker_detection,
         )
 
         # ── Phase 4: Final Muxing ──────────────────────────────────────────
@@ -142,6 +154,17 @@ Examples:
         default="id",
         help="Target language BCP-47 code (default: id = Indonesian)",
     )
+    parser.add_argument(
+        "--no-diarize",
+        action="store_true",
+        help="Disable speaker detection (assign all to SPEAKER_00)",
+    )
+    parser.add_argument(
+        "--num-speakers",
+        type=int,
+        default=None,
+        help="Hint for the maximum speaker count (1-6)",
+    )
     return parser.parse_args()
 
 
@@ -157,7 +180,10 @@ async def main() -> None:
         output_dir=args.output,
         target_language=args.lang,
     )
-    await pipeline.run()
+    await pipeline.run(
+        speaker_detection=not args.no_diarize,
+        num_speakers=args.num_speakers,
+    )
 
 
 if __name__ == "__main__":

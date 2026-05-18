@@ -21,11 +21,7 @@ TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ─── API Keys ─────────────────────────────────────────────────────────────────
-# HF_TOKEN is optional — only needed for speaker diarization (pyannote).
-# If not set, all transcript segments are assigned to SPEAKER_00.
-HF_TOKEN: str = os.getenv("HF_TOKEN", "")
-
-# GEMINI_API_KEYS — required for Clip Finder (AI-based clip detection).
+# GEMINI_API_KEYS — required for translation/regrouping and Clip Finder.
 # Supports multiple keys for automatic fallback when a key is rate-limited.
 GEMINI_API_KEYS: list[str] = [
     k for k in [
@@ -99,52 +95,6 @@ CLIP_FINDER_CACHE_DIR: Path = Path(
 CLIP_FINDER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
 
-# ─── WhisperX ─────────────────────────────────────────────────────────────────
-WHISPERX_MODEL: str = os.getenv("WHISPERX_MODEL", "large-v2")
-WHISPERX_COMPUTE_TYPE: str = os.getenv("WHISPERX_COMPUTE_TYPE", "float16")
-WHISPERX_DEVICE: str = os.getenv("WHISPERX_DEVICE", "cuda")
-WHISPERX_BATCH_SIZE: int = int(os.getenv("WHISPERX_BATCH_SIZE", "16"))
-WHISPERX_LANGUAGE: str = os.getenv("WHISPERX_LANGUAGE", "en")
-
-# ─── Whisper Model Options ────────────────────────────────────────────────────
-# Available transcription models. Each entry defines:
-#   - label: Display name shown in the UI
-#   - type: "whisperx" (standard) or "faster-whisper" (local model)
-#   - model: Model name/size (for whisperx) or local path (for faster-whisper)
-#   - description: Short description for the UI
-WHISPER_ANIME_MODEL_PATH: str = os.getenv(
-    "WHISPER_ANIME_MODEL_PATH",
-    str(BASE_DIR / "models" / "whisper-anime")
-)
-
-WHISPER_MODELS: dict = {
-    "large-v2": {
-        "label": "WhisperX Large-V2",
-        "type": "whisperx",
-        "model": "large-v2",
-        "description": "Standard model — best for general content (English, multilingual)",
-    },
-    "large-v3": {
-        "label": "WhisperX Large-V3",
-        "type": "whisperx",
-        "model": "large-v3",
-        "description": "Latest standard model — improved accuracy",
-    },
-    "anime": {
-        "label": "Anime Whisper",
-        "type": "faster-whisper",
-        "model": WHISPER_ANIME_MODEL_PATH,
-        "description": "Optimized for anime/manga content — better for Japanese audio",
-    },
-    "elevenlabs": {
-        "label": "ElevenLabs Speech-to-Text",
-        "type": "elevenlabs",
-        "model": "elevenlabs",
-        "description": "Cloud-based STT — auto-translate via Gemini to target language",
-    },
-}
-
-
 # ─── FFmpeg ───────────────────────────────────────────────────────────────────
 FFMPEG_PATH: str = os.getenv("FFMPEG_PATH", "ffmpeg")
 FFPROBE_PATH: str = os.getenv("FFPROBE_PATH", "ffprobe")
@@ -153,3 +103,4 @@ FFPROBE_PATH: str = os.getenv("FFPROBE_PATH", "ffprobe")
 # ─── Audio Settings ───────────────────────────────────────────────────────────
 AUDIO_SAMPLE_RATE: int = 44100
 AUDIO_CHANNELS: int = 1  # Mono for speech
+
