@@ -2,7 +2,7 @@
  * jobs.js — Job list, job detail modal, SSE log streaming, system info
  */
 
-import { apiFetch, timeAgo, escHtml, showScreen, formatClipDuration, toast } from './utils.js';
+import { apiFetch, timeAgo, escHtml, showScreen, formatClipDuration, toast, confirmDialog } from './utils.js';
 import * as S from './state.js';
 import { fetchTranscript, loadClipJobsList } from './upload.js';
 import { openPreviewScreen } from './preview.js';
@@ -358,14 +358,25 @@ function appendLog(line) {
 
 // ── Job Actions ────────────────────────────────────────────────────────────
 async function cancelJob(jobId) {
-  if (!confirm('Cancel this job?')) return;
+  const ok = await confirmDialog('Cancel this job?', {
+    title: 'Cancel job',
+    confirmText: 'Cancel job',
+    cancelText: 'Keep running',
+    danger: true,
+  });
+  if (!ok) return;
   await apiFetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
   closeModal();
   loadJobs();
 }
 
 async function deleteJob(jobId) {
-  if (!confirm('Remove this job from the list?')) return;
+  const ok = await confirmDialog('Remove this job from the list?', {
+    title: 'Remove job',
+    confirmText: 'Remove',
+    danger: true,
+  });
+  if (!ok) return;
   await apiFetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
   closeModal();
   loadJobs();

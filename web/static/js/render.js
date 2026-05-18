@@ -273,6 +273,8 @@ function setupAEExport() {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
 
+      toast.success('After Effects script downloaded');
+
     } catch (err) {
       toast.error('AE Export failed: ' + err.message);
     } finally {

@@ -226,3 +226,177 @@ toast.info    = (msg, opts = {}) => _showToast(msg, 'info',    opts.duration);
 toast.success = (msg, opts = {}) => _showToast(msg, 'success', opts.duration);
 toast.warn    = (msg, opts = {}) => _showToast(msg, 'warn',    opts.duration);
 toast.error   = (msg, opts = {}) => _showToast(msg, 'error',   opts.duration ?? 6000);
+
+// ── Confirm + Prompt Modals ──────────────────────────────────────────────
+//
+// Promise-based replacements for the native ``window.confirm`` /
+// ``window.prompt`` dialogs.  Native dialogs are modal-blocking, hard
+// to style, and look like an OS popup — out of place inside the app's
+// dark theme.  These replacements share the same DOM scaffolding and
+// resolve the returned promise when the user picks an option.
+//
+// Usage:
+//   const ok = await confirmDialog('Delete this segment?');
+//   if (!ok) return;
+//
+//   const newName = await promptDialog({
+//     title: 'Rename speaker',
+//     defaultValue: 'SPEAKER_02',
+//     placeholder: 'e.g. SPEAKER_02',
+//   });
+//   if (newName === null) return;  // user cancelled
+
+function _trapFocus(modal) {
+  // Keep Tab cycling within the dialog so keyboard users don't reach
+  // the page behind.  Simple two-element trap: shift+Tab on first
+  // focusable goes to last, Tab on last goes to first.
+  const focusables = modal.querySelectorAll(
+    'button, [href], input, textarea, [tabindex]:not([tabindex="-1"])'
+  );
+  if (focusables.length === 0) return;
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  modal.addEventListener('keydown', (e) => {
+    if (e.key !== 'Tab') return;
+    if (e.shiftKey && document.activeElement === first) {
+      last.focus();
+      e.preventDefault();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      first.focus();
+      e.preventDefault();
+    }
+  });
+}
+
+function _openDialog({ title, body, confirmText, cancelText, variant, onMount }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'app-dialog-overlay';
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-modal', 'true');
+    overlay.innerHTML = `
+      <div class="app-dialog app-dialog--${variant || 'info'}">
+        ${title ? `<h3 class="app-dialog-title"></h3>` : ''}
+        <div class="app-dialog-body"></div>
+        <div class="app-dialog-actions">
+          <button type="button" class="btn-secondary app-dialog-cancel">${escHtml(cancelText || 'Cancel')}</button>
+          <button type="button" class="btn-primary app-dialog-confirm">${escHtml(confirmText || 'OK')}</button>
+        </div>
+      </div>
+    `;
+
+    if (title) overlay.querySelector('.app-dialog-title').textContent = title;
+    const bodyEl = overlay.querySelector('.app-dialog-body');
+    if (typeof body === 'string') {
+      bodyEl.textContent = body;
+    } else if (body instanceof Node) {
+      bodyEl.appendChild(body);
+    }
+
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('app-dialog-open'));
+
+    let value;
+    if (typeof onMount === 'function') {
+      value = onMount(overlay);
+    }
+
+    const close = (result) => {
+      overlay.classList.add('app-dialog-leave');
+      setTimeout(() => overlay.remove(), 180);
+      document.removeEventListener('keydown', onKey);
+      resolve(result);
+    };
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close(variant === 'prompt' ? null : false);
+      } else if (e.key === 'Enter' && variant === 'prompt') {
+        const input = overlay.querySelector('.app-dialog-input');
+        if (input && document.activeElement === input) {
+          e.preventDefault();
+          close(input.value);
+        }
+      }
+    };
+    document.addEventListener('keydown', onKey);
+
+    overlay.querySelector('.app-dialog-cancel').addEventListener('click', () =>
+      close(variant === 'prompt' ? null : false)
+    );
+    overlay.querySelector('.app-dialog-confirm').addEventListener('click', () => {
+      if (variant === 'prompt') {
+        const input = overlay.querySelector('.app-dialog-input');
+        close(input ? input.value : '');
+      } else {
+        close(true);
+      }
+    });
+    // Click on the overlay (outside the dialog box) cancels.
+    overlay.addEventListener('mousedown', (e) => {
+      if (e.target === overlay) close(variant === 'prompt' ? null : false);
+    });
+
+    _trapFocus(overlay);
+    // Default focus: confirm button for confirm dialogs, input for prompts
+    setTimeout(() => {
+      const inputEl = overlay.querySelector('.app-dialog-input');
+      if (inputEl) {
+        inputEl.focus();
+        inputEl.select();
+      } else {
+        overlay.querySelector('.app-dialog-confirm').focus();
+      }
+    }, 50);
+  });
+}
+
+/**
+ * Show a yes/no confirmation dialog.  Returns a promise that resolves
+ * to true (confirm), false (cancel), or false (Esc / overlay click).
+ *
+ * @param {string} message
+ * @param {object} [opts] - { title, confirmText, cancelText, danger }
+ */
+export function confirmDialog(message, opts = {}) {
+  const variant = opts.danger ? 'danger' : 'info';
+  return _openDialog({
+    title: opts.title || 'Confirm',
+    body: message,
+    confirmText: opts.confirmText || (opts.danger ? 'Delete' : 'Confirm'),
+    cancelText: opts.cancelText || 'Cancel',
+    variant,
+  });
+}
+
+/**
+ * Show a single-line text-input dialog.  Returns a promise that
+ * resolves to the entered string, or null if the user cancelled.
+ *
+ * @param {object} opts - { title, message, defaultValue, placeholder, confirmText }
+ */
+export function promptDialog(opts = {}) {
+  const message = opts.message || '';
+  const wrap = document.createElement('div');
+  wrap.className = 'app-dialog-prompt-body';
+  if (message) {
+    const p = document.createElement('p');
+    p.className = 'app-dialog-prompt-message';
+    p.textContent = message;
+    wrap.appendChild(p);
+  }
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'app-dialog-input';
+  input.value = opts.defaultValue || '';
+  if (opts.placeholder) input.placeholder = opts.placeholder;
+  wrap.appendChild(input);
+
+  return _openDialog({
+    title: opts.title || 'Input',
+    body: wrap,
+    confirmText: opts.confirmText || 'OK',
+    cancelText: opts.cancelText || 'Cancel',
+    variant: 'prompt',
+  });
+}

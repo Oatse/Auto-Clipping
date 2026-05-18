@@ -750,3 +750,114 @@ select {
   background: rgba(239, 68, 68, 0.18);
   color: var(--red);
 }
+
+/* ════════════════════════════════════════════════════════════════════
+ * P9 — In-app confirm() / prompt() replacements.
+ * ════════════════════════════════════════════════════════════════════ */
+
+.app-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(0, 0, 0, 0.55);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  opacity: 0;
+  transition: opacity var(--dur-base) var(--ease-out);
+}
+.app-dialog-overlay.app-dialog-open {
+  opacity: 1;
+}
+.app-dialog-overlay.app-dialog-leave {
+  opacity: 0;
+  transition-duration: var(--dur-fast);
+}
+
+.app-dialog {
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 22px 24px 18px;
+  min-width: 320px;
+  max-width: min(440px, 90vw);
+  /* Modal scales from centre — entrance feels more solid than fade-only. */
+  transform: scale(0.94);
+  opacity: 0;
+  transition:
+    transform var(--dur-base) var(--ease-out),
+    opacity var(--dur-base) var(--ease-out);
+}
+.app-dialog-open .app-dialog {
+  transform: scale(1);
+  opacity: 1;
+}
+.app-dialog-leave .app-dialog {
+  transform: scale(0.97);
+  opacity: 0;
+}
+
+.app-dialog-title {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 8px;
+  letter-spacing: 0.1px;
+}
+
+.app-dialog-body {
+  font-size: 13px;
+  color: var(--text-2);
+  line-height: 1.55;
+  margin-bottom: 18px;
+}
+
+.app-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.app-dialog-actions .btn-primary,
+.app-dialog-actions .btn-secondary {
+  width: auto;
+  padding: 9px 16px;
+  font-size: 13px;
+  letter-spacing: 0.2px;
+}
+
+/* Danger variant — confirm button looks destructive. */
+.app-dialog--danger .app-dialog-confirm {
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+}
+.app-dialog--danger .app-dialog-confirm:hover:not(:disabled) {
+  box-shadow: 0 8px 22px rgba(239, 68, 68, 0.42);
+}
+
+/* Prompt input. */
+.app-dialog-prompt-body .app-dialog-prompt-message {
+  font-size: 13px;
+  color: var(--text-2);
+  margin-bottom: 10px;
+  line-height: 1.45;
+}
+.app-dialog-input {
+  width: 100%;
+  padding: 10px 12px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  color: var(--text);
+  font-size: 14px;
+  font-family: var(--font);
+  transition:
+    border-color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+.app-dialog-input:focus,
+.app-dialog-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
+}

@@ -2,7 +2,7 @@
  * timeline.js — Timeline component: ruler, segments, playhead, split/merge, keyboard shortcuts
  */
 
-import { fmtTime, fmtTimeShort, parseTime, toast } from './utils.js';
+import { fmtTime, fmtTimeShort, parseTime, toast, confirmDialog } from './utils.js';
 import * as S from './state.js';
 import { pushUndoSnapshot } from './state.js';
 import { renderTranscriptList, setActiveSeg, scheduleAutoSave } from './preview.js';
@@ -115,19 +115,23 @@ export function setupTimeline() {
   addSegmentBtn.addEventListener('click', () => openSegmentDialog(previewVideo.currentTime));
 
   // Delete segment button
-  deleteSegmentBtn.addEventListener('click', () => {
+  deleteSegmentBtn.addEventListener('click', async () => {
     if (S.selectedSegIdx !== null && S.selectedSegIdx < S.transcriptData.length) {
-      if (confirm('Delete this subtitle segment?')) {
-        pushUndoSnapshot();
-        S.transcriptData.splice(S.selectedSegIdx, 1);
-        S.setSelectedSegIdx(null);
-        deleteSegmentBtn.disabled = true;
-        duplicateSegmentBtn.disabled = true;
-        renderTimeline();
-        renderTranscriptList();
-        onStyleChange();
-        scheduleAutoSave();
-      }
+      const ok = await confirmDialog('Delete this subtitle segment?', {
+        title: 'Delete segment',
+        confirmText: 'Delete',
+        danger: true,
+      });
+      if (!ok) return;
+      pushUndoSnapshot();
+      S.transcriptData.splice(S.selectedSegIdx, 1);
+      S.setSelectedSegIdx(null);
+      deleteSegmentBtn.disabled = true;
+      duplicateSegmentBtn.disabled = true;
+      renderTimeline();
+      renderTranscriptList();
+      onStyleChange();
+      scheduleAutoSave();
     }
   });
 
