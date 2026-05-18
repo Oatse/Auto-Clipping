@@ -861,3 +861,143 @@ select {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.18);
 }
+
+/* ════════════════════════════════════════════════════════════════════
+ * P10 — Global scrollbar styling + input normalisation + scroll shadows
+ * ════════════════════════════════════════════════════════════════════ */
+
+/* ────────── Global scrollbars (Firefox + Chromium) ──────────────────── */
+/* Five separate scrollbar rules existed across the codebase, each with
+   its own colour and width.  Standardise so every overflow container
+   shares the same thin, accent-tinted scrollbar.  Per-container
+   overrides still win — this rule sets the baseline. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-2) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--border-2);
+  border-radius: 999px;
+  /* Border keeps a small gap inside the gutter so the thumb doesn't
+     touch the edge — feels lighter visually. */
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(148, 163, 184, 0.45);
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* ────────── Form input + select normalisation ──────────────────────── */
+/* The codebase has three different ways to style inputs:
+   .setting-input/.setting-select with their own focus rule, raw
+   input[type="text"] using browser defaults, and theme-endfield
+   overrides.  This block gives every text-style input the same
+   surface + focus-visible ring for consistency. */
+input[type="text"],
+input[type="number"],
+input[type="search"],
+input[type="url"],
+input[type="email"],
+input[type="password"],
+input[type="tel"],
+textarea,
+select {
+  background-color: var(--bg-3);
+  color: var(--text);
+  border: 1px solid var(--border-2);
+  border-radius: var(--radius-sm);
+  /* No font-family override — modules already specify the design
+     family they want.  Just normalise sizing. */
+  font-size: 13px;
+  font-family: inherit;
+}
+input[type="text"]:hover,
+input[type="number"]:hover,
+input[type="search"]:hover,
+input[type="url"]:hover,
+input[type="email"]:hover,
+input[type="password"]:hover,
+input[type="tel"]:hover,
+textarea:hover,
+select:hover {
+  border-color: rgba(255, 255, 255, 0.20);
+}
+input[type="text"]:focus,
+input[type="number"]:focus,
+input[type="search"]:focus,
+input[type="url"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+input[type="tel"]:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.16);
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-3);
+}
+input:disabled,
+textarea:disabled,
+select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Range inputs (sliders) get accent-tinted thumb. */
+input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: var(--border-2);
+  border-radius: 999px;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: transform var(--dur-press) var(--ease-out),
+              background-color var(--dur-base) var(--ease-out);
+}
+input[type="range"]::-webkit-slider-thumb:hover {
+  background: var(--accent-2);
+}
+input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 2px solid var(--bg);
+  cursor: pointer;
+}
+
+/* Checkbox + radio — softer default look. */
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
