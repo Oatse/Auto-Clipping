@@ -341,6 +341,29 @@ function cfRenderClipsInfoOnly(job) {
       return sb - sa;
     });
 
+  // Results bar — surfaces clip count + the active sort.  Only shown
+  // when at least one clip has a score; otherwise sorting is a no-op
+  // and the strip would be misleading.
+  const hasScores = ordered.some(({ clip }) =>
+    clip.score && typeof clip.score.total === 'number'
+  );
+  if (ordered.length > 0) {
+    const bar = document.createElement('div');
+    bar.className = 'cf-results-bar';
+    bar.innerHTML = `
+      <div class="cf-results-bar-count">
+        <strong>${ordered.length}</strong> clip${ordered.length === 1 ? '' : 's'}
+        ${hasScores ? '· ranked by score' : ''}
+      </div>
+      ${hasScores ? `
+        <div class="cf-results-bar-hint" title="Highest score first.  Clips without a score sink to the bottom.">
+          sorted by score
+        </div>
+      ` : ''}
+    `;
+    grid.appendChild(bar);
+  }
+
   ordered.forEach(({ clip, originalIdx }, displayIdx) => {
     const idx = originalIdx;  // backend index — used by all URL building
     const card = document.createElement('div');

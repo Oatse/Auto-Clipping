@@ -1894,10 +1894,13 @@
                 checked
               />
               <div class="render-option-info">
-                <span class="render-option-title">✨ Refined Transcript</span>
+                <span class="render-option-title">
+                  ✨ Refined Transcript
+                  <span class="render-option-badge">Recommended</span>
+                </span>
                 <span class="render-option-desc"
-                  >Subtitle yang sudah di-refine oleh Gemini (sama dengan yang
-                  ditampilkan di preview)</span
+                  >Sanitized + Gemini-regrouped subtitles with your edits
+                  (matches the Preview).</span
                 >
               </div>
             </label>
@@ -1909,11 +1912,12 @@
               />
               <div class="render-option-info">
                 <span class="render-option-title"
-                  >📝 Original ElevenLabs Transcript</span
+                  >📝 Raw ElevenLabs Transcript</span
                 >
                 <span class="render-option-desc"
-                  >Transcript asli dari ElevenLabs sebelum di-refine (word-level
-                  timing lebih akurat)</span
+                  >Word-level data exactly as ElevenLabs Scribe returned it
+                  (pre-sanitization). Use when you want to bypass the
+                  refinement step.</span
                 >
               </div>
             </label>

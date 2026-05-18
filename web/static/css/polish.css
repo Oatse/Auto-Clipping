@@ -301,19 +301,20 @@ select:focus-visible,
 /* ────────── Stagger entries on the Clip Finder grid ────────────────── */
 /* Cards used to all animate in together; cascade them so the grid
    feels alive without slowing first-paint.  60 ms between cards, capped
-   at 6 cards so a 24-clip dashboard doesn't take 1.4 s to settle. */
+   at 6 cards via clamp() so a 24-clip dashboard doesn't take 1.4 s to
+   settle.
+   Driven by the --cf-card-i CSS variable set by clipfinder.js (which
+   is the *display* order, so highest-score-first stays visually
+   first), so adding results-bar / signals-summary siblings to the
+   grid does not break the cascade. */
 @media (prefers-reduced-motion: no-preference) {
   .cf-clips-grid > .cf-clip-card {
     opacity: 0;
     transform: translateY(8px);
     animation: cf-card-in var(--dur-slow) var(--ease-out) forwards;
+    /* clamp delay to 0–300ms so cards beyond the 5th appear together. */
+    animation-delay: min(300ms, calc(var(--cf-card-i, 0) * 60ms));
   }
-  .cf-clips-grid > .cf-clip-card:nth-child(1) { animation-delay: 0ms; }
-  .cf-clips-grid > .cf-clip-card:nth-child(2) { animation-delay: 60ms; }
-  .cf-clips-grid > .cf-clip-card:nth-child(3) { animation-delay: 120ms; }
-  .cf-clips-grid > .cf-clip-card:nth-child(4) { animation-delay: 180ms; }
-  .cf-clips-grid > .cf-clip-card:nth-child(5) { animation-delay: 240ms; }
-  .cf-clips-grid > .cf-clip-card:nth-child(n + 6) { animation-delay: 300ms; }
 }
 
 @keyframes cf-card-in {
@@ -552,4 +553,78 @@ select {
    transform so the subtle bar height changes don't trigger paint. */
 .wave-bar {
   transition: transform var(--dur-slow) var(--ease-in-out);
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+ * P7 — Terminology consistency + Recommended badge + Results bar.
+ * ═════════════════════════════════════════════════════════════════════ */
+
+/* ────────── Render-options "Recommended" badge ─────────────────────── */
+/* Lives inside the option title so it inherits the right line-height
+   and stays glued to the heading.  Subtle gradient pill. */
+.render-option-badge {
+  display: inline-block;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: white;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+}
+
+/* When the user selects the option, soften the badge so it doesn't
+   compete with the now-prominent card border. */
+.render-option-card.selected .render-option-badge {
+  background: linear-gradient(
+    135deg,
+    rgba(255, 255, 255, 0.92),
+    rgba(255, 255, 255, 0.78)
+  );
+  color: var(--accent);
+}
+
+/* ────────── Clip Finder — results bar ───────────────────────────────── */
+/* Tiny header strip that appears above the grid when results are
+   present.  Tells the user how many clips were found and that they
+   are sorted by score.  Inserted dynamically by clipfinder.js. */
+.cf-results-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  margin-bottom: 12px;
+  background: rgba(99, 102, 241, 0.08);
+  border: 1px solid rgba(99, 102, 241, 0.22);
+  border-radius: 10px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.cf-results-bar-count {
+  font-weight: 700;
+  color: var(--text);
+}
+.cf-results-bar-count strong {
+  color: var(--accent-3);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.cf-results-bar-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.cf-results-bar-hint::before {
+  content: "↓";
+  display: inline-block;
+  font-weight: 700;
+  color: var(--accent-3);
 }
