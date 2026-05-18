@@ -5,7 +5,7 @@
  * Popup editors delegated to popups.js
  */
 
-import { apiFetch, showScreen, switchTab, fmtTime, escHtml } from './utils.js';
+import { apiFetch, showScreen, switchTab, fmtTime, escHtml, toast } from './utils.js';
 import * as S from './state.js';
 import { pushUndoSnapshot, popUndoSnapshot } from './state.js';
 import { renderTimeline } from './timeline.js';
@@ -62,9 +62,18 @@ export async function saveTranscript(isAutoSave = false) {
       body: JSON.stringify({ segments: S.transcriptData }),
     });
     showAutoSaveIndicator('saved');
+    // Manual saves get a toast — auto-saves stay silent so they don't
+    // overwhelm the user during continuous editing.  Indicator chip
+    // (above the panel) handles the auto-save case.
+    if (!isAutoSave) {
+      toast.success('Transcript saved');
+    }
   } catch (err) {
     console.error('Save failed:', err);
     showAutoSaveIndicator('error');
+    if (!isAutoSave) {
+      toast.error('Save failed: ' + (err.message || 'unknown error'));
+    }
   } finally {
     S.setIsSaving(false);
   }

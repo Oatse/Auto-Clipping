@@ -191,12 +191,14 @@ async function watchRender(jobId) {
           dlBtn.download = true;
           document.querySelector('#screen-rendering .transcribing-card').appendChild(dlBtn);
 
+          toast.success('Render complete — your video is ready');
           resolve();
         } else if (job.status === 'failed') {
           clearInterval(poll);
           sse.close();
           renderStatus.textContent = 'Render failed: ' + (job.error || 'Unknown error');
           renderBar.style.background = 'var(--red)';
+          toast.error('Render failed: ' + (job.error || 'Unknown error'));
           reject(new Error(job.error));
         }
       } catch (err) {
