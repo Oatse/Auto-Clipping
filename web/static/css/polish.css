@@ -333,3 +333,223 @@ select:focus-visible,
     transition-duration: 0.01ms !important;
   }
 }
+
+/* ═════════════════════════════════════════════════════════════════════
+ * P6 EXTENSIONS — additional polish for the remaining transition:all
+ * sites, job-card status motion, and unified empty-state styling.
+ * ═════════════════════════════════════════════════════════════════════ */
+
+/* ────────── Replace remaining transition:all on hot paths ──────────── */
+/* These elements use transition:all in their module CSS, which paints
+   on every property change.  Override with a specific list so the
+   browser only animates what actually changes. */
+
+.job-card,
+.btn-resume-job,
+.btn-view-job,
+.jobs-toggle-btn,
+.clip-job-use {
+  transition:
+    transform var(--dur-press) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out),
+    color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+
+.cf-clip-play-btn,
+.cf-clip-download {
+  transition:
+    transform var(--dur-press) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .btn-resume-job:active,
+  .btn-view-job:active,
+  .clip-job-use:active {
+    transform: scale(0.97);
+  }
+}
+
+/* ────────── Job-card status motion — running gets a heartbeat ──────── */
+/* The status border-left is the only visual difference between running
+   and queued cards.  Running deserves a subtle pulsing glow so the
+   active job stands out at a glance. */
+.job-card.status-running {
+  position: relative;
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.18) inset,
+              0 4px 16px rgba(99, 102, 241, 0.10);
+}
+.job-card.status-running::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+  animation: job-running-pulse 1.6s var(--ease-in-out) infinite;
+}
+
+@keyframes job-running-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px rgba(99, 102, 241, 0.3); }
+  50%      { opacity: 0.55; box-shadow: 0 0 14px rgba(99, 102, 241, 0.55); }
+}
+
+/* Progress-bar fill gets a subtle moving sheen so a running job is
+   clearly progressing instead of looking frozen. */
+.job-progress-bar:not(.done):not(.failed) {
+  position: relative;
+  overflow: hidden;
+}
+.job-progress-bar:not(.done):not(.failed)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.18) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: progress-sheen 1.8s linear infinite;
+}
+
+@keyframes progress-sheen {
+  to { transform: translateX(100%); }
+}
+
+/* Same for global progress-bar (transcribing / rendering screens). */
+.progress-bar:not(.done):not(.failed) {
+  position: relative;
+  overflow: hidden;
+}
+.progress-bar:not(.done):not(.failed)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(255, 255, 255, 0.16) 50%,
+    transparent 100%
+  );
+  transform: translateX(-100%);
+  animation: progress-sheen 1.8s linear infinite;
+}
+
+/* ────────── Unified empty-state styling ────────────────────────────── */
+/* Two empty-state variants exist: .empty-state (jobs panel) and
+   .cf-empty-state (clip finder).  Standardise spacing + icon presence
+   so they read as the same component. */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 48px 20px;
+}
+.empty-state .empty-icon {
+  margin-bottom: 4px;
+  background: linear-gradient(
+    135deg,
+    rgba(99, 102, 241, 0.10),
+    rgba(139, 92, 246, 0.06)
+  );
+  border-color: rgba(99, 102, 241, 0.24);
+  color: var(--accent-3);
+}
+
+/* ────────── Modal overlay — softer dim + scale-in ──────────────────── */
+/* `transition: all 0.3s` on .modal-overlay paints everything on enter.
+   Use only opacity (no transform on the overlay itself; child content
+   handles scale). */
+.modal-overlay {
+  transition: opacity var(--dur-base) var(--ease-out);
+  backdrop-filter: blur(4px);
+}
+
+/* ────────── Toast / autosave indicator — tighter motion ────────────── */
+.autosave-indicator {
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+
+/* ────────── Form inputs — consistent focus ring ─────────────────────── */
+input[type="text"],
+input[type="number"],
+input[type="search"],
+input[type="url"],
+input[type="email"],
+input[type="password"],
+textarea,
+select {
+  transition:
+    border-color var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out);
+}
+
+/* Style-panel chip / preset rows — make selection state obvious. */
+.preset-chip,
+.anim-chip,
+.position-chip,
+.style-control-chip {
+  transition:
+    transform var(--dur-press) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out),
+    color var(--dur-base) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .preset-chip:active,
+  .anim-chip:active,
+  .position-chip:active,
+  .style-control-chip:active {
+    transform: scale(0.97);
+  }
+}
+
+/* ────────── CF preset chips — selected state ────────────────────────── */
+/* The instruction preset chips on the Clip Finder get the same press
+   feedback + a clear "active" visual when one is selected. */
+.cf-preset-chip {
+  transition:
+    transform var(--dur-press) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out),
+    color var(--dur-base) var(--ease-out);
+}
+@media (hover: hover) and (pointer: fine) {
+  .cf-preset-chip:active {
+    transform: scale(0.97);
+  }
+}
+
+/* ────────── Tab + Nav buttons — instant feedback ───────────────────── */
+.nav-tab,
+.tab-btn {
+  transition:
+    color var(--dur-base) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out),
+    border-color var(--dur-base) var(--ease-out);
+}
+
+/* ────────── Drop-zone — smoother dragover state ────────────────────── */
+.drop-zone {
+  transition:
+    border-color var(--dur-base) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
+}
+
+/* ────────── Wave-bar (transcribing screen) — slower for elegance ───── */
+/* The "transcribing" wave bars use transition:all 0.3s.  Constrain to
+   transform so the subtle bar height changes don't trigger paint. */
+.wave-bar {
+  transition: transform var(--dur-slow) var(--ease-in-out);
+}
