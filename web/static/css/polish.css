@@ -1271,3 +1271,43 @@ input[type="radio"] {
   0%   { background-position: 0% 50%; }
   100% { background-position: 200% 50%; }
 }
+
+/* ════════════════════════════════════════════════════════════════════
+ * P15 — Drop-zone polish (drag feedback + accessibility)
+ * ════════════════════════════════════════════════════════════════════ */
+
+/* Replace 'transition: all 0.3s' with explicit list, add a richer
+   drag-over state, and a focus-visible ring so keyboard users know
+   the zone is interactive. */
+.drop-zone {
+  transition:
+    border-color var(--dur-base) var(--ease-out),
+    background-color var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out),
+    box-shadow var(--dur-base) var(--ease-out);
+}
+
+.drop-zone:hover {
+  border-style: solid;
+}
+
+.drop-zone.drag-over {
+  border-color: var(--accent);
+  background: rgba(99, 102, 241, 0.12);
+  transform: scale(1.005);
+  box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.18);
+  border-style: solid;
+}
+
+/* Drop icon scales up slightly during drag for kinetic feedback. */
+.drop-zone.drag-over .drop-icon {
+  transform: scale(1.1);
+  transition: transform var(--dur-base) var(--ease-out);
+}
+
+/* Make the entire zone keyboard-focusable feedback obvious. */
+.drop-zone:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.22);
+}
