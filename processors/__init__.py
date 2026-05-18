@@ -1,11 +1,16 @@
 """processors package — STT, translation, subtitle rendering, muxing."""
-from .elevenlabs_stt import ElevenLabsSTTProcessor
+from .stt import ElevenLabsSttEngine, SttEngine
 from .translator import TranslatorProcessor
 from .subtitle_renderer import SubtitleRendererProcessor
 from .muxer import MuxerProcessor
 
+# Legacy alias — see processors/elevenlabs_stt.py for the compat shim.
+ElevenLabsSTTProcessor = ElevenLabsSttEngine
+
 __all__ = [
-    "ElevenLabsSTTProcessor",
+    "ElevenLabsSttEngine",
+    "ElevenLabsSTTProcessor",  # legacy alias
+    "SttEngine",
     "TranslatorProcessor",
     "SubtitleRendererProcessor",
     "MuxerProcessor",
