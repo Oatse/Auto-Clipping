@@ -1,29 +1,69 @@
 # CLIP-AUTOMATION
 
-**Video Clip Automation System** — A robust end-to-end pipeline for automatically processing videos, generating transcriptions, translating subtitles, and hard-subbing them back into the video. 
-
-This project provides both a **Web UI** and a **CLI Interface** for seamless video subtitle automation.
+**Video Clip Automation System** — An end-to-end pipeline that transcribes a
+video, translates the subtitles, and burns them back into the video with
+broadcast-ready styling.  The project ships both a **Web UI** and a **CLI**.
 
 ## Features
 
 The system runs a **4-Phase Pipeline**:
-1. **Transcription & Diarization**: Extracts audio and detects speakers using [WhisperX](https://github.com/m-bain/whisperX) (for local processing) or [ElevenLabs STT](https://elevenlabs.io/) (via API).
-2. **Translation**: Automatically translates the resulting transcripts to a target language using LLM (Gemini).
-3. **Subtitle Rendering**: Renders dynamic, highly customizable subtitles directly onto the video frames using `Pycaps`.
-4. **Final Muxing**: Combines the processed video frames with the original audio using FFmpeg.
+1. **Transcription** — [ElevenLabs Scribe STT](https://elevenlabs.io/) cloud
+   API with word-level timestamps and built-in speaker diarisation.
+2. **Translation** — [Gemini](https://ai.google.dev/) regroups the words into
+   subtitle-sized segments and translates them.  DeepL is used as an
+   automatic fallback when Gemini is unavailable.
+3. **Subtitle Rendering** — Pycaps for single-speaker, ASS + FFmpeg for
+   multi-speaker (stacked, per-speaker colour, simultaneous talk).
+4. **Final Muxing** — FFmpeg combines the burned-in video with the original
+   audio.
 
-**Additional Features:**
-- **Web Interface**: A FastAPI-based interactive web dashboard to upload videos, monitor processing in real-time, and download the final result.
-- **After Effects Export**: Generates `.jsx` ExtendScript files to explicitly import the synchronized subtitles into Adobe After Effects for advanced styling.
-- **Hardware Acceleration**: Full support for PyTorch CUDA to leverage local GPU power for transcription and rendering.
-- **Speaker Detection**: Supports automatic speaker diarization and manual speaker count overrides.
+**Additional features**
+- **Web Interface** — FastAPI dashboard for upload, monitoring, preview, and
+  download.
+- **Live Preview Editor** — drag-and-drop timeline with karaoke /
+  narration-pop highlighting.  Edits to segment timing rescale word-level
+  timestamps so animations stay in sync.
+- **After Effects Export** — generates `.jsx` ExtendScript files to import
+  the synchronized subtitles into After Effects for advanced styling.
+- **Clip Finder** — Gemini-powered detection of highlight clips from
+  long-form YouTube videos.
+- **Short Maker** — vertical-aspect crop tool for shorts/reels.
+
+## Architecture
+
+```
+processors/
+  stt/             SttEngine Protocol + ElevenLabsSttEngine
+  timing/          TimingPolicy + Sanitizer (single seam for word/segment timing fixes)
+  translator/      Gemini client + regrouper + recheck + DeepL fallback + local grouper
+  subtitle_renderer.py
+  muxer.py
+  clip_finder/     YouTube clip detection (yt-dlp + Gemini)
+  short_maker.py   Vertical-aspect crop tool
+
+web/
+  server.py        FastAPI app + route handlers
+  services/        job_models, transcript_sync, pipeline_runner
+
+models/transcript.py
+  TranscriptSegment, WordTimestamp, sanitize_timestamps (compat shim)
+```
+
+The timing sanitizer is **speaker-aware**: cross-speaker overlap (one
+speaker interrupting another) is preserved, while same-speaker overlap is
+trimmed.  See `processors/timing/policy.py` for tuning knobs.
 
 ## Requirements
 
-Before running the project, make sure you have the following installed:
 - Python 3.11+
-- [FFmpeg](https://ffmpeg.org/) (must be accessible in your system PATH)
-- NVIDIA GPU with CUDA support (Recommended for WhisperX and PyTorch)
+- [FFmpeg](https://ffmpeg.org/) accessible from `PATH`
+- An ElevenLabs API key (mandatory)
+- A Gemini API key (mandatory for translation)
+- Optional: a DeepL API key for fallback translation
+
+No local Whisper/WhisperX runtime is required — STT is delegated to the
+ElevenLabs cloud API.  GPU acceleration is only used by FFmpeg (NVENC) when
+available.
 
 ## Installation
 
@@ -33,57 +73,58 @@ Before running the project, make sure you have the following installed:
    cd Auto-Clipping
    ```
 
-2. Set up a virtual environment (Recommended):
+2. Set up a virtual environment (recommended):
    ```bash
    python -m venv venv_python311
-   # Activate on Windows:
+   # Windows:
    .\venv_python311\Scripts\activate
-   # Activate on Linux/Mac:
+   # Linux/Mac:
    source venv_python311/bin/activate
    ```
 
-3. Install the required dependencies:
+3. Install dependencies:
    ```bash
    pip install -r requirements.txt
    ```
 
-4. Configure your environment variables by copying the example environment file:
+4. Configure your API keys:
    ```bash
    cp .env.example .env
+   # Edit .env and add ELEVENLABS_API_KEY_01 and GEMINI_API_KEY
    ```
-   *Edit `.env` to include your necessary API keys (like `GEMINI_API_KEYS` or `ELEVENLABS_API_KEY`) and customize default settings.*
 
 ## Usage
 
-### 1. Web UI (Recommended)
-You can start the web interface by running:
+### 1. Web UI (recommended)
 ```bash
-# On Windows
+# Windows
 run_web_v311.bat
 
 # Or directly via python
 python run_web.py
 ```
-Then, open your browser and navigate to `http://localhost:8000` (or the port specified in your console).
+Open `http://localhost:8000` in your browser.
 
-### 2. Command Line Interface (CLI)
-You can also run the pipeline purely from the terminal:
+### 2. CLI
 ```bash
 python main.py --input path/to/your/video.mp4 --lang id --output ./output
 ```
-**Arguments:**
-- `--input` (`-i`): Path to the input video file.
-- `--output` (`-o`): Output directory for processed files (default is `./output`).
-- `--lang` (`-l`): Target language BCP-47 code for translation (default is `id`).
+**Arguments**
+- `--input` (`-i`): Input video file.
+- `--output` (`-o`): Output directory (default `./output`).
+- `--lang` (`-l`): Target language BCP-47 code (default `id` = Indonesian).
+- `--no-diarize`: Disable speaker detection (assigns all to `SPEAKER_00`).
+- `--num-speakers`: Hint for the maximum speaker count (1-6).
 
-## Project Structure
+## Testing
 
-- `main.py`: The CLI orchestrator chaining all pipeline phases.
-- `web/`: Contains the FastAPI backend (`server.py`) and static frontend files (HTML/JS/CSS).
-- `processors/`: Core logic modules for each phase (Transcription, Translator, Subtitle Renderer, Muxer) and exporters (`ae_export.py`).
-- `models/`: Python data models (e.g., Pydantic schemas for the transcript).
-- `utils/`: Reusable utility functions (FFmpeg wrappers, file operations).
-- `output/`: Default directory where processed jobs, temporary files, and final renders are saved (Ignored in Git).
+```bash
+pytest tests/ -q
+```
+
+The test suite covers the timing sanitizer, word-level recheck, translator
+regrouper, JSON salvage from truncated Gemini output, the local grouping
+fallback, and the transcript-sync helper used by the preview editor.
 
 ## License
 
