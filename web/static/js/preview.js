@@ -55,6 +55,10 @@ export async function saveTranscript(isAutoSave = false) {
   if (!S.activeJobId || !S.transcriptData.length || S.isSaving) return;
   S.setIsSaving(true);
   showAutoSaveIndicator('saving');
+  // Manual saves get a button-level spinner — auto-saves don't, since
+  // the autosave-indicator chip already covers them.
+  const saveBtn = document.getElementById('saveTranscriptBtn');
+  if (!isAutoSave && saveBtn) saveBtn.classList.add('is-saving');
   try {
     await apiFetch(`/api/jobs/${S.activeJobId}/transcript`, {
       method: 'PUT',
@@ -62,9 +66,6 @@ export async function saveTranscript(isAutoSave = false) {
       body: JSON.stringify({ segments: S.transcriptData }),
     });
     showAutoSaveIndicator('saved');
-    // Manual saves get a toast — auto-saves stay silent so they don't
-    // overwhelm the user during continuous editing.  Indicator chip
-    // (above the panel) handles the auto-save case.
     if (!isAutoSave) {
       toast.success('Transcript saved');
     }
@@ -76,6 +77,7 @@ export async function saveTranscript(isAutoSave = false) {
     }
   } finally {
     S.setIsSaving(false);
+    if (!isAutoSave && saveBtn) saveBtn.classList.remove('is-saving');
   }
 }
 

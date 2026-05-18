@@ -175,7 +175,21 @@ function renderJobs(jobs) {
         <div class="empty-icon">📋</div>
         <p class="empty-title">No jobs yet</p>
         <p class="empty-sub">Upload a video below to start your first transcription. Jobs you create will show up here for resume + edit.</p>
+        <button type="button" class="empty-cta" id="emptyJobsCta">
+          ↓ Jump to upload
+        </button>
       </div>`;
+    // Wire the CTA — scroll to the drop-zone and emphasise it briefly.
+    const cta = document.getElementById('emptyJobsCta');
+    if (cta) {
+      cta.addEventListener('click', () => {
+        const drop = document.getElementById('dropZone');
+        if (!drop) return;
+        drop.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        drop.classList.add('drop-zone--highlight');
+        setTimeout(() => drop.classList.remove('drop-zone--highlight'), 1400);
+      });
+    }
     return;
   }
 
