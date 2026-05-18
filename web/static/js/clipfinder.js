@@ -7,6 +7,7 @@ import { escHtml } from './utils.js';
 // ── State ──────────────────────────────────────────────────────────────────
 let cfJobId = null;
 let cfSSE   = null;
+let cfMode  = 'single-shot';
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 export function setupClipFinder() {
@@ -16,6 +17,10 @@ export function setupClipFinder() {
   const cfStartOffset  = document.getElementById('cfStartOffset');
   const cfFindBtn      = document.getElementById('cfFindBtn');
   const cfDownloadAllBtn = document.getElementById('cfDownloadAllBtn');
+  const cfModeSingle   = document.getElementById('cfModeSingle');
+  const cfModeMulti    = document.getElementById('cfModeMulti');
+  const cfEnableAudio  = document.getElementById('cfEnableAudio');
+  const cfEnableChat   = document.getElementById('cfEnableChat');
 
   function updateFindBtn() {
     cfFindBtn.disabled = !cfUrl.value.trim();
@@ -23,6 +28,19 @@ export function setupClipFinder() {
   cfUrl.addEventListener('input', updateFindBtn);
   cfInstructions.addEventListener('input', updateFindBtn);
   updateFindBtn();
+
+  // Mode toggle (single-shot ↔ multi-stage)
+  function setMode(mode) {
+    cfMode = mode;
+    [cfModeSingle, cfModeMulti].forEach(btn => {
+      const active = btn && btn.dataset.mode === mode;
+      if (!btn) return;
+      btn.classList.toggle('active', active);
+      btn.setAttribute('aria-checked', active ? 'true' : 'false');
+    });
+  }
+  if (cfModeSingle) cfModeSingle.addEventListener('click', () => setMode('single-shot'));
+  if (cfModeMulti)  cfModeMulti.addEventListener('click',  () => setMode('multi-stage'));
 
   // Find Clips button
   cfFindBtn.addEventListener('click', async () => {
@@ -49,7 +67,15 @@ export function setupClipFinder() {
       const res = await fetch('/api/clip-finder/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, instructions, lang, start_offset: startOffset }),
+        body: JSON.stringify({
+          url,
+          instructions,
+          lang,
+          start_offset: startOffset,
+          mode: cfMode,
+          enable_audio_signals: cfEnableAudio ? cfEnableAudio.checked : true,
+          enable_chat_signals:  cfEnableChat  ? cfEnableChat.checked  : true,
+        }),
       });
 
       if (!res.ok) {
@@ -108,7 +134,7 @@ function cfShowProgress() {
   dlAll.classList.add('hidden');
   grid.innerHTML = '';
 
-  for (let i = 1; i <= 3; i++) {
+  for (let i = 1; i <= 4; i++) {
     const step = document.getElementById('cfStep' + i);
     if (step) step.className = 'cf-step';
   }
@@ -118,17 +144,19 @@ function cfShowProgress() {
 }
 
 function cfUpdateSteps(status) {
+  // 4-step progression: transcript → signals → analysis → results
   const stepMap = {
     transcribing: 1,
-    analyzing:    2,
-    analyzed:     3,
-    downloading:  3,
-    completed:    3,
+    signals:      2,
+    analyzing:    3,
+    analyzed:     4,
+    downloading:  4,
+    completed:    4,
   };
 
   const activeStep = stepMap[status] || 0;
 
-  for (let i = 1; i <= 3; i++) {
+  for (let i = 1; i <= 4; i++) {
     const step = document.getElementById('cfStep' + i);
     if (!step) continue;
     step.classList.remove('active', 'done');
@@ -284,9 +312,40 @@ function cfRenderClipsInfoOnly(job) {
   const grid = document.getElementById('cfClipsGrid');
   grid.innerHTML = '';
 
-  job.clips.forEach((clip, idx) => {
+  // Job-wide signals summary at the top of the grid
+  const summary = job.signals_summary || {};
+  const summaryEntries = Object.entries(summary).filter(([, v]) => v > 0);
+  if (summaryEntries.length > 0) {
+    const wrap = document.createElement('div');
+    wrap.className = 'cf-signals-summary';
+    wrap.innerHTML = `<span class="cf-signals-summary-label">Signals</span>` +
+      summaryEntries.map(([kind, count]) =>
+        `<span class="cf-signal-pill cf-signal-pill--${escHtml(kind)}">${cfSignalLabel(kind)}: ${count}</span>`
+      ).join('');
+    grid.appendChild(wrap);
+  }
+
+  // Sort clips by score (descending) when score data is present.  Keep
+  // the original index in `originalIdx` so the download URLs
+  // (/api/clip-finder/clips/{job}/{idx}) and the file lookup in
+  // `job.clip_files[idx]` keep referencing the right backend record.
+  // Clips without a score sink to the bottom in their original order.
+  const ordered = job.clips
+    .map((clip, originalIdx) => ({ clip, originalIdx }))
+    .sort((a, b) => {
+      const sa = (a.clip.score && typeof a.clip.score.total === 'number')
+        ? a.clip.score.total : -Infinity;
+      const sb = (b.clip.score && typeof b.clip.score.total === 'number')
+        ? b.clip.score.total : -Infinity;
+      if (sa === sb) return a.originalIdx - b.originalIdx;
+      return sb - sa;
+    });
+
+  ordered.forEach(({ clip, originalIdx }, displayIdx) => {
+    const idx = originalIdx;  // backend index — used by all URL building
     const card = document.createElement('div');
     card.className = 'cf-clip-card';
+    card.style.setProperty('--cf-card-i', String(displayIdx));
 
     const startFmt = cfFmtTime(clip.start);
     const endFmt   = cfFmtTime(clip.end);
@@ -296,6 +355,10 @@ function cfRenderClipsInfoOnly(job) {
       : Math.floor(duration) + 's';
 
     const isDownloaded = job.clip_files && job.clip_files[idx];
+    const scoreHtml    = cfRenderScore(clip);
+    const hunterHtml   = cfRenderHunter(clip);
+    const highlightHtml= cfRenderHighlight(clip);
+    const signalsHtml  = cfRenderClipSignals(clip);
 
     if (isDownloaded) {
       card.innerHTML = `
@@ -311,10 +374,12 @@ function cfRenderClipsInfoOnly(job) {
           <span class="cf-clip-duration">${durFmt}</span>
         </div>
         <div class="cf-clip-info">
-          <div class="cf-clip-number">#${idx + 1}</div>
+          <div class="cf-clip-number">${hunterHtml}#${idx + 1}${highlightHtml}</div>
           <div class="cf-clip-title">${escHtml(clip.title || 'Clip ' + (idx + 1))}</div>
           <div class="cf-clip-time">${startFmt} - ${endFmt}</div>
+          ${scoreHtml}
           ${clip.reason ? `<div class="cf-clip-reason">${escHtml(clip.reason)}</div>` : ''}
+          ${signalsHtml}
         </div>
         <div class="cf-clip-actions">
           <a class="cf-clip-download" href="/api/clip-finder/clips/${job.id}/${idx}" download>
@@ -348,10 +413,12 @@ function cfRenderClipsInfoOnly(job) {
           </svg>
         </div>
         <div class="cf-clip-info">
-          <div class="cf-clip-number">#${idx + 1}</div>
+          <div class="cf-clip-number">${hunterHtml}#${idx + 1}${highlightHtml}</div>
           <div class="cf-clip-title">${escHtml(clip.title || 'Clip ' + (idx + 1))}</div>
           <div class="cf-clip-time">${startFmt} - ${endFmt} (${durFmt})</div>
+          ${scoreHtml}
           ${clip.reason ? `<div class="cf-clip-reason">${escHtml(clip.reason)}</div>` : ''}
+          ${signalsHtml}
         </div>
         <div class="cf-clip-actions">
           <button class="cf-clip-download cf-clip-dl-single" data-clip-idx="${idx}">
@@ -370,6 +437,88 @@ function cfRenderClipsInfoOnly(job) {
   grid.querySelectorAll('.cf-clip-dl-single').forEach(btn => {
     btn.addEventListener('click', () => cfDownloadSingleClip(btn, job.id));
   });
+}
+
+// ── Helpers: render score, hunter chip, signals ────────────────────────────
+
+function cfRenderScore(clip) {
+  const s = clip.score;
+  if (!s || typeof s.total !== 'number') return '';
+  const dims = [
+    ['Hook',    s.retention_hook],
+    ['Emotion', s.emotional_intensity],
+    ['Cycle',   s.completeness],
+    ['Replay',  s.replayability],
+  ];
+  return `
+    <div class="cf-clip-score">
+      <div class="cf-clip-score-total">${(s.total || 0).toFixed(1)}<small>/10</small></div>
+      <div class="cf-clip-score-bars">
+        ${dims.map(([name, val]) => {
+          const v = Math.max(0, Math.min(10, Number(val) || 0));
+          return `
+            <div class="cf-clip-score-bar">
+              <span class="cf-clip-score-bar-name">${name}</span>
+              <div class="cf-clip-score-bar-track">
+                <div class="cf-clip-score-bar-fill" style="width:${v * 10}%"></div>
+              </div>
+              <span class="cf-clip-score-bar-val">${v.toFixed(1)}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function cfRenderHunter(clip) {
+  const h = clip.hunter;
+  if (!h || h === 'general') return '';
+  return `<span class="cf-clip-hunter cf-clip-hunter--${escHtml(h)}">${escHtml(h)}</span>`;
+}
+
+function cfRenderHighlight(clip) {
+  const ht = clip.highlight_type;
+  if (!ht || ht === '' || ht === 'other') return '';
+  const labels = {
+    karma_arc: 'Karma',
+    genuine_reaction: 'Reaction',
+    clutch_play: 'Clutch',
+    chaotic_plea: 'Chaos',
+  };
+  const label = labels[ht] || ht;
+  return ` <span class="cf-clip-badge cf-clip-badge--${escHtml(ht)}">${escHtml(label)}</span>`;
+}
+
+function cfRenderClipSignals(clip) {
+  const sigs = clip.signals || [];
+  if (!sigs.length) return '';
+  // Group by kind, count, take top 4
+  const counts = sigs.reduce((acc, s) => {
+    acc[s.kind] = (acc[s.kind] || 0) + 1;
+    return acc;
+  }, {});
+  const entries = Object.entries(counts).slice(0, 4);
+  return `
+    <div class="cf-clip-signals">
+      ${entries.map(([k, n]) =>
+        `<span class="cf-signal-pill cf-signal-pill--${escHtml(k)}">${cfSignalLabel(k)} ×${n}</span>`
+      ).join('')}
+    </div>
+  `;
+}
+
+function cfSignalLabel(kind) {
+  const map = {
+    audio_peak: 'audio peak',
+    audio_silence: 'silence',
+    chat_spike: 'chat spike',
+    chat_emote: 'emote storm',
+    chat_superchat: 'superchat',
+    scene_cut: 'scene cut',
+    generic: 'signal',
+  };
+  return map[kind] || kind;
 }
 
 async function cfDownloadSingleClip(btn, jobId) {

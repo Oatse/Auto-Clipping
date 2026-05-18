@@ -43,7 +43,9 @@ export async function loadSystemInfo() {
 
     const ffmpegOk     = !!data.packages.ffmpeg;
     const elevenlabsOk = !!data.packages.elevenlabs;
-    const allOk        = ffmpegOk && elevenlabsOk;
+    const geminiOk     = !!(data.env && data.env.gemini_keys_set);
+    const deeplOk      = !!(data.env && data.env.deepl_key_set);
+    const allOk        = ffmpegOk && elevenlabsOk && geminiOk;
     dot.className = 'status-dot ' + (allOk ? 'ok' : 'warn');
     if (allOk) {
       const gpuLabel = data.cuda_available
@@ -55,18 +57,29 @@ export async function loadSystemInfo() {
       text.textContent = `Ready · ${gpuLabel}${torchPart}`;
     } else if (!elevenlabsOk) {
       text.textContent = 'Setup required — ELEVENLABS_API_KEY missing';
+    } else if (!geminiOk) {
+      text.textContent = 'Setup required — GEMINI_API_KEY missing (translate disabled)';
     } else {
       text.textContent = 'Setup required — FFmpeg missing';
     }
 
+    // System status grid surfaces the same backend env signals so the
+    // user sees Gemini + DeepL availability at a glance.  DeepL is
+    // optional (fallback only) so its missing state is "warn" rather
+    // than "err".
     const items = [
       { label: 'FFmpeg',     ok: ffmpegOk },
       { label: 'ElevenLabs', ok: elevenlabsOk },
+      { label: 'Gemini',     ok: geminiOk },
+      { label: 'DeepL',      ok: deeplOk, warn: !deeplOk,
+        title: deeplOk
+          ? 'DeepL fallback ready'
+          : 'DeepL fallback disabled (optional). Translate falls back to source-language text if Gemini fails.' },
       { label: 'Pycaps',     ok: !!data.packages.pycaps },
       { label: 'GPU',        ok: !!data.cuda_available, warn: !data.cuda_available },
     ];
     sysGrid.innerHTML = items.map(i => `
-      <div class="sys-item ${i.ok ? 'ok' : i.warn ? 'warn' : 'err'}">
+      <div class="sys-item ${i.ok ? 'ok' : i.warn ? 'warn' : 'err'}"${i.title ? ` title="${i.title}"` : ''}>
         <span class="dot"></span>${i.label}
       </div>
     `).join('');

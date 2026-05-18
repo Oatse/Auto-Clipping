@@ -1,13 +1,20 @@
 /**
- * preview.js — Preview screen: video playback, subtitle rendering, style controls, save
+ * preview.js — Preview screen: video playback, transcript list, speaker styles, save
+ * Subtitle rendering delegated to subtitleEngine.js
+ * Style controls delegated to styleControls.js
+ * Popup editors delegated to popups.js
  */
 
-import { apiFetch, showScreen, switchTab, fmtTime, escHtml, parseTime } from './utils.js';
+import { apiFetch, showScreen, switchTab, fmtTime, escHtml } from './utils.js';
 import * as S from './state.js';
-import { renderTimeline, updatePlayhead, updateTimeDisplay } from './timeline.js';
+import { pushUndoSnapshot, popUndoSnapshot } from './state.js';
+import { renderTimeline } from './timeline.js';
 import { openSplitDialog, mergeSegmentWithNext } from './timeline.js';
 import { loadJobs } from './jobs.js';
 import { clearFile } from './upload.js';
+import { onStyleChange, startSubtitleSync, renderActiveSubtitles, injectSetActiveSeg } from './subtitleEngine.js';
+import { setupStyleControls } from './styleControls.js';
+import { openTimeEditor, openSpeakerPicker, injectPopupCallbacks } from './popups.js';
 
 // ── DOM Refs ───────────────────────────────────────────────────────────────
 const previewVideo     = document.getElementById('previewVideo');
@@ -22,39 +29,19 @@ const startRenderBtn   = document.getElementById('startRenderBtn');
 const fullscreenBtn    = document.getElementById('fullscreenBtn');
 const videoWrap        = document.querySelector('.video-preview-wrap');
 
-// Style controls
-const fontFamilyEl    = document.getElementById('fontFamily');
-const fontSizeEl      = document.getElementById('fontSize');
-const fontSizeVal     = document.getElementById('fontSizeVal');
-const fontColorEl     = document.getElementById('fontColor');
-const strokeEnabledEl = document.getElementById('strokeEnabled');
-const strokeControls  = document.getElementById('strokeControls');
-const strokeColorEl   = document.getElementById('strokeColor');
-const strokeWidthEl   = document.getElementById('strokeWidth');
-const strokeWidthVal  = document.getElementById('strokeWidthVal');
-const glowEnabledEl   = document.getElementById('glowEnabled');
-const glowControls    = document.getElementById('glowControls');
-const glowColorEl     = document.getElementById('glowColor');
-const glowBlurEl      = document.getElementById('glowBlur');
-const glowBlurVal     = document.getElementById('glowBlurVal');
-const bgBoxEnabledEl  = document.getElementById('bgBoxEnabled');
-const bgBoxControls   = document.getElementById('bgBoxControls');
-const bgBoxColorEl    = document.getElementById('bgBoxColor');
-const bgOpacityEl     = document.getElementById('bgOpacity');
-const bgOpacityVal    = document.getElementById('bgOpacityVal');
-const animGrid        = document.getElementById('animGrid');
-const positionGrid    = document.getElementById('positionGrid');
-const presetGrid      = document.getElementById('presetGrid');
-const colorSwatches   = document.getElementById('colorSwatches');
-
-// Speaker style panel
+// Speaker style panel DOM refs
 const speakerStylesSection = document.getElementById('speakerStylesSection');
 const speakerStylesPanel   = document.getElementById('speakerStylesPanel');
+const strokeColorEl        = document.getElementById('strokeColor');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 export function setupPreview() {
   setupPreviewControls();
   setupStyleControls();
+  // Inject setActiveSeg into subtitle engine (avoids circular dep)
+  injectSetActiveSeg(setActiveSeg);
+  // Inject callbacks into popups module
+  injectPopupCallbacks({ renderTranscriptList, buildSpeakerStylePanel, scheduleAutoSave });
 }
 
 // ── Save / Auto-Save ───────────────────────────────────────────────────────
@@ -241,7 +228,10 @@ export function renderTranscriptList() {
     });
     if (S.editMode) {
       const textEl = div.querySelector('.seg-text');
+      let _undoPushed = false;
+      textEl.addEventListener('focus', () => { _undoPushed = false; });
       textEl.addEventListener('input', () => {
+        if (!_undoPushed) { pushUndoSnapshot(); _undoPushed = true; }
         S.transcriptData[idx].text = textEl.textContent;
         scheduleAutoSave();
       });
@@ -308,14 +298,20 @@ function initOriginalTranscriptToggle() {
 
   if (!toggleWrap || !toggleInput) return;
 
+  // Labels reflect the audit's terminology: the "raw" view shows the
+  // pre-sanitization snapshot from ElevenLabs Scribe (saved by the STT
+  // engine before sanitize_timestamps mutates anything), while the
+  // "refined" view shows the user-edited / Gemini-regrouped transcript.
   toggleInput.addEventListener('change', () => {
     S.setShowingOriginal(toggleInput.checked);
     if (S.showingOriginal) {
-      label.textContent = 'ElevenLabs';
+      label.textContent = 'Raw ElevenLabs';
+      label.title = 'Word-level data exactly as ElevenLabs Scribe returned it (pre-sanitization).';
       editBtn.style.display = 'none';
       renderOriginalTranscriptList();
     } else {
       label.textContent = 'Refined';
+      label.title = 'Sanitized + Gemini-regrouped transcript with your edits.';
       editBtn.style.display = '';
       renderTranscriptList();
     }
@@ -348,538 +344,6 @@ export function setActiveSeg(idx) {
   if (active) active.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
-// ── Time Editor Popup ──────────────────────────────────────────────────────
-let activeTimeEditor = null;
-
-function closeTimeEditor() {
-  if (activeTimeEditor) { activeTimeEditor.remove(); activeTimeEditor = null; }
-}
-
-function openTimeEditor(anchorEl, segIdx) {
-  closeTimeEditor();
-  closeSpeakerPicker();
-
-  const seg = S.transcriptData[segIdx];
-  const popup = document.createElement('div');
-  popup.className = 'time-editor-popup';
-  popup.innerHTML = `
-    <div class="time-editor-header">Edit Timing</div>
-    <div class="time-editor-fields">
-      <div class="time-editor-field">
-        <label class="time-editor-label">Start</label>
-        <div class="time-editor-spin">
-          <button class="time-spin-btn" data-field="start" data-dir="-1">−</button>
-          <input class="time-editor-input" id="teStartInput" type="text" value="${fmtTime(seg.start)}" />
-          <button class="time-spin-btn" data-field="start" data-dir="1">+</button>
-        </div>
-      </div>
-      <div class="time-editor-field">
-        <label class="time-editor-label">End</label>
-        <div class="time-editor-spin">
-          <button class="time-spin-btn" data-field="end" data-dir="-1">−</button>
-          <input class="time-editor-input" id="teEndInput" type="text" value="${fmtTime(seg.end)}" />
-          <button class="time-spin-btn" data-field="end" data-dir="1">+</button>
-        </div>
-      </div>
-    </div>
-    <div class="time-editor-error hidden" id="teError">Invalid values</div>
-    <div class="time-editor-actions">
-      <button class="btn-secondary btn-sm" id="teCancelBtn">Cancel</button>
-      <button class="btn-primary btn-sm" id="teConfirmBtn">Apply</button>
-    </div>
-  `;
-
-  document.body.appendChild(popup);
-  const rect = anchorEl.getBoundingClientRect();
-  let left = rect.left;
-  let top = rect.bottom + 4;
-  const popW = 220;
-  if (left + popW > window.innerWidth - 8) left = window.innerWidth - popW - 8;
-  if (top < 0) top = 0;
-  popup.style.left = `${left}px`;
-  popup.style.top  = `${top}px`;
-
-  activeTimeEditor = popup;
-
-  const startInput = popup.querySelector('#teStartInput');
-  const endInput   = popup.querySelector('#teEndInput');
-  const errEl      = popup.querySelector('#teError');
-
-  popup.querySelectorAll('.time-spin-btn').forEach(btn => {
-    btn.addEventListener('mousedown', (e) => { e.preventDefault(); });
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const field = btn.dataset.field;
-      const dir   = parseFloat(btn.dataset.dir);
-      const inp   = field === 'start' ? startInput : endInput;
-      const val   = parseTime(inp.value);
-      if (val !== null) {
-        inp.value = fmtTime(Math.max(0, parseFloat((val + dir * 0.1).toFixed(1))));
-      }
-    });
-  });
-
-  function applyChanges() {
-    const newStart = parseTime(startInput.value);
-    const newEnd   = parseTime(endInput.value);
-    errEl.classList.add('hidden');
-    if (newStart === null || newEnd === null) {
-      errEl.textContent = 'Invalid time format (use M:SS.d)';
-      errEl.classList.remove('hidden'); return;
-    }
-    if (newStart < 0) {
-      errEl.textContent = 'Start cannot be negative'; errEl.classList.remove('hidden'); return;
-    }
-    if (newEnd <= newStart) {
-      errEl.textContent = 'End must be after Start'; errEl.classList.remove('hidden'); return;
-    }
-    S.transcriptData[segIdx].start = parseFloat(newStart.toFixed(1));
-    S.transcriptData[segIdx].end   = parseFloat(newEnd.toFixed(1));
-    closeTimeEditor();
-    renderTranscriptList();
-    renderTimeline();
-    onStyleChange();
-    scheduleAutoSave();
-  }
-
-  popup.querySelector('#teConfirmBtn').addEventListener('click', (e) => { e.stopPropagation(); applyChanges(); });
-  popup.querySelector('#teCancelBtn').addEventListener('click', (e) => { e.stopPropagation(); closeTimeEditor(); });
-  startInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') applyChanges(); if (e.key === 'Escape') closeTimeEditor(); });
-  endInput.addEventListener('keydown',   (e) => { if (e.key === 'Enter') applyChanges(); if (e.key === 'Escape') closeTimeEditor(); });
-
-  startInput.addEventListener('focus', () => startInput.select());
-  endInput.addEventListener('focus',   () => endInput.select());
-  startInput.focus();
-
-  setTimeout(() => {
-    document.addEventListener('click', closeTimeEditor, { once: true });
-  }, 0);
-}
-
-// ── Speaker Picker ─────────────────────────────────────────────────────────
-let activeSpeakerPicker = null;
-
-function closeSpeakerPicker() {
-  if (activeSpeakerPicker) {
-    activeSpeakerPicker.remove();
-    activeSpeakerPicker = null;
-  }
-}
-
-function openSpeakerPicker(anchorEl, segIdx) {
-  closeSpeakerPicker();
-  closeTimeEditor();
-
-  const seen = [];
-  S.transcriptData.forEach(s => {
-    const sp = s.speaker || 'SPEAKER_00';
-    if (!seen.includes(sp)) seen.push(sp);
-  });
-
-  const currentSpeaker = S.transcriptData[segIdx].speaker || 'SPEAKER_00';
-
-  const picker = document.createElement('div');
-  picker.className = 'speaker-picker-popup';
-  picker.innerHTML = `
-    <div class="speaker-picker-header">Change Speaker</div>
-    <div class="speaker-picker-list">
-      ${seen.map(sp => {
-        const idx = parseInt((sp.match(/\d+$/) || ['0'])[0], 10);
-        const color = S.getSpeakerColor(sp);
-        const label = `S${idx}`;
-        const active = sp === currentSpeaker ? ' speaker-picker-item-active' : '';
-        return `<button class="speaker-picker-item${active}" data-speaker="${sp}" style="--sp-color:${color}">
-          <span class="speaker-picker-badge" style="color:${color};border-color:${color}">${label}</span>
-          <span class="speaker-picker-name">Speaker ${idx}</span>
-          ${sp === currentSpeaker ? '<span class="speaker-picker-check">✓</span>' : ''}
-        </button>`;
-      }).join('')}
-      <div class="speaker-picker-divider"></div>
-      <button class="speaker-picker-item speaker-picker-new" data-speaker="__new__">
-        <span class="speaker-picker-badge" style="color:var(--text-2);border-color:var(--border-2)">+</span>
-        <span class="speaker-picker-name">New Speaker…</span>
-      </button>
-    </div>
-  `;
-
-  document.body.appendChild(picker);
-  const rect = anchorEl.getBoundingClientRect();
-  const pickerW = 180;
-  let left = rect.left;
-  let top = rect.bottom + 4;
-  if (left + pickerW > window.innerWidth - 8) left = window.innerWidth - pickerW - 8;
-  if (top < 0) top = 0;
-  picker.style.left = `${left}px`;
-  picker.style.top = `${top}px`;
-
-  activeSpeakerPicker = picker;
-
-  picker.querySelectorAll('.speaker-picker-item').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const sp = btn.dataset.speaker;
-      if (sp === '__new__') {
-        const input = prompt('Enter new speaker ID (e.g. SPEAKER_02):', `SPEAKER_0${seen.length}`);
-        if (!input || !input.trim()) { closeSpeakerPicker(); return; }
-        const newSp = input.trim().toUpperCase().replace(/\s+/g, '_');
-        if (!S.speakerStyles[newSp]) {
-          const nIdx = parseInt((newSp.match(/\d+$/) || ['0'])[0], 10);
-          S.speakerStyles[newSp] = { color: S.SPEAKER_COLORS[nIdx % S.SPEAKER_COLORS.length] };
-        }
-        S.transcriptData[segIdx].speaker = newSp;
-      } else {
-        S.transcriptData[segIdx].speaker = sp;
-      }
-      closeSpeakerPicker();
-      renderTranscriptList();
-      buildSpeakerStylePanel();
-      onStyleChange();
-      scheduleAutoSave();
-    });
-  });
-
-  setTimeout(() => {
-    document.addEventListener('click', closeSpeakerPicker, { once: true });
-  }, 0);
-}
-
-// ── Subtitle Sync Loop ─────────────────────────────────────────────────────
-function startSubtitleSync() {
-  if (S.subtitleTimer) cancelAnimationFrame(S.subtitleTimer);
-
-  let lastActiveKey = '';
-
-  function tick() {
-    const t = previewVideo.currentTime;
-
-    updatePlayhead(t);
-    updateTimeDisplay(t);
-
-    const activeSegs = S.transcriptData
-      .map((s, i) => ({ ...s, _idx: i }))
-      .filter(s => t >= s.start && t <= s.end);
-
-    const activeKey = activeSegs.map(s => s._idx).join(',');
-
-    if (activeKey !== lastActiveKey) {
-      lastActiveKey = activeKey;
-      setActiveSeg(activeSegs.length > 0 ? activeSegs[0]._idx : -1);
-      renderActiveSubtitles(activeSegs, t);
-    } else if (activeSegs.length > 0 && (S.currentAnim === 'karaoke' || S.currentAnim === 'narration-pop')) {
-      activeSegs.forEach(seg => updateKaraokeHighlight(seg, t, seg._idx));
-    }
-
-    S.setSubtitleTimer(requestAnimationFrame(tick));
-  }
-
-  S.setSubtitleTimer(requestAnimationFrame(tick));
-}
-
-export function renderActiveSubtitles(activeSegs, currentTime) {
-  subtitleContainer.innerHTML = '';
-
-  subtitleOverlay.style.alignItems = '';
-  subtitleOverlay.style.justifyContent = '';
-
-  if (activeSegs.length === 0) return;
-
-  const style = collectStyle();
-
-  const isMultiSpeaker = new Set(S.transcriptData.map(s => s.speaker || 'SPEAKER_00')).size > 1;
-
-  activeSegs.forEach((seg, layerIdx) => {
-    const speakerColor       = isMultiSpeaker ? S.getSpeakerColor(seg.speaker) : null;
-    const speakerStrokeColor = isMultiSpeaker ? S.getSpeakerStrokeColor(seg.speaker) : null;
-    const words = seg.text.split(' ');
-
-    const wordsHtml = words.map((w) => {
-      return `<span class="sub-word" style="${buildWordStyle(style, speakerColor, speakerStrokeColor)}">${escHtml(w)}</span>`;
-    }).join('');
-
-    const lineDiv = document.createElement('div');
-    lineDiv.className = `subtitle-line anim-${S.currentAnim} speaker-layer-${layerIdx} draggable`;
-    lineDiv.dataset.segIdx = seg._idx;
-    lineDiv.dataset.speaker = seg.speaker || 'SPEAKER_00';
-    lineDiv.style.cssText = buildLineStyle(style, speakerColor, layerIdx);
-
-    if (seg.posOverride || seg.pos_override) {
-      const px = seg.posX ?? seg.pos_x ?? 50;
-      const py = seg.posY ?? seg.pos_y ?? 85;
-      lineDiv.style.position = 'absolute';
-      lineDiv.style.left = px + '%';
-      lineDiv.style.top = py + '%';
-      lineDiv.style.transform = 'translate(-50%, -50%)';
-    }
-
-    lineDiv.innerHTML = wordsHtml;
-
-    // Drag to reposition subtitle
-    lineDiv.addEventListener('mousedown', (e) => {
-      if (e.button !== 0) return;
-      e.preventDefault();
-      const segIdx = parseInt(lineDiv.dataset.segIdx);
-      const overlayRect = subtitleOverlay.getBoundingClientRect();
-      const lineRect = lineDiv.getBoundingClientRect();
-      const actualPosX = ((lineRect.left + lineRect.width / 2) - overlayRect.left) / overlayRect.width * 100;
-      const actualPosY = ((lineRect.top + lineRect.height / 2) - overlayRect.top) / overlayRect.height * 100;
-
-      const segData = S.transcriptData[segIdx];
-      segData.posX = actualPosX;
-      segData.pos_x = actualPosX;
-      segData.posY = actualPosY;
-      segData.pos_y = actualPosY;
-      segData.posOverride = true;
-      segData.pos_override = true;
-
-      lineDiv.style.position = 'absolute';
-      lineDiv.style.left = actualPosX + '%';
-      lineDiv.style.top = actualPosY + '%';
-      lineDiv.style.transform = 'translate(-50%, -50%)';
-
-      S.setSubtitleDragState({
-        segIdx,
-        startX: e.clientX,
-        startY: e.clientY,
-        overlayRect,
-        origPosX: actualPosX,
-        origPosY: actualPosY,
-      });
-      lineDiv.classList.add('dragging');
-    });
-
-    subtitleContainer.appendChild(lineDiv);
-
-    if ((S.currentAnim === 'karaoke' || S.currentAnim === 'narration-pop') && seg.words) {
-      updateKaraokeHighlight(seg, currentTime, seg._idx);
-    }
-  });
-}
-
-function updateKaraokeHighlight(seg, currentTime, segIdx) {
-  if (!seg.words || !seg.words.length) return;
-  const lineDiv = subtitleContainer.querySelector(`[data-seg-idx="${segIdx}"]`);
-  if (!lineDiv) return;
-  const wordEls = lineDiv.querySelectorAll('.sub-word');
-  if (!wordEls.length) return;
-
-  seg.words.forEach((w, i) => {
-    if (!wordEls[i]) return;
-    const isActive = currentTime >= w.start && currentTime <= w.end;
-    wordEls[i].classList.toggle('karaoke-active', isActive);
-    if (isActive) {
-      wordEls[i].style.color = fontColorEl.value;
-    } else {
-      wordEls[i].style.color = '';
-    }
-  });
-}
-
-// ── Style Computation ──────────────────────────────────────────────────────
-export function collectStyle() {
-  return {
-    fontFamily:    fontFamilyEl.value,
-    fontSize:      parseInt(fontSizeEl.value),
-    fontColor:     fontColorEl.value,
-    strokeEnabled: strokeEnabledEl.checked,
-    strokeColor:   strokeColorEl.value,
-    strokeWidth:   parseInt(strokeWidthEl.value),
-    glowEnabled:   glowEnabledEl.checked,
-    glowColor:     glowColorEl.value,
-    glowBlur:      parseInt(glowBlurEl.value),
-    bgBoxEnabled:  bgBoxEnabledEl.checked,
-    bgBoxColor:    bgBoxColorEl ? bgBoxColorEl.value : '#000000',
-    bgOpacity:     bgOpacityEl ? parseInt(bgOpacityEl.value) : 60,
-    speakerStyles: Object.fromEntries(
-      Object.entries(S.speakerStyles).map(([k, v]) => [k, { color: v.color, strokeColor: v.strokeColor || null }])
-    ),
-  };
-}
-
-function buildWordStyle(style, speakerColor, speakerStrokeColor) {
-  let parts = [];
-  let shadows = [];
-
-  if (style.strokeEnabled && style.strokeWidth > 0) {
-    const w = Math.round(style.strokeWidth * S.fsScale);
-    const c = speakerStrokeColor || style.strokeColor;
-    shadows.push(
-      `${w}px ${w}px 0 ${c}`,
-      `-${w}px ${w}px 0 ${c}`,
-      `${w}px -${w}px 0 ${c}`,
-      `-${w}px -${w}px 0 ${c}`,
-      `${w}px 0 0 ${c}`,
-      `-${w}px 0 0 ${c}`,
-      `0 ${w}px 0 ${c}`,
-      `0 -${w}px 0 ${c}`
-    );
-  }
-
-  if (style.glowEnabled && style.glowBlur > 0) {
-    const gb = Math.round(style.glowBlur * S.fsScale);
-    const gc = style.glowColor;
-    shadows.push(`0 0 ${gb}px ${gc}`, `0 0 ${gb * 2}px ${gc}`);
-  }
-
-  if (shadows.length > 0) {
-    parts.push(`text-shadow: ${shadows.join(', ')}`);
-  }
-
-  if (style.bgBoxEnabled) {
-    const hex = style.bgBoxColor;
-    const r = parseInt(hex.slice(1,3),16);
-    const g = parseInt(hex.slice(3,5),16);
-    const b = parseInt(hex.slice(5,7),16);
-    const a = (style.bgOpacity / 100).toFixed(2);
-    parts.push(`background: rgba(${r},${g},${b},${a})`);
-    parts.push('padding: 4px 10px');
-    parts.push('border-radius: 6px');
-  }
-
-  return parts.join('; ');
-}
-
-function buildLineStyle(style, speakerColor, layerIdx) {
-  const color = speakerColor || style.fontColor;
-  const marginBottom = layerIdx > 0 ? `${layerIdx * 2.8}em` : '0';
-
-  let parts = [
-    `font-family: ${style.fontFamily}`,
-    `font-size: ${Math.round(style.fontSize * S.fsScale)}px`,
-    `color: ${color}`,
-    `font-weight: 800`,
-    `line-height: 1.2`,
-    `margin-bottom: ${marginBottom}`,
-  ];
-
-  return parts.join('; ');
-}
-
-// Trigger re-render when style changes
-export function onStyleChange() {
-  if (subtitleContainer.children.length > 0) {
-    const t = previewVideo.currentTime;
-    const activeSegs = S.transcriptData
-      .map((s, i) => ({ ...s, _idx: i }))
-      .filter(s => t >= s.start && t <= s.end);
-    if (activeSegs.length > 0) renderActiveSubtitles(activeSegs, t);
-  }
-}
-
-// ── Style Controls Setup ──────────────────────────────────────────────────
-function setupStyleControls() {
-  fontSizeEl.addEventListener('input', () => {
-    fontSizeVal.textContent = fontSizeEl.value;
-    onStyleChange();
-  });
-  strokeWidthEl.addEventListener('input', () => {
-    strokeWidthVal.textContent = strokeWidthEl.value;
-    onStyleChange();
-  });
-  glowBlurEl.addEventListener('input', () => {
-    glowBlurVal.textContent = glowBlurEl.value;
-    onStyleChange();
-  });
-  bgOpacityEl.addEventListener('input', () => {
-    bgOpacityVal.textContent = bgOpacityEl.value;
-    onStyleChange();
-  });
-
-  fontColorEl.addEventListener('input', onStyleChange);
-  strokeColorEl.addEventListener('input', onStyleChange);
-  glowColorEl.addEventListener('input', onStyleChange);
-  bgBoxColorEl.addEventListener('input', onStyleChange);
-  fontFamilyEl.addEventListener('change', onStyleChange);
-
-  strokeEnabledEl.addEventListener('change', () => {
-    strokeControls.classList.toggle('hidden', !strokeEnabledEl.checked);
-    onStyleChange();
-  });
-  glowEnabledEl.addEventListener('change', () => {
-    glowControls.classList.toggle('hidden', !glowEnabledEl.checked);
-    onStyleChange();
-  });
-  bgBoxEnabledEl.addEventListener('change', () => {
-    bgBoxControls.classList.toggle('hidden', !bgBoxEnabledEl.checked);
-    onStyleChange();
-  });
-
-  colorSwatches.querySelectorAll('.swatch').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const color = btn.dataset.color;
-      fontColorEl.value = color;
-      colorSwatches.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
-      btn.classList.add('active');
-      onStyleChange();
-    });
-  });
-
-  animGrid.querySelectorAll('.anim-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      animGrid.querySelectorAll('.anim-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      S.setCurrentAnim(btn.dataset.anim);
-      onStyleChange();
-    });
-  });
-
-  positionGrid.querySelectorAll('.pos-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      positionGrid.querySelectorAll('.pos-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      S.setCurrentPos(btn.dataset.pos);
-      subtitleOverlay.className = 'subtitle-overlay pos-' + S.currentPos;
-    });
-  });
-
-  presetGrid.querySelectorAll('.preset-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      presetGrid.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
-      applyPreset(btn.dataset.preset);
-    });
-  });
-}
-
-export function applyPreset(name) {
-  const p = S.PRESETS[name];
-  if (!p) return;
-
-  fontFamilyEl.value = p.fontFamily;
-  fontSizeEl.value = p.fontSize;
-  fontSizeVal.textContent = p.fontSize;
-  fontColorEl.value = p.fontColor;
-  strokeEnabledEl.checked = p.strokeEnabled;
-  strokeControls.classList.toggle('hidden', !p.strokeEnabled);
-  strokeColorEl.value = p.strokeColor;
-  strokeWidthEl.value = p.strokeWidth;
-  strokeWidthVal.textContent = p.strokeWidth;
-  glowEnabledEl.checked = p.glowEnabled;
-  glowControls.classList.toggle('hidden', !p.glowEnabled);
-  glowColorEl.value = p.glowColor;
-  glowBlurEl.value = p.glowBlur;
-  glowBlurVal.textContent = p.glowBlur;
-  bgBoxEnabledEl.checked = p.bgBoxEnabled || false;
-  bgBoxControls.classList.toggle('hidden', !p.bgBoxEnabled);
-  if (p.bgBoxColor) bgBoxColorEl.value = p.bgBoxColor;
-  if (p.bgOpacity !== undefined) {
-    bgOpacityEl.value = p.bgOpacity;
-    bgOpacityVal.textContent = p.bgOpacity;
-  }
-
-  S.setCurrentAnim(p.anim);
-  animGrid.querySelectorAll('.anim-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.anim === p.anim);
-  });
-
-  S.setCurrentPos(p.pos);
-  positionGrid.querySelectorAll('.pos-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.pos === p.pos);
-  });
-  subtitleOverlay.className = 'subtitle-overlay pos-' + S.currentPos;
-
-  onStyleChange();
-}
-
 // ── Preview Controls ───────────────────────────────────────────────────────
 function setupPreviewControls() {
   const saveBtn = document.getElementById('saveTranscriptBtn');
@@ -893,6 +357,14 @@ function setupPreviewControls() {
       if (previewScreen && previewScreen.classList.contains('active')) {
         e.preventDefault();
         saveTranscript(false);
+      }
+    }
+    // Ctrl+Z — Undo last transcript change
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+      const previewScreen = document.getElementById('screen-preview');
+      if (previewScreen && previewScreen.classList.contains('active')) {
+        e.preventDefault();
+        performUndo();
       }
     }
   });
@@ -1011,6 +483,39 @@ function setupPreviewControls() {
       onStyleChange();
     }
   });
+}
+
+// ── Undo ───────────────────────────────────────────────────────────────────
+function performUndo() {
+  const snapshot = popUndoSnapshot();
+  if (!snapshot) {
+    showUndoToast('Nothing to undo');
+    return;
+  }
+  S.setTranscriptData(snapshot);
+  renderTranscriptList();
+  renderTimeline();
+  onStyleChange();
+  scheduleAutoSave();
+  showUndoToast('Undo successful');
+}
+
+function showUndoToast(msg) {
+  let toast = document.getElementById('undoToast');
+  if (!toast) {
+    toast = document.createElement('div');
+    toast.id = 'undoToast';
+    toast.className = 'undo-toast';
+    document.body.appendChild(toast);
+  }
+  toast.textContent = msg;
+  toast.classList.remove('undo-toast-hide');
+  toast.classList.add('undo-toast-show');
+  clearTimeout(toast._hideTimer);
+  toast._hideTimer = setTimeout(() => {
+    toast.classList.remove('undo-toast-show');
+    toast.classList.add('undo-toast-hide');
+  }, 1500);
 }
 
 function toggleFullscreen() {
