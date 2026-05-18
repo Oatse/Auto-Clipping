@@ -7,7 +7,7 @@
  *   Bottom: zoomed VTuber / face cam area
  */
 
-import { apiFetch } from './utils.js';
+import { apiFetch, formatBytes, fmtTimeShort, toast } from './utils.js';
 
 // ── State ──────────────────────────────────────────────────────────────────
 
@@ -73,7 +73,7 @@ async function handleSmUpload(file) {
   const allowed = ['.mp4', '.mov', '.mkv', '.avi'];
   const ext = '.' + file.name.split('.').pop().toLowerCase();
   if (!allowed.includes(ext)) {
-    alert('Only video files are accepted (.mp4, .mov, .mkv, .avi)');
+    toast.warn('Only video files are accepted (.mp4, .mov, .mkv, .avi)');
     return;
   }
 
@@ -98,7 +98,7 @@ async function handleSmUpload(file) {
     // Fetch video info + default crops
     await loadVideoInfo();
   } catch (err) {
-    alert('Upload error: ' + err.message);
+    toast.error('Upload error: ' + err.message);
     showSmPhase('upload');
   }
 }
@@ -132,7 +132,7 @@ async function loadVideoInfo() {
     drawCropOverlay();
     drawShortPreview();
   } catch (err) {
-    alert('Error loading video info: ' + err.message);
+    toast.error('Error loading video info: ' + err.message);
     showSmPhase('upload');
   }
 }
@@ -406,7 +406,7 @@ async function startSmProcess() {
     // Start polling
     smPollTimer = setInterval(pollSmStatus, 1500);
   } catch (err) {
-    alert('Error starting process: ' + err.message);
+    toast.error('Error starting process: ' + err.message);
     showSmPhase('editor');
   }
 }
@@ -434,7 +434,7 @@ async function pollSmStatus() {
     } else if (data.status === 'failed') {
       clearInterval(smPollTimer);
       smPollTimer = null;
-      alert('Processing failed: ' + (data.error || 'Unknown error'));
+      toast.error('Processing failed: ' + (data.error || 'Unknown error'));
       showSmPhase('editor');
     }
   } catch (err) {
@@ -474,15 +474,5 @@ function resetShortMaker() {
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-function formatBytes(bytes) {
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-}
-
-function formatDuration(secs) {
-  if (!secs || isNaN(secs)) return '0:00';
-  const m = Math.floor(secs / 60);
-  const s = Math.floor(secs % 60);
-  return `${m}:${String(s).padStart(2, '0')}`;
-}
+// formatBytes and fmtTimeShort (as formatDuration) imported from utils.js
+const formatDuration = fmtTimeShort;

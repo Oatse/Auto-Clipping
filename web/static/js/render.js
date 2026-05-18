@@ -2,10 +2,11 @@
  * render.js — Render pipeline: render options modal, start render, AE export
  */
 
-import { apiFetch, showScreen } from './utils.js';
+import { apiFetch, showScreen, toast } from './utils.js';
 import * as S from './state.js';
-import { collectStyle } from './preview.js';
+import { collectStyle } from './subtitleEngine.js';
 import { loadJobs } from './jobs.js';
+import { collectEffectsConfig } from './effects.js';
 
 // ── DOM Refs ───────────────────────────────────────────────────────────────
 const previewVideo   = document.getElementById('previewVideo');
@@ -84,6 +85,11 @@ async function startRender(transcriptSource = 'refined') {
   styleConfig.transcript = chosenTranscript;
   styleConfig.transcriptSource = transcriptSource;
 
+  // Merge effects & filter config
+  const fxConfig = collectEffectsConfig();
+  styleConfig.effects = fxConfig.effects;
+  styleConfig.filter  = fxConfig.filter;
+
   // Scale font sizes from display to native video pixels
   const nativeWidth  = previewVideo.videoWidth  || 0;
   const nativeHeight = previewVideo.videoHeight || 0;
@@ -128,7 +134,7 @@ async function startRender(transcriptSource = 'refined') {
 
   } catch (err) {
     renderStatus.textContent = 'Error: ' + err.message;
-    alert('Render failed: ' + err.message);
+    toast.error('Render failed: ' + err.message);
     startRenderBtn.disabled = false;
     showScreen('preview');
   }
@@ -208,7 +214,7 @@ function setupAEExport() {
 
   exportAEBtn.addEventListener('click', async () => {
     if (!S.activeJobId) {
-      alert('No active job to export.');
+      toast.warn('No active job to export.');
       return;
     }
 
@@ -268,7 +274,7 @@ function setupAEExport() {
       URL.revokeObjectURL(url);
 
     } catch (err) {
-      alert('AE Export failed: ' + err.message);
+      toast.error('AE Export failed: ' + err.message);
     } finally {
       exportAEBtn.disabled = false;
       exportAEBtn.querySelector('.btn-text').textContent = 'Export .jsx';

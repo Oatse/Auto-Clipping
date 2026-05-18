@@ -628,3 +628,125 @@ select {
   font-weight: 700;
   color: var(--accent-3);
 }
+
+/* ════════════════════════════════════════════════════════════════════
+ * P8 — Toast notifications (replacement for native alert()).
+ * ════════════════════════════════════════════════════════════════════ */
+
+.toast-container {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 32px));
+  pointer-events: none;
+}
+
+.toast {
+  pointer-events: auto;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border-2);
+  background: var(--bg-3);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.45;
+  box-shadow: var(--shadow-lg);
+  /* Enter from right, slightly faded — Sonner-style. */
+  opacity: 0;
+  transform: translateX(20px) scale(0.97);
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
+  min-width: 0;
+}
+
+.toast.toast-enter {
+  opacity: 1;
+  transform: translateX(0) scale(1);
+}
+
+.toast.toast-leave {
+  opacity: 0;
+  transform: translateX(8px) scale(0.97);
+  transition-duration: var(--dur-fast);
+}
+
+.toast-icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  flex-shrink: 0;
+}
+
+.toast-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.toast-close {
+  background: transparent;
+  border: 0;
+  color: var(--text-3);
+  font-size: 18px;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color var(--dur-fast) var(--ease-out),
+              background-color var(--dur-fast) var(--ease-out);
+}
+.toast-close:hover {
+  color: var(--text);
+  background: var(--border-2);
+}
+
+/* Variant chrome — keeps the same dark surface but tints the icon
+   chip + the left accent so the variant reads at a glance. */
+.toast--info {
+  border-left: 3px solid var(--accent);
+}
+.toast--info .toast-icon {
+  background: rgba(99, 102, 241, 0.18);
+  color: var(--accent-3);
+}
+
+.toast--success {
+  border-left: 3px solid var(--green);
+}
+.toast--success .toast-icon {
+  background: rgba(16, 185, 129, 0.16);
+  color: var(--green);
+}
+
+.toast--warn {
+  border-left: 3px solid var(--warn);
+}
+.toast--warn .toast-icon {
+  background: var(--warn-soft);
+  color: var(--warn-on-bg);
+}
+
+.toast--error {
+  border-left: 3px solid var(--red);
+}
+.toast--error .toast-icon {
+  background: rgba(239, 68, 68, 0.18);
+  color: var(--red);
+}

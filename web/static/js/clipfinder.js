@@ -2,7 +2,7 @@
  * clipfinder.js — Clip Finder feature: YouTube clip detection via yt-dlp + Gemini AI
  */
 
-import { escHtml } from './utils.js';
+import { escHtml, toast } from './utils.js';
 
 // ── State ──────────────────────────────────────────────────────────────────
 let cfJobId = null;
@@ -53,7 +53,7 @@ export function setupClipFinder() {
     if (offsetRaw) {
       startOffset = cfParseTimeInput(offsetRaw);
       if (isNaN(startOffset) || startOffset < 0) {
-        alert('Invalid start time format. Use M:SS (e.g. 5:00) or seconds (e.g. 300).');
+        toast.warn('Invalid start time format. Use M:SS (e.g. 5:00) or seconds (e.g. 300).');
         return;
       }
     }
@@ -90,7 +90,7 @@ export function setupClipFinder() {
       cfStartSSE(job.id);
 
     } catch (err) {
-      alert('Error: ' + err.message);
+      toast.error(err.message || 'Unknown error');
       cfFindBtn.disabled = false;
       cfFindBtn.querySelector('.btn-text').textContent = 'Find Clips';
     }
@@ -117,7 +117,7 @@ export function setupClipFinder() {
       cfStartSSE(cfJobId);
 
     } catch (err) {
-      alert('Error: ' + err.message);
+      toast.error(err.message || 'Unknown error');
       cfDownloadAllBtn.disabled = false;
       cfDownloadAllBtn.classList.remove('loading');
       cfDownloadAllBtn.querySelector('.btn-text').textContent = 'Download All Clips';
@@ -590,7 +590,7 @@ async function cfDownloadSingleClip(btn, jobId) {
 
     throw new Error('Download timed out (>20 menit)');
   } catch (err) {
-    alert('Error: ' + err.message);
+    toast.error(err.message || 'Unknown error');
     btn.disabled = false;
     btn.innerHTML = `
       <svg width="14" height="14" viewBox="0 0 14 14" fill="none">

@@ -2,7 +2,7 @@
  * upload.js — Upload screen: drag-drop, file selection, form submit, clip picker
  */
 
-import { apiFetch, formatBytes, showScreen, escHtml } from './utils.js';
+import { apiFetch, formatBytes, formatClipDuration, showScreen, escHtml, toast } from './utils.js';
 import * as S from './state.js';
 import { openPreviewScreen } from './preview.js';
 import { loadJobs } from './jobs.js';
@@ -77,7 +77,7 @@ function setFile(file) {
   const validTypes = ['.mp4', '.mov', '.mkv', '.avi'];
   const ext = '.' + file.name.split('.').pop().toLowerCase();
   if (!validTypes.includes(ext)) {
-    alert('Please select a video file: MP4, MOV, MKV, or AVI');
+    toast.warn('Please select a video file: MP4, MOV, MKV, or AVI');
     return;
   }
   S.setSelectedFile(file);
@@ -268,7 +268,7 @@ function setupForm() {
 
       await watchTranscription(job.id);
     } catch (err) {
-      alert('Failed to start transcription: ' + err.message);
+      toast.error('Failed to start transcription: ' + err.message);
       showScreen('upload');
     } finally {
       transcribeBtn.classList.remove('loading');
@@ -471,7 +471,7 @@ export async function startJobFromClip(clipPath, clipFilename) {
 
     await watchTranscription(job.id);
   } catch (err) {
-    alert('Failed to start transcription: ' + err.message);
+    toast.error('Failed to start transcription: ' + err.message);
     showScreen('upload');
   } finally {
     transcribeBtnEl.classList.remove('loading');
@@ -481,7 +481,7 @@ export async function startJobFromClip(clipPath, clipFilename) {
 }
 
 // ── Clip Jobs List (in upload panel) ───────────────────────────────────────
-async function loadClipJobsList() {
+export async function loadClipJobsList() {
   const clipJobsList = document.getElementById('clipJobsList');
   if (!clipJobsList) return;
 
@@ -504,7 +504,7 @@ async function loadClipJobsList() {
         const start = typeof clip.start === 'number' ? clip.start : 0;
         const end = typeof clip.end === 'number' ? clip.end : 0;
         const duration = Math.max(0, end - start);
-        const durationLabel = duration > 0 ? formatClipDurationInline(duration) : '--';
+        const durationLabel = duration > 0 ? formatClipDuration(duration) : '--';
 
         const title = clip.title || clip.filename || `Clip ${clip.index + 1}`;
         const sourceTitle = job.video_title || job.url || job.job_id;
@@ -546,7 +546,7 @@ async function loadClipJobsList() {
           if (!durationEl) return;
           const seconds = Number(video.duration);
           if (Number.isFinite(seconds) && seconds > 0) {
-            durationEl.textContent = formatClipDurationInline(seconds);
+            durationEl.textContent = formatClipDuration(seconds);
           }
         });
 
@@ -571,10 +571,4 @@ async function loadClipJobsList() {
   }
 }
 
-function formatClipDurationInline(seconds) {
-  const total = Math.max(0, Math.floor(seconds));
-  const mins = Math.floor(total / 60);
-  const secs = total % 60;
-  if (mins > 0) return `${mins}m ${secs}s`;
-  return `${secs}s`;
-}
+// formatClipDuration imported from utils.js

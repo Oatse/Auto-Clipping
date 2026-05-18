@@ -114,3 +114,115 @@ export function setupNavTabs() {
     btn.addEventListener('click', () => switchTab(btn.dataset.tab));
   });
 }
+
+// ── Toast Notifications ──────────────────────────────────────────────────
+//
+// Replacement for native alert().  Native alert() is modal-blocking,
+// looks like a system dialog, and breaks the visual rhythm of the app.
+// This toast system shows a non-blocking, dismissable banner anchored
+// to the bottom-right of the viewport.
+//
+// Usage:
+//   import { toast } from './utils.js';
+//   toast('Saved');
+//   toast.error('Upload failed: ' + err.message);
+//   toast.warn('Cannot split a single-word segment');
+//   toast.success('Render complete');
+//
+// The container is created lazily on first call.  Each toast lives for
+// 4 s by default, with the timer paused on hover so users can read
+// long messages without rushing.
+
+let _toastContainer = null;
+const _TOAST_DEFAULT_MS = 4000;
+
+function _ensureToastContainer() {
+  if (_toastContainer && document.body.contains(_toastContainer)) {
+    return _toastContainer;
+  }
+  _toastContainer = document.createElement('div');
+  _toastContainer.id = 'toastContainer';
+  _toastContainer.className = 'toast-container';
+  // aria-live=polite so screen readers announce new toasts without
+  // interrupting the user.
+  _toastContainer.setAttribute('aria-live', 'polite');
+  _toastContainer.setAttribute('aria-atomic', 'false');
+  document.body.appendChild(_toastContainer);
+  return _toastContainer;
+}
+
+function _showToast(message, variant = 'info', durationMs = _TOAST_DEFAULT_MS) {
+  if (!message) return null;
+  const container = _ensureToastContainer();
+
+  const el = document.createElement('div');
+  el.className = `toast toast--${variant}`;
+  el.setAttribute('role', variant === 'error' ? 'alert' : 'status');
+
+  const iconMap = {
+    info: 'ℹ',
+    success: '✓',
+    warn: '⚠',
+    error: '✕',
+  };
+  el.innerHTML = `
+    <span class="toast-icon" aria-hidden="true">${iconMap[variant] || iconMap.info}</span>
+    <span class="toast-text"></span>
+    <button class="toast-close" aria-label="Dismiss">×</button>
+  `;
+  // Use textContent to neutralise any HTML in user/error messages.
+  el.querySelector('.toast-text').textContent = String(message);
+
+  let timer = null;
+  let remaining = durationMs;
+  let openedAt = Date.now();
+
+  const dismiss = () => {
+    if (!el.isConnected) return;
+    el.classList.add('toast-leave');
+    // Animation duration must match polish.css .toast leave transition.
+    setTimeout(() => el.remove(), 200);
+    if (timer) clearTimeout(timer);
+  };
+
+  const startTimer = () => {
+    openedAt = Date.now();
+    timer = setTimeout(dismiss, remaining);
+  };
+
+  // Pause timer while the user is hovering — prevents fast flickers
+  // from being unreadable.
+  el.addEventListener('mouseenter', () => {
+    if (timer) {
+      clearTimeout(timer);
+      remaining -= Date.now() - openedAt;
+      timer = null;
+    }
+  });
+  el.addEventListener('mouseleave', () => {
+    if (!timer && remaining > 0) startTimer();
+  });
+
+  el.querySelector('.toast-close').addEventListener('click', dismiss);
+
+  container.appendChild(el);
+  // Trigger entrance transition on next frame.
+  requestAnimationFrame(() => el.classList.add('toast-enter'));
+  startTimer();
+
+  return { dismiss };
+}
+
+/**
+ * Show a non-blocking toast.  Default variant is 'info'.
+ * Static methods .success/.error/.warn/.info are provided for clarity.
+ */
+export function toast(message, opts = {}) {
+  const variant = opts.variant || 'info';
+  const duration = opts.duration ?? _TOAST_DEFAULT_MS;
+  return _showToast(message, variant, duration);
+}
+toast.info    = (msg, opts = {}) => _showToast(msg, 'info',    opts.duration);
+toast.success = (msg, opts = {}) => _showToast(msg, 'success', opts.duration);
+toast.warn    = (msg, opts = {}) => _showToast(msg, 'warn',    opts.duration);
+toast.error   = (msg, opts = {}) => _showToast(msg, 'error',   opts.duration ?? 6000);

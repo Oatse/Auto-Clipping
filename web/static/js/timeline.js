@@ -2,7 +2,7 @@
  * timeline.js — Timeline component: ruler, segments, playhead, split/merge, keyboard shortcuts
  */
 
-import { fmtTime, fmtTimeShort, parseTime } from './utils.js';
+import { fmtTime, fmtTimeShort, parseTime, toast } from './utils.js';
 import * as S from './state.js';
 import { pushUndoSnapshot } from './state.js';
 import { renderTranscriptList, setActiveSeg, scheduleAutoSave } from './preview.js';
@@ -654,11 +654,11 @@ function confirmAddSegment() {
   const speaker = newSegSpeaker.value;
 
   if (isNaN(start) || isNaN(end) || start >= end) {
-    alert('Invalid time range.');
+    toast.warn('Invalid time range.');
     return;
   }
   if (!text) {
-    alert('Please enter subtitle text.');
+    toast.warn('Please enter subtitle text.');
     return;
   }
 
@@ -706,7 +706,7 @@ export function openSplitDialog(idx) {
   const seg   = S.transcriptData[idx];
   const words = seg.text.trim().split(/\s+/).filter(Boolean);
   if (words.length < 2) {
-    alert('Cannot split a segment that contains only one word.');
+    toast.warn('Cannot split a segment that contains only one word.');
     return;
   }
   S.setSplitDialogIdx(idx);
@@ -780,7 +780,7 @@ function confirmSplit() {
   const firstText  = words.slice(0, S.splitDialogWordIdx).join(' ');
   const secondText = words.slice(S.splitDialogWordIdx).join(' ');
   if (!firstText || !secondText) {
-    alert('Cannot create an empty segment. Adjust the split point.');
+    toast.warn('Cannot create an empty segment. Adjust the split point.');
     return;
   }
 

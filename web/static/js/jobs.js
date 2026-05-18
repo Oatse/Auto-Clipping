@@ -2,7 +2,7 @@
  * jobs.js — Job list, job detail modal, SSE log streaming, system info
  */
 
-import { apiFetch, timeAgo, escHtml, showScreen, formatClipDuration } from './utils.js';
+import { apiFetch, timeAgo, escHtml, showScreen, formatClipDuration, toast } from './utils.js';
 import * as S from './state.js';
 import { fetchTranscript, loadClipJobsList } from './upload.js';
 import { openPreviewScreen } from './preview.js';
@@ -225,7 +225,7 @@ async function resumeJob(jobId) {
   try {
     const transcript = await fetchTranscript(jobId);
     if (!transcript || !transcript.length) {
-      alert('Transcript belum tersedia untuk job ini.');
+      toast.warn('Transcript belum tersedia untuk job ini.');
       return;
     }
     S.setActiveJobId(jobId);
@@ -233,7 +233,7 @@ async function resumeJob(jobId) {
     openPreviewScreen(jobId);
   } catch (e) {
     console.error('Resume job failed:', e);
-    alert('Gagal membuka job untuk editing: ' + (e.message || e));
+    toast.error('Gagal membuka job untuk editing: ' + (e.message || e));
   }
 }
 
