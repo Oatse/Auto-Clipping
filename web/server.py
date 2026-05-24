@@ -40,10 +40,11 @@ except ImportError:  # pragma: no cover
     torch = None  # type: ignore
     _HAS_TORCH = False
 
-from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 from loguru import logger
 from pydantic import BaseModel
 
@@ -70,6 +71,11 @@ app.add_middleware(
 STATIC_DIR = Path(__file__).parent / "static"
 STATIC_DIR.mkdir(exist_ok=True)
 
+# Jinja2 templates — multi-page editorial structure
+TEMPLATES_DIR = Path(__file__).parent / "templates"
+TEMPLATES_DIR.mkdir(exist_ok=True)
+templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
 UPLOADS_DIR = Path("./output/uploads")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -80,6 +86,73 @@ OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 def _is_job_id(name: str) -> bool:
     """Return True if name looks like a 12-char hex job ID."""
     return bool(re.match(r'^[0-9a-f]{12}$', name))
+
+
+# ─── Upload streaming helpers ────────────────────────────────────────────────
+#
+# UploadFile.read() materialises the entire upload in RAM, which OOMs on
+# multi-GB videos and lets a single client exhaust the server's memory.
+# These helpers stream the body to disk in fixed-size chunks and enforce a
+# configurable size cap so abuse is bounded.
+
+class _UploadTooLargeError(Exception):
+    """Raised when the streaming upload exceeds config.MAX_UPLOAD_BYTES."""
+
+
+def _safe_upload_name(filename: str | None) -> str:
+    """Sanitise an uploaded filename for safe filesystem use.
+
+    Strips path separators, collapses whitespace, removes anything outside
+    a conservative whitelist, and caps total length so we never overflow
+    Windows' MAX_PATH when prepending the job_id prefix.
+    """
+    name = (filename or "video.mp4").strip()
+    # Drop any directory components a malicious client may have included.
+    name = name.replace("\\", "/").rsplit("/", 1)[-1]
+    # Whitelist: alnum, dot, dash, underscore. Replace everything else.
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
+    # Avoid double-extensions and absurd lengths.
+    if len(name) > 120:
+        stem, _, ext = name.rpartition(".")
+        name = (stem[: 120 - (len(ext) + 1)] + "." + ext) if ext else name[:120]
+    return name or "video.mp4"
+
+
+async def _save_upload_streaming(
+    upload: UploadFile,
+    dest: Path,
+    *,
+    chunk_bytes: int | None = None,
+    max_bytes: int | None = None,
+) -> int:
+    """Stream ``upload`` to ``dest`` and return the number of bytes written.
+
+    Raises :class:`_UploadTooLargeError` once the running total would
+    exceed ``max_bytes`` (defaults to ``config.MAX_UPLOAD_BYTES``).  The
+    partially-written file is left in place; the caller is responsible
+    for unlinking it after handling the error.
+    """
+    chunk_size: int = chunk_bytes or getattr(config, "UPLOAD_CHUNK_BYTES", 1024 * 1024)
+    max_size: int = max_bytes or getattr(config, "MAX_UPLOAD_BYTES", 4 * 1024 * 1024 * 1024)
+
+    written = 0
+    try:
+        with dest.open("wb") as out:
+            while True:
+                chunk = await upload.read(chunk_size)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_size:
+                    raise _UploadTooLargeError(
+                        f"Upload exceeds limit of {max_size} bytes "
+                        f"(received at least {written}). "
+                        "Increase MAX_UPLOAD_BYTES in .env or upload a smaller file."
+                    )
+                out.write(chunk)
+    finally:
+        await upload.close()
+    return written
 
 
 @app.on_event("startup")
@@ -166,6 +239,26 @@ from web.services.transcript_sync import (  # noqa: E402
 # In-memory job store (replace with Redis/DB for production)
 _jobs: dict[str, Job] = {}
 _job_tasks: dict[str, asyncio.Task] = {}
+
+
+def _track_job_task(job_id: str, task: asyncio.Task) -> None:
+    """Register a background task and ensure ``_job_tasks`` doesn't leak.
+
+    Without the done-callback the dict grows unbounded as completed Tasks
+    pile up after each /api/jobs request.  Tying the cleanup to
+    Task.add_done_callback keeps the bookkeeping local to the task itself
+    instead of scattered across every endpoint that creates one.
+    """
+    _job_tasks[job_id] = task
+
+    def _cleanup(_t: asyncio.Task) -> None:
+        # Only drop the entry if it's still pointing at the same task —
+        # a re-render would have replaced it with a fresh Task and we
+        # mustn't clobber the new mapping.
+        if _job_tasks.get(job_id) is _t:
+            _job_tasks.pop(job_id, None)
+
+    task.add_done_callback(_cleanup)
 
 
 # ─── System Info ──────────────────────────────────────────────────────────────
@@ -291,10 +384,21 @@ async def get_job(job_id: str):
 @app.delete("/api/jobs/{job_id}")
 async def delete_job(job_id: str):
     job = _get_job_or_404(job_id)
-    task = _job_tasks.get(job_id)
+    task = _job_tasks.pop(job_id, None)
     if task and not task.done():
         task.cancel()
-    del _jobs[job_id]
+        # Wait briefly for the task to acknowledge cancellation so we don't
+        # leave a half-written transcript / output file behind.  asyncio.shield
+        # ensures CancelledError from the task itself doesn't propagate up to
+        # the HTTP handler and turn into a 500.
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=5.0)
+        except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
+            # Task either took too long, was cancelled cleanly, or raised —
+            # either way, the cancel signal was delivered and the cleanup
+            # itself shouldn't block the delete response.
+            pass
+    _jobs.pop(job_id, None)
     return {"deleted": job_id}
 
 
@@ -333,12 +437,16 @@ async def create_job(
         raise HTTPException(status_code=400, detail="num_speakers must be between 1 and 6")
 
     job_id = uuid.uuid4().hex[:12]
-    upload_path = UPLOADS_DIR / f"{job_id}_{video.filename}"
+    safe_name = _safe_upload_name(video.filename)
+    upload_path = UPLOADS_DIR / f"{job_id}_{safe_name}"
 
-    # Save uploaded file
-    with upload_path.open("wb") as f:
-        content = await video.read()
-        f.write(content)
+    # Stream upload chunk-by-chunk so multi-GB files don't blow RAM, and
+    # enforce config.MAX_UPLOAD_BYTES so a malicious client can't fill disk.
+    try:
+        await _save_upload_streaming(video, upload_path)
+    except _UploadTooLargeError as exc:
+        upload_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=413, detail=str(exc))
 
     job = Job(
         id=job_id,
@@ -366,7 +474,7 @@ async def create_job(
                 style_config={},
             )
         )
-    _job_tasks[job_id] = task
+    _track_job_task(job_id, task)
 
     return job.model_dump(exclude={"log_lines"})
 
@@ -468,8 +576,23 @@ async def get_original_transcript(job_id: str):
     with original_file.open("r", encoding="utf-8") as f:
         raw = json.load(f)
 
+    # The on-disk format has changed over time:
+    #   - new jobs: ``{"segments": [...]}`` dict wrapper
+    #   - older jobs: a bare list of segments
+    # ``.get`` blows up on the list form, which used to crash this route
+    # with a 500.  Normalise to a list of segment dicts up front so the
+    # rest of the function only has to deal with one shape.
+    if isinstance(raw, list):
+        raw_segments = raw
+    elif isinstance(raw, dict):
+        raw_segments = raw.get("segments", [])
+    else:
+        raw_segments = []
+
     segments = []
-    for seg in raw.get("segments", raw if isinstance(raw, list) else []):
+    for seg in raw_segments:
+        if not isinstance(seg, dict):
+            continue
         entry = {
             "start": seg.get("start", 0),
             "end": seg.get("end", 0),
@@ -562,7 +685,7 @@ async def start_render(job_id: str, req: RenderRequest):
             style_config=req.style_config,
         )
     )
-    _job_tasks[job_id] = task
+    _track_job_task(job_id, task)
 
     return job.model_dump(exclude={"log_lines"})
 
@@ -734,7 +857,7 @@ def _build_clip_finder():
     return ClipFinder(
         cookies_file=getattr(config, "YTDLP_COOKIES_FILE", ""),
         cookies_browser=getattr(config, "YTDLP_COOKIES_BROWSER", ""),
-        gemini_model=getattr(config, "CLIP_FINDER_GEMINI_MODEL", "gemini-3-flash-preview"),
+        gemini_model=getattr(config, "CLIP_FINDER_GEMINI_MODEL", "gemini-3.5-flash"),
         cache_dir=getattr(config, "CLIP_FINDER_CACHE_DIR", None),
         ffmpeg_path=getattr(config, "FFMPEG_PATH", "ffmpeg"),
     )
@@ -889,7 +1012,7 @@ async def create_job_from_clip(
     task = asyncio.create_task(
         _run_transcription_only(job_id, clip_file, target_language)
     )
-    _job_tasks[job_id] = task
+    _track_job_task(job_id, task)
 
     return job.model_dump(exclude={"log_lines"})
 
@@ -1621,6 +1744,44 @@ async def short_maker_from_job(source_job_id: str):
     return {"job_id": job_id, "filename": source_job.filename}
 
 
+# ─── Page Routes (Jinja2 templates) ──────────────────────────────────────────
+
+@app.get("/", response_class=HTMLResponse)
+async def page_home(request: Request):
+    return templates.TemplateResponse(request, "pages/home.html", {"active": "home"})
+
+
+@app.get("/auto-subtitle", response_class=HTMLResponse)
+async def page_auto_subtitle(request: Request):
+    return templates.TemplateResponse(
+        request, "pages/auto_subtitle.html", {"active": "subtitle"},
+    )
+
+
+@app.get("/clip-finder", response_class=HTMLResponse)
+async def page_clip_finder(request: Request):
+    return templates.TemplateResponse(
+        request, "pages/clip_finder.html", {"active": "clipfinder"},
+    )
+
+
+@app.get("/short-maker", response_class=HTMLResponse)
+async def page_short_maker(request: Request):
+    return templates.TemplateResponse(
+        request, "pages/short_maker.html", {"active": "shortmaker"},
+    )
+
+
+@app.get("/editor", response_class=HTMLResponse)
+@app.get("/editor/{job_id}", response_class=HTMLResponse)
+async def page_editor(request: Request, job_id: str | None = None):
+    return templates.TemplateResponse(
+        request,
+        "pages/editor.html",
+        {"active": "editor", "job_id": job_id},
+    )
+
+
 # ─── Mount Static Files (must be last) ───────────────────────────────────────
 
-app.mount("/", StaticFiles(directory=str(STATIC_DIR), html=True), name="static")
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")

@@ -428,6 +428,12 @@ def _build_ass_content(
     # ── Fix same-speaker overlaps before building dialogue lines ──────────
     # Sort segments by (speaker, start) and trim any same-speaker overlaps
     # so subtitles for one speaker never stack on top of each other.
+    #
+    # IMPORTANT: trim only ``all_fields`` (the local tuple list) — never
+    # mutate the caller's segment objects.  This renderer is called from
+    # the pipeline runner with the live ``translated_segments`` list, and
+    # downstream phases (mux, AE export, preview re-render) re-read those
+    # objects.  Mutating them here would change end-times the user can see.
     _speaker_groups: dict[str, list[int]] = {}
     for _i, (_, _, _sp) in enumerate(all_fields):
         _speaker_groups.setdefault(_sp, []).append(_i)
@@ -439,20 +445,17 @@ def _build_ass_content(
             cur_idx = _indices[_k]
             nxt_idx = _indices[_k + 1]
             cur_start, cur_end, _ = all_fields[cur_idx]
-            nxt_start, nxt_end, _ = all_fields[nxt_idx]
+            nxt_start, _nxt_end, _ = all_fields[nxt_idx]
             if cur_end > nxt_start:
-                # Trim current segment's end to avoid overlap
-                new_end = max(cur_start + 0.05, nxt_start - 0.01)
+                # Shrink toward the next segment but never past its start.
+                # min() picks the smaller of (nxt_start - 0.01) and the
+                # original end, then max() ensures we don't go below
+                # cur_start + 0.05 (degenerate near-zero duration).
+                new_end = max(cur_start + 0.05, min(cur_end, nxt_start - 0.01))
                 all_fields[cur_idx] = (cur_start, new_end, _sp)
-                # Also update the actual segment object
-                _seg_obj = segments[cur_idx]
-                if isinstance(_seg_obj, dict):
-                    _seg_obj["end"] = new_end
-                else:
-                    _seg_obj.end = new_end
                 logger.debug(
                     "ASS: trimmed same-speaker overlap for {} seg#{}: "
-                    "end {:.3f} → {:.3f}",
+                    "end {:.3f} -> {:.3f}",
                     _sp, cur_idx, cur_end, new_end,
                 )
 
@@ -487,8 +490,9 @@ def _build_ass_content(
 
         line_margin_v = margin_v_base + stack_pos * margin_v_step
 
-        # ASS escapes: curly braces are control codes
-        text_esc = text.replace("{", "\\\{").replace("}", "\\\}")
+        # ASS escapes: curly braces are control codes — must be escaped as \{ \}
+        # Use raw strings so the literal output is "\{" / "\}" (single backslash + brace).
+        text_esc = text.replace("{", r"\{").replace("}", r"\}")
         anim_tag = _get_ass_anim_tag(style.get("animStyle", "word-pop"))
 
         # Extra stroke layers (rendered behind primary text)
@@ -662,114 +666,16 @@ class SubtitleRendererProcessor:
             len(unique_speakers) if unique_speakers else 1,
         )
 
-        # Always use ASS/FFmpeg path for all cases (single-speaker, multi-speaker,
-        # speaker detection on or off) for consistent rendering behaviour.
-        if segs:
-            return self._render_ass(video_path, output_path, segs, style)
-
-        # ── Single-speaker path: Pycaps ───────────────────────────────────────
-        try:
-            from pycaps import CapsPipelineBuilder  # type: ignore
-            from pycaps.layout import SubtitleLayoutOptions, VerticalAlignment, VerticalAlignmentType
-            from pycaps.common import ElementType, EventType
-        except ImportError:
-            raise ImportError(
-                "pycaps is not installed. Install it with: pip install git+https://github.com/francozanardi/pycaps.git"
-            )
-
-        pycaps_transcript = Path(pycaps_transcript)
-
-        # ── Compensate for Pycaps device_scale_factor (DSF) ───────────────────
-        # Pycaps' CssSubtitleRenderer renders word images at DSF× the CSS pixel
-        # size, then composites them onto the video at native resolution.  This
-        # effectively multiplies all CSS pixel sizes by DSF.  The frontend has
-        # already scaled fontSize / strokeWidth / glowBlur from preview-pixels
-        # to native-video-pixels (nativeWidth / displayedWidth), but that
-        # scaling assumes 1 CSS-px = 1 video-px.  Because Pycaps inserts an
-        # extra DSF multiplier we must divide by DSF so the final composited
-        # size matches the proportional size the user saw in the preview.
-        #
-        # DSF formula (mirrors CssSubtitleRenderer internals):
-        #   scale_modifier = clamp(video_height / 1280, 0.25, 5.0)
-        #   device_scale_factor = 2.0 × scale_modifier
-        vid_w, vid_h = _get_video_dimensions(video_path)
-        _pycaps_ref_h = 1280
-        _pycaps_base_dsf = 2.0
-        _scale_mod = max(0.25, min(5.0, vid_h / _pycaps_ref_h))
-        _pycaps_dsf = _pycaps_base_dsf * _scale_mod
-
-        pycaps_style = dict(style)
-        if _pycaps_dsf > 0:
-            pycaps_style["fontSize"]    = max(1, round(int(pycaps_style.get("fontSize", 40)) / _pycaps_dsf))
-            pycaps_style["strokeWidth"] = max(0, round(int(pycaps_style.get("strokeWidth", 3)) / _pycaps_dsf))
-            pycaps_style["glowBlur"]    = max(0, round(int(pycaps_style.get("glowBlur", 10)) / _pycaps_dsf))
-            # Scale extra stroke widths too
-            if pycaps_style.get("extraStrokes"):
-                pycaps_style["extraStrokes"] = [
-                    {"color": es.get("color", "#000000"), "width": max(0, round(int(es.get("width", 0)) / _pycaps_dsf))}
-                    for es in pycaps_style["extraStrokes"]
-                ]
-
-        logger.debug(
-            "Pycaps DSF correction: DSF={:.4f}, fontSize {} → {}, strokeWidth {} → {}, glowBlur {} → {}",
-            _pycaps_dsf,
-            style.get("fontSize"), pycaps_style["fontSize"],
-            style.get("strokeWidth"), pycaps_style["strokeWidth"],
-            style.get("glowBlur"), pycaps_style["glowBlur"],
-        )
-
-        # Build CSS from DSF-corrected style config
-        css_content = _build_css_from_style(pycaps_style)
-
-        # Map position string to Pycaps VerticalAlignmentType
-        pos_str = style.get("position", "bottom")
-        pos_map = {
-            "bottom": VerticalAlignmentType.BOTTOM,
-            "center": VerticalAlignmentType.CENTER,
-            "top":    VerticalAlignmentType.TOP,
-        }
-        v_align_type = pos_map.get(pos_str, VerticalAlignmentType.BOTTOM)
-
-        layout_options = SubtitleLayoutOptions(
-            max_width_ratio=0.85,
-            max_number_of_lines=2,
-            vertical_align=VerticalAlignment(align=v_align_type, offset=-0.05),
-        )
-
-        builder = CapsPipelineBuilder()
-
-        if hasattr(builder, "with_input_video"):
-            builder = builder.with_input_video(str(video_path))
-        elif hasattr(builder, "load_video"):
-            builder = builder.load_video(str(video_path))
-        else:
-            raise AttributeError(
-                "Unsupported pycaps CapsPipelineBuilder API: missing "
-                "'with_input_video' and 'load_video'."
-            )
-
-        builder = (
-            builder
-            .with_transcription_file(str(pycaps_transcript))
-            .add_css_content(css_content)
-            .with_layout_options(layout_options)
-            .with_output_video(str(output_path))
-        )
-
-        # Add word entry animation
-        anim_style = style.get("animStyle", "word-pop")
-        animation, element_type = _get_pycaps_animation(anim_style)
-        if animation is not None and element_type is not None:
-            builder = builder.add_animation(
-                animation,
-                EventType.ON_NARRATION_STARTS,
-                element_type,
-            )
-
-        builder.build().run()
-
-        logger.info("Subtitle rendering complete (Pycaps): {}", output_path.name)
-        return output_path
+        # All render paths route through ASS/FFmpeg.  The legacy Pycaps
+        # ``CapsPipelineBuilder`` path was retired (see git history) — it
+        # only ever ran for single-speaker, no-segments inputs and the
+        # pipeline runner now always passes ``segments``, so the branch
+        # was dead code that imported a heavy optional dependency at
+        # render-time.  ``pycaps_transcript`` (the JSON the renderer used
+        # to feed Pycaps) is still built upstream because the file is
+        # useful as a debug artifact and is referenced by the After
+        # Effects export, but it's no longer consumed by the renderer.
+        return self._render_ass(video_path, output_path, segs, style)
 
     def _render_ass(
         self,

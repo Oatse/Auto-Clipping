@@ -1,0 +1,158 @@
+{% extends "base.html" %}
+{% block title %}Editor — ClipAuto{% endblock %}
+{% block body_mode %}editor{% endblock %}
+{% block body_class %}p-editor{% endblock %}
+{% block theme_color %}#0E0C0D{% endblock %}
+{% block page_class %}page--flush{% endblock %}
+
+{% block extra_styles %}
+<link rel="stylesheet" href="/static/css/editor.css" />
+{% endblock %}
+
+{% block content %}
+<div id="editorRoot" class="editor" data-job-id="{{ job_id or '' }}">
+  <!-- ── App screens ──────────────────────────────────────────────── -->
+  <div id="screen-upload" class="app-screen hidden">
+    <section class="container container--wide" style="padding-top: calc(var(--nav-h) + var(--s-8));">
+      <div class="surface" style="text-align: center;">
+        <h2 class="surface__title">No project loaded</h2>
+        <p class="surface__desc" style="margin-inline:auto;">Open the editor from a transcribed job, or start a new transcription in Auto Subtitle.</p>
+        <div style="margin-top: var(--s-5); display: inline-flex; gap: var(--s-3);">
+          <a class="btn btn--lg" href="/auto-subtitle">
+            New project
+            <span class="btn__icon"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 11L11 3M11 3H5M11 3V9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </a>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <div id="screen-transcribing" class="app-screen process hidden">
+    <div class="container container--narrow">
+      <div class="process__card">
+        <div class="process__file" id="transcribingFile">video.mp4</div>
+        <h2 class="process__title">Transcribing voice</h2>
+        <p class="process__sub" id="transcribingStatus">Running ElevenLabs Speech-to-Text on your video.</p>
+        <div class="process__progress"><div class="process__progress-bar" id="transcribingBar" style="width: 0%;"></div></div>
+        <div class="process__waves" aria-hidden="true">
+          <span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span>
+          <span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span>
+          <span class="wave-bar"></span>
+        </div>
+        <div class="process__log" id="transcribingLog">Waiting for the engine to warm up…</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="screen-rendering" class="app-screen process hidden">
+    <div class="container container--narrow">
+      <div class="process__card">
+        <div class="process__file" id="renderFile">final.mp4</div>
+        <h2 class="process__title">Rendering subtitles</h2>
+        <p class="process__sub" id="renderStatus">Burning subtitles into the video frame-by-frame.</p>
+        <div class="process__progress"><div class="process__progress-bar" id="renderBar" style="width: 0%;"></div></div>
+        <div class="render-phases" id="renderPhases" style="display:flex; gap: var(--s-2); justify-content: center; margin-top: var(--s-5); flex-wrap:wrap;"></div>
+        <div class="process__log" id="renderLog">Queueing render…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── PRIMARY EDITOR SCREEN ────────────────────────────────────── -->
+  <div id="screen-preview" class="app-screen active">
+    <header class="editor__topbar">
+      <div class="editor__topbar-left">
+        <button class="icon-btn" id="navBackBtn" title="Back to dashboard" onclick="window.location.href='/auto-subtitle'">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M9 3L4 7l5 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="editor__title">
+          <span class="editor__title-eyebrow">Subtitle Editor</span>
+          <span class="editor__title-name" id="editorJobName">Untitled project</span>
+        </div>
+      </div>
+
+      <div class="editor__topbar-center">
+        <span class="badge badge--ink" id="autosaveIndicator">
+          <span class="pulse"></span>
+          <span>Saved</span>
+        </span>
+      </div>
+
+      <div class="editor__topbar-right">
+        <button class="btn btn--sm btn--ghost" id="exportAEBtn" title="Export as After Effects script">
+          <span>AE Export</span>
+          <span class="btn__icon"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 2h8v8H2z M5 5h2v2H5z" stroke="currentColor" stroke-width="1.4" fill="none"/></svg></span>
+        </button>
+        <button class="btn btn--sm btn--lime" id="startRenderBtn">
+          <span>Render video</span>
+          <span class="btn__icon"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 2v8l7-4z" fill="currentColor"/></svg></span>
+        </button>
+      </div>
+    </header>
+
+    <div class="editor__layout">
+      {% include "_partials/editor_left.html" %}
+      {% include "_partials/editor_center.html" %}
+      {% include "_partials/editor_right.html" %}
+    </div>
+  </div>
+
+  <!-- ── Modal & overlay placeholders (legacy IDs preserved) ──────── -->
+  <div id="modalOverlay" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <span class="modal-title" id="modalTitle">Job</span>
+        <span class="modal-id" id="modalId"></span>
+        <button class="icon-btn" id="modalClose" aria-label="Close modal">
+          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M4 4l6 6M10 4l-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-progress"><div class="modal-progress-bar" id="modalProgressBar"></div></div>
+        <div class="modal-meta"><span class="modal-phase" id="modalPhase">Queued</span><span class="modal-pct" id="modalPct">0%</span></div>
+        <div class="phase-dots" id="phaseDots"></div>
+        <div class="log-body" id="logBody"></div>
+        <div class="modal-actions" id="modalActions"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="renderOptionsOverlay" class="modal-overlay hidden">
+    <div class="modal-card">
+      <div class="modal-head">
+        <span class="modal-title">Render options</span>
+        <button class="icon-btn" id="renderOptionsClose"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M4 4l6 6M10 4l-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></button>
+      </div>
+      <div class="modal-body">
+        <div class="def-list" style="margin-bottom: var(--s-5);">
+          <label class="def-list__row" style="cursor:pointer;">
+            <div>
+              <div style="color: var(--c-ink); font-weight: 500;">Refined transcript</div>
+              <div class="field__hint">Use the user-edited / Gemini-cleaned transcript.</div>
+            </div>
+            <input type="radio" name="renderMode" id="renderOptRefined" checked />
+          </label>
+          <label class="def-list__row" style="cursor:pointer;">
+            <div>
+              <div style="color: var(--c-ink); font-weight: 500;">Original ElevenLabs words</div>
+              <div class="field__hint">Render with raw word-timed transcript.</div>
+            </div>
+            <input type="radio" name="renderMode" id="renderOptOriginal" />
+          </label>
+        </div>
+        <div style="display:flex; gap: var(--s-3); justify-content:flex-end;">
+          <button class="btn btn--sm btn--ghost" id="renderOptionsCancel">Cancel</button>
+          <button class="btn btn--sm btn--lime" id="renderOptionsConfirm">Start render</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+  <div class="undo-toast hidden" id="undoToast"></div>
+  <div id="logBadge" class="hidden"></div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/app.module.js"></script>
+{% endblock %}

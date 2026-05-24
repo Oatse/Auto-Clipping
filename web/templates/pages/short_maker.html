@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Short Maker — ClipAuto{% endblock %}
+{% block body_class %}p-shortmaker{% endblock %}
+
+{% block content %}
+<section class="hero" data-reveal>
+  <div class="container container--wide">
+    <div class="hero__split">
+      <div>
+        <span class="eyebrow is-cream" data-reveal-item><span class="dot"></span>Workspace · 03</span>
+        <h1 class="hero__title" data-reveal-item>
+          Vertical shorts<br/>from <em>any</em> footage.
+        </h1>
+        <p class="hero__sub" data-reveal-item>
+          Crop horizontal videos to 9:16 with smart subject framing. Pick the focal area, preview a frame, render to TikTok / Shorts / Reels-ready output.
+        </p>
+      </div>
+      <aside class="hero__aside" data-reveal-item>
+        <div class="surface surface--lime">
+          <div class="metric">
+            <span class="metric__value" data-counter data-target="9.16">0</span>
+            <span class="metric__label">Aspect ratio · vertical</span>
+          </div>
+        </div>
+        <dl class="hero__aside-meta">
+          <div><dt>Output</dt><dd>1080 × 1920</dd></div>
+          <div><dt>Codec</dt><dd>H.264 · AAC</dd></div>
+        </dl>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container container--wide">
+    <div class="workbench">
+      <div class="surface" data-reveal>
+        <div class="surface__head">
+          <div>
+            <h2 class="surface__title">Make a vertical short</h2>
+            <p class="surface__desc">Drop a horizontal video, draw the focal crop, and render.</p>
+          </div>
+        </div>
+
+        <div class="dropzone" id="smDropZone">
+          <div class="dropzone__empty">
+            <div class="dropzone__icon" aria-hidden="true">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <rect x="6" y="3" width="12" height="18" rx="2" stroke="currentColor" stroke-width="1.6"/>
+                <path d="M9 9h6M9 13h4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div class="dropzone__title">Drop your video</div>
+            <div class="dropzone__sub">or <label for="smFileInput" class="file-link" id="smBrowseLink">browse files</label></div>
+            <div class="dropzone__formats">MP4 · MOV · MKV</div>
+          </div>
+          <div class="dropzone__filled" id="smFileSelected">
+            <span class="file-pill__type">VIDEO</span>
+            <div class="file-pill__meta">
+              <span class="file-pill__name" id="smFileName">—</span>
+              <span class="file-pill__size" id="smFileSize">—</span>
+            </div>
+          </div>
+          <input type="file" id="smFileInput" accept=".mp4,.mov,.mkv" hidden />
+        </div>
+
+        <div class="def-list" id="smInfoBlock" style="margin-top: var(--s-5); display: none;">
+          <div class="def-list__row"><span class="def-list__key">Resolution</span><span class="def-list__val" id="smVideoRes">—</span></div>
+          <div class="def-list__row"><span class="def-list__key">Duration</span><span class="def-list__val" id="smVideoDur">—</span></div>
+          <div class="def-list__row"><span class="def-list__key">Frame rate</span><span class="def-list__val" id="smVideoFps">—</span></div>
+        </div>
+
+        <div id="smCropWrap" style="margin-top: var(--s-6); display:none;">
+          <div class="field__label" style="margin-bottom: var(--s-3);">Crop frame</div>
+          <p class="field__hint" style="margin-bottom: var(--s-3);">Drag the highlighted box. Vertical 9:16 ratio is locked.</p>
+          <div style="position: relative; background: var(--c-ink); border-radius: var(--r-5); overflow: hidden; padding: 0;">
+            <video id="smVideoPreview" muted playsinline style="display:block; width: 100%; height: auto;"></video>
+            <canvas id="smCanvas" style="position:absolute; inset:0; width:100%; height:100%; cursor: grab;"></canvas>
+          </div>
+          <div style="display:grid; grid-template-columns: 1fr auto; gap: var(--s-3); align-items:center; margin-top: var(--s-4);">
+            <div class="field__hint">Preview frame at current crop:</div>
+            <button type="button" class="btn btn--sm btn--ghost" id="smPreviewBtn">Refresh preview</button>
+          </div>
+          <div style="background: var(--c-paper-2); border-radius: var(--r-5); margin-top: var(--s-3); padding: var(--s-4); display:flex; align-items:center; justify-content:center;">
+            <canvas id="smPreviewCanvas" style="max-width: 100%; height: auto; max-height: 360px; border-radius: var(--r-3);"></canvas>
+          </div>
+        </div>
+
+        <div style="display:flex; gap: var(--s-3); margin-top: var(--s-6); flex-wrap: wrap;">
+          <button type="button" class="btn btn--lg" id="smGenerateBtn" disabled>
+            <span>Render short</span>
+            <span class="btn__icon"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 11L11 3M11 3H5M11 3V9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </button>
+          <button type="button" class="btn btn--lg btn--ghost" id="smNewBtn" style="display:none;">Start over</button>
+        </div>
+      </div>
+
+      <aside class="surface surface--cream" data-reveal>
+        <div class="surface__head">
+          <div>
+            <h3 class="surface__title" style="font-size: var(--fs-20);">Render</h3>
+            <p class="surface__desc">Status and final download.</p>
+          </div>
+          <span class="badge badge--ink" id="smStatusBadge">Idle</span>
+        </div>
+
+        <div id="smProcessWrap" style="display:none;">
+          <p class="field__hint" id="smProcessStatus" style="margin-bottom: var(--s-3);">Queueing…</p>
+          <div class="process__progress">
+            <div class="process__progress-bar" id="smProcessBar" style="width: 0%;"></div>
+          </div>
+          <div class="render-phases" style="display:flex; gap: var(--s-2); margin-top: var(--s-4); flex-wrap: wrap;">
+            <span class="badge" id="smPhase-1">01 Probe</span>
+            <span class="badge" id="smPhase-2">02 Crop</span>
+            <span class="badge" id="smPhase-3">03 Encode</span>
+            <span class="badge" id="smPhase-4">04 Done</span>
+          </div>
+        </div>
+
+        <div id="smDoneWrap" style="display:none;">
+          <div class="state state--ok">
+            <div class="state__icon" style="background: var(--c-lime); color: var(--c-ink);">
+              <svg width="20" height="20" viewBox="0 0 20 20"><path d="M5 10l3 3 7-7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+            </div>
+            <h4 class="state__title">Short ready</h4>
+            <p class="state__desc">Vertical 1080×1920 video rendered.</p>
+          </div>
+          <button type="button" class="btn" id="smDownloadBtn" style="margin-top: var(--s-3);">
+            Download short
+            <span class="btn__icon"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M7 1v9M3 7l4 4 4-4M2 13h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </button>
+        </div>
+
+        <div class="state state--empty" id="smIdleState">
+          <div class="state__icon"><svg width="22" height="22" viewBox="0 0 22 22"><rect x="6" y="3" width="10" height="16" rx="2" stroke="currentColor" stroke-width="1.4" fill="none"/></svg></div>
+          <h4 class="state__title">No render yet</h4>
+          <p class="state__desc">Pick a video and adjust the crop to enable rendering.</p>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/app.module.js"></script>
+{% endblock %}

@@ -1,0 +1,30 @@
+{# editor_left.html — Transcript pane (left column) #}
+<aside class="editor__left" id="previewLeft">
+  <div class="editor__pane editor__pane--transcript">
+    <header class="editor__pane-head">
+      <div class="editor__pane-title">
+        <span class="eyebrow is-outline" style="background: transparent; color: var(--c-noir-text); box-shadow: inset 0 0 0 1px var(--c-noir-line);">Transcript</span>
+      </div>
+      <div class="editor__pane-actions">
+        <div class="transcript-source-toggle" id="transcriptSourceToggle" style="display:none;" title="Switch between refined transcript and the raw ElevenLabs words">
+          <span class="transcript-source-label" id="transcriptSourceLabel">Refined</span>
+          <label class="switch">
+            <input type="checkbox" id="showOriginalTranscript" />
+            <span class="switch__track"></span>
+            <span class="switch__thumb"></span>
+          </label>
+        </div>
+        <button class="btn btn--sm btn--ghost" id="editTranscriptBtn">
+          <span>Edit</span>
+        </button>
+        <button class="btn btn--sm btn--ghost hidden" id="saveTranscriptBtn">
+          <span>Save</span>
+        </button>
+      </div>
+    </header>
+
+    <div class="transcript-body" id="transcriptBody">
+      {# Segments injected by preview.js #}
+    </div>
+  </div>
+</aside>

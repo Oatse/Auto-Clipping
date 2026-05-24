@@ -1,0 +1,5 @@
+/* ============================================================================
+ * fonts.css — Satoshi via Fontshare CDN (variable + standard weights)
+ * ============================================================================ */
+
+@import url("https://api.fontshare.com/v2/css?f[]=satoshi@900,700,500,400,300&f[]=jetbrains-mono@500,400&display=swap");

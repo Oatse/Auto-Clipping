@@ -246,19 +246,32 @@ class Sanitizer:
         """Trim ``end`` to the *next same-speaker word's* ``start``.
 
         Cross-speaker overlap (interruption) is intentionally preserved.
+
+        Optimisation: the previous implementation was O(N**2) — for every
+        word it scanned forwards looking for the next same-speaker word.
+        On long jobs that's tens of millions of comparisons.  We instead
+        bucket word indices by speaker once, then for each word jump
+        directly to the next same-speaker index.  O(N) total.
         """
         fixes = 0
-        for i, (w, sp) in enumerate(all_words_with_sp):
-            for j in range(i + 1, len(all_words_with_sp)):
-                nxt_w, nxt_sp = all_words_with_sp[j]
-                if nxt_sp != sp:
-                    continue
-                if w.end > nxt_w.start:
-                    w.end = round(nxt_w.start, 3)
+
+        # Build {speaker -> ordered list of indices} once.
+        speaker_indices: dict[str, list[int]] = {}
+        for idx, (_w, sp) in enumerate(all_words_with_sp):
+            speaker_indices.setdefault(sp, []).append(idx)
+
+        # For each speaker, walk the bucket pairwise.  Both lists are
+        # already in chronological order because we appended while
+        # iterating ``all_words_with_sp`` in order.
+        for indices in speaker_indices.values():
+            for k in range(len(indices) - 1):
+                cur_idx = indices[k]
+                nxt_idx = indices[k + 1]
+                cur_w, _ = all_words_with_sp[cur_idx]
+                nxt_w, _ = all_words_with_sp[nxt_idx]
+                if cur_w.end > nxt_w.start:
+                    cur_w.end = round(nxt_w.start, 3)
                     fixes += 1
-                # First same-speaker successor is enough; further ones are
-                # already after it chronologically.
-                break
         return fixes
 
     @staticmethod

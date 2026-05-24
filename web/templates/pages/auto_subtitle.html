@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% block title %}Auto Subtitle — ClipAuto{% endblock %}
+{% block body_class %}p-subtitle{% endblock %}
+
+{% block content %}
+<section class="hero" data-reveal>
+  <div class="container container--wide">
+    <div class="hero__split">
+      <div>
+        <span class="eyebrow is-outline" data-reveal-item><span class="dot"></span>Workspace · 01</span>
+        <h1 class="hero__title" data-reveal-item>
+          Subtitle in <em>any</em><br/>
+          language. <span class="accent-bg">Cleanly.</span>
+        </h1>
+        <p class="hero__sub" data-reveal-item>
+          Drop a video, pick a target language, and ClipAuto produces word-accurate subtitles ready to review on a timeline. Multi-speaker. Auto-translated. Export-ready.
+        </p>
+      </div>
+      <aside class="hero__aside" data-reveal-item>
+        <div class="stepper" id="stepperRoot">
+          <span class="stepper__item is-active" data-step="upload"><span class="stepper__num">01</span>Upload</span>
+          <span class="stepper__divider"></span>
+          <span class="stepper__item" data-step="transcribe"><span class="stepper__num">02</span>Transcribe</span>
+          <span class="stepper__divider"></span>
+          <span class="stepper__item" data-step="review"><span class="stepper__num">03</span>Review</span>
+          <span class="stepper__divider"></span>
+          <span class="stepper__item" data-step="render"><span class="stepper__num">04</span>Render</span>
+        </div>
+        <dl class="hero__aside-meta">
+          <div><dt>Engine</dt><dd>ElevenLabs</dd></div>
+          <div><dt>Translate</dt><dd>Gemini</dd></div>
+        </dl>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="screen-upload">
+  <div class="container container--wide">
+    <div class="workbench">
+      <!-- LEFT: Upload + settings -->
+      <div class="surface" data-reveal>
+        <div class="surface__head">
+          <div>
+            <h2 class="surface__title">Create new subtitle job</h2>
+            <p class="surface__desc">Choose a video source, set language, and start transcription. Review and style on the next screen.</p>
+          </div>
+        </div>
+
+        <form id="uploadForm" class="grid" style="display: grid; gap: var(--s-6);">
+          <div class="dropzone" id="dropZone">
+            <div class="dropzone__empty" id="dropZoneInner">
+              <div class="dropzone__icon" aria-hidden="true">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                  <path d="M12 4v12M6 10l6-6 6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M4 20h16" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <div class="dropzone__title">Drop your video here</div>
+              <div class="dropzone__sub">or <label for="fileInput" class="file-link">browse files</label> from your computer</div>
+              <div class="dropzone__formats">MP4 · MOV · MKV · AVI</div>
+            </div>
+
+            <div class="dropzone__filled" id="fileSelected">
+              <span class="file-pill__type">VIDEO</span>
+              <div class="file-pill__meta">
+                <span class="file-pill__name" id="fileName">—</span>
+                <span class="file-pill__size" id="fileSize">—</span>
+              </div>
+              <button type="button" class="file-pill__remove" id="fileRemove" aria-label="Remove file">
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M4 4l6 6M10 4l-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              </button>
+            </div>
+            <input type="file" id="fileInput" accept=".mp4,.mov,.mkv,.avi" hidden />
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label class="field__label" for="whisperModel">Transcription engine</label>
+              <select class="select" id="whisperModel" name="whisper_model">
+                <option value="elevenlabs" selected>ElevenLabs Scribe — cloud STT + Gemini translate</option>
+              </select>
+              <p class="field__hint" id="elevenlabsNote" style="display:none;">ElevenLabs transcribes the source language, Gemini auto-translates to your target.</p>
+              <div id="elevenlabsQuota" style="display:none; font-family: var(--f-mono); font-size: var(--fs-12); color: var(--c-ink-mute);">
+                <span id="elQuotaContent">Loading quota…</span>
+              </div>
+            </div>
+            <div class="field">
+              <label class="field__label" for="targetLang">Target language</label>
+              <select class="select" id="targetLang" name="target_language">
+                <option value="en" selected>English</option>
+                <option value="id">Indonesian</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="zh">Chinese</option>
+                <option value="ar">Arabic</option>
+                <option value="pt">Portuguese</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="adv" id="advancedSection">
+            <button type="button" class="adv__toggle" id="advancedToggle">
+              <svg id="advancedArrow" width="12" height="12" viewBox="0 0 12 12"><path d="M2 4l4 4 4-4" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              Advanced options
+            </button>
+            <div class="adv__body hidden" id="advancedBody">
+              <div class="def-list__row" style="border-bottom: 1px solid var(--c-hairline);">
+                <div>
+                  <div class="field__label" style="text-transform:none; letter-spacing:0; font-size: var(--fs-14); color: var(--c-ink);">Speaker detection</div>
+                  <div class="field__hint">Detect multiple speakers via timing gaps. Disable for single-speaker (enables PyCaps animations).</div>
+                </div>
+                <label class="switch"><input type="checkbox" id="speakerDetectionEnabled" checked /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+              </div>
+              <div class="def-list__row" id="numSpeakersRow">
+                <div>
+                  <div class="field__label" style="text-transform:none; letter-spacing:0; font-size: var(--fs-14); color: var(--c-ink);">Max speakers</div>
+                  <div class="field__hint">Cap detection. Actual count may be lower.</div>
+                </div>
+                <label class="switch"><input type="checkbox" id="numSpeakersEnabled" /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+              </div>
+              <div class="num-speakers-input hidden" id="numSpeakersInput" style="display:flex; gap: var(--s-2); flex-wrap:wrap; align-items:center;">
+                <button type="button" class="icon-btn" id="speakerCountDec">−</button>
+                <span class="badge badge--ink" id="speakerCountVal" style="min-width:48px; justify-content:center;">2</span>
+                <button type="button" class="icon-btn" id="speakerCountInc">+</button>
+                <span class="field__hint" style="margin-left: var(--s-2);">speakers</span>
+                <div class="speaker-count-pills" id="speakerCountPills" style="display:flex; gap:6px; margin-left:auto;">
+                  <button type="button" class="tag" data-count="1">1</button>
+                  <button type="button" class="tag is-active" data-count="2">2</button>
+                  <button type="button" class="tag" data-count="3">3</button>
+                  <button type="button" class="tag" data-count="4">4</button>
+                  <button type="button" class="tag" data-count="5">5</button>
+                  <button type="button" class="tag" data-count="6">6</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn--lg" id="transcribeBtn" disabled style="justify-self:start;">
+            <span class="btn-text">Transcribe & preview</span>
+            <span class="btn__icon"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 11L11 3M11 3H5M11 3V9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </button>
+        </form>
+
+        <div class="hairline" style="margin-block: var(--s-8);"></div>
+
+        <div>
+          <div class="surface__head" style="margin-bottom: var(--s-4);">
+            <div>
+              <h3 class="surface__title" style="font-size: var(--fs-20);">System status</h3>
+              <p class="surface__desc">Quick check on engines and dependencies.</p>
+            </div>
+          </div>
+          <div class="def-list" id="sysGrid">
+            <div class="def-list__row"><span class="def-list__key">Checking…</span><span class="def-list__val">—</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: Recent jobs sidebar -->
+      <aside class="surface surface--cream" data-reveal style="position: sticky; top: calc(var(--nav-h) + var(--s-8));">
+        <div class="surface__head">
+          <div>
+            <h2 class="surface__title" style="font-size: var(--fs-20);">Recent</h2>
+            <p class="surface__desc">Resume jobs or pull a clip from Clip Finder.</p>
+          </div>
+          <button class="icon-btn" id="refreshBtn" title="Refresh">
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7a5 5 0 0 1 9-3.16M12 7a5 5 0 0 1-9 3.16M11 1v3h-3M3 13v-3h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+
+        <div class="tab-toggle" id="jobsToggle">
+          <button type="button" class="is-active" data-jobs-tab="jobs">My jobs</button>
+          <button type="button" data-jobs-tab="clips">From Clip Finder</button>
+        </div>
+
+        <div class="jobs-pane" id="jobsPane">
+          <div class="jobs-list" id="jobsList" style="display:grid; gap: 8px;">
+            <div class="state state--empty">
+              <div class="state__icon"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><rect x="3" y="3" width="14" height="14" rx="3" stroke="currentColor" stroke-width="1.4"/></svg></div>
+              <h4 class="state__title">No jobs yet</h4>
+              <p class="state__desc">Upload a video to start your first transcription.</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="jobs-pane hidden" id="clipsPane">
+          <div class="clip-jobs-list" id="clipJobsList" style="display:grid; gap: 8px;">
+            <div class="state state--empty">
+              <div class="state__icon"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.4"/></svg></div>
+              <h4 class="state__title">No clips downloaded</h4>
+              <p class="state__desc">Use Clip Finder to detect highlights and bring them here.</p>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+{% include "_partials/process_screen.html" %}
+
+<!-- Modals (preserved IDs from legacy) -->
+<div id="modalOverlay" class="hidden"></div>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/app.module.js"></script>
+{% endblock %}

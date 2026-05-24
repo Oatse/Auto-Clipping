@@ -4,7 +4,7 @@
 
 import { fmtTime, fmtTimeShort, parseTime, toast, confirmDialog } from './utils.js';
 import * as S from './state.js';
-import { pushUndoSnapshot } from './state.js';
+import { pushUndoSnapshot, popUndoSnapshot, pushRedoSnapshot, popRedoSnapshot } from './state.js';
 import { renderTranscriptList, setActiveSeg, scheduleAutoSave } from './preview.js';
 import { onStyleChange } from './subtitleEngine.js';
 
@@ -325,6 +325,46 @@ export function setupTimeline() {
     if (!previewScreen.classList.contains('active')) return;
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
 
+    const isMod = e.ctrlKey || e.metaKey;
+
+    // ── Undo (Ctrl/Cmd + Z) ──
+    if (isMod && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      const snap = popUndoSnapshot();
+      if (!snap) { toast('Nothing to undo', 'info'); return; }
+      // Save current state to redo before restoring
+      pushRedoSnapshot();
+      S.setTranscriptData(snap);
+      S.setSelectedSegIdx(null);
+      deleteSegmentBtn.disabled = true;
+      duplicateSegmentBtn.disabled = true;
+      renderTimeline();
+      renderTranscriptList();
+      onStyleChange();
+      scheduleAutoSave();
+      toast('Undo', 'info');
+      return;
+    }
+
+    // ── Redo (Ctrl/Cmd + Y  OR  Ctrl/Cmd + Shift + Z) ──
+    if (isMod && ((e.key === 'y' || e.key === 'Y') || (e.shiftKey && (e.key === 'z' || e.key === 'Z')))) {
+      e.preventDefault();
+      const snap = popRedoSnapshot();
+      if (!snap) { toast('Nothing to redo', 'info'); return; }
+      // Save current onto undo stack WITHOUT clearing redo (manual push to avoid reset)
+      S.undoStack.push(JSON.parse(JSON.stringify(S.transcriptData)));
+      S.setTranscriptData(snap);
+      S.setSelectedSegIdx(null);
+      deleteSegmentBtn.disabled = true;
+      duplicateSegmentBtn.disabled = true;
+      renderTimeline();
+      renderTranscriptList();
+      onStyleChange();
+      scheduleAutoSave();
+      toast('Redo', 'info');
+      return;
+    }
+
     if (e.key === ' ') {
       e.preventDefault();
       if (previewVideo.paused) previewVideo.play();
@@ -348,7 +388,7 @@ export function setupTimeline() {
         onStyleChange();
         scheduleAutoSave();
       }
-    } else if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D')) {
+    } else if (isMod && (e.key === 'd' || e.key === 'D')) {
       e.preventDefault();
       duplicateSelectedSegment();
     } else if (e.key === 'f' || e.key === 'F') {

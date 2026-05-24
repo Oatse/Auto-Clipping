@@ -1,10 +1,26 @@
 /**
- * utils.js — Shared utility functions and screen navigation
+ * utils.js — Stateless helpers shared by every frontend module.
+ *
+ * Centralises everything that has no place inside a feature module:
+ *   - HTTP wrapper      (apiFetch)
+ *   - Time formatting   (fmtTime, fmtTimeShort, timeAgo, parseTime)
+ *   - Sizes / durations (formatBytes, formatClipDuration)
+ *   - Markup escaping   (escHtml)
+ *   - Screen routing    (showScreen, switchTab, setupNavTabs)
+ *   - User feedback     (toast, confirmDialog, promptDialog)
+ *
+ * All functions are pure (no module-level mutable state) and safe to call
+ * before DOMContentLoaded — DOM-dependent helpers create their own host
+ * elements lazily on first use.
  */
 
+// ── HTTP ─────────────────────────────────────────────────────────────
 const API = '';
 
-// ── API Helper ─────────────────────────────────────────────────────────────
+/**
+ * Thin fetch wrapper that always returns parsed JSON and throws an Error
+ * carrying the server-supplied detail message on non-2xx responses.
+ */
 export async function apiFetch(url, options = {}) {
   const res = await fetch(API + url, options);
   if (!res.ok) {
@@ -14,7 +30,7 @@ export async function apiFetch(url, options = {}) {
   return res.json();
 }
 
-// ── Formatting Helpers ─────────────────────────────────────────────────────
+// ── Time / size formatting ───────────────────────────────────────────
 export function formatBytes(bytes) {
   if (bytes < 1024) return bytes + ' B';
   if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
@@ -28,85 +44,128 @@ export function timeAgo(ts) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
+/** "1:23.4" — minute / second / decisecond, used by the transcript panel. */
 export function fmtTime(secs) {
   const m = Math.floor(secs / 60);
   const s = Math.floor(secs % 60);
   const ms = Math.round((secs % 1) * 10);
-  return `${m}:${String(s).padStart(2,'0')}.${ms}`;
+  return `${m}:${String(s).padStart(2, '0')}.${ms}`;
 }
 
+/** "1:23" — minute / second, used by the timeline ruler. */
 export function fmtTimeShort(secs) {
-  if (!secs || isNaN(secs)) return '0:00';
   const m = Math.floor(secs / 60);
   const s = Math.floor(secs % 60);
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+/** Human-friendly clip length: "5s" / "1m 5s". */
+export function formatClipDuration(seconds) {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '0s';
+  const total = Math.round(seconds);
+  if (total < 60) return `${total}s`;
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return s ? `${m}m ${s}s` : `${m}m`;
+}
+
+/**
+ * Parse a user-typed timestamp into seconds.
+ * Accepts: plain seconds ("82.5"), "1:22", "1:02:30", or "1m 22s".
+ * Returns NaN if the string can't be interpreted.
+ */
+export function parseTime(str) {
+  if (str == null) return NaN;
+  const raw = String(str).trim();
+  if (!raw) return NaN;
+
+  // M-and-S text: "1m 22s" / "30s" / "2m"
+  const ms = /^(?:(\d+)\s*m)?\s*(?:(\d+(?:\.\d+)?)\s*s)?$/i.exec(raw);
+  if (ms && (ms[1] || ms[2])) {
+    return (parseInt(ms[1] || 0, 10) * 60) + parseFloat(ms[2] || 0);
+  }
+
+  // Colon form: HH:MM:SS or MM:SS
+  if (raw.includes(':')) {
+    const parts = raw.split(':').map(p => p.trim());
+    if (parts.some(p => p === '' || Number.isNaN(parseFloat(p)))) return NaN;
+    if (parts.length === 3) {
+      return (
+        parseInt(parts[0], 10) * 3600
+        + parseInt(parts[1], 10) * 60
+        + parseFloat(parts[2])
+      );
+    }
+    if (parts.length === 2) {
+      return parseInt(parts[0], 10) * 60 + parseFloat(parts[1]);
+    }
+    return NaN;
+  }
+
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+// ── HTML escaping ────────────────────────────────────────────────────
 export function escHtml(text) {
   const d = document.createElement('div');
-  d.textContent = text;
+  d.textContent = text == null ? '' : String(text);
   return d.innerHTML;
 }
 
-// Alias used in clip finder
-export { escHtml as escapeHtml };
-
-export function parseTime(str) {
-  // Accept "M:SS.d", "M:SS", or "SS.d" formats
-  str = str.trim();
-  const full = str.match(/^(\d+):(\d{1,2})(?:\.(\d))?$/);
-  if (full) {
-    return parseInt(full[1], 10) * 60 + parseInt(full[2], 10) + (full[3] ? parseInt(full[3], 10) / 10 : 0);
-  }
-  const secs = str.match(/^(\d+(?:\.\d)?)$/);
-  if (secs) return parseFloat(secs[1]);
-  return null;
-}
-
-export function formatClipDuration(seconds) {
-  const total = Math.max(0, Math.floor(seconds));
-  const mins = Math.floor(total / 60);
-  const secs = total % 60;
-  if (mins > 0) return `${mins}m ${secs}s`;
-  return `${secs}s`;
-}
-
-// ── Screen Navigation ──────────────────────────────────────────────────────
-let activeTab = 'subtitle'; // 'subtitle' or 'clipfinder'
+// ── Screen routing ───────────────────────────────────────────────────
+//
+// The dashboard is a single-page UI with multiple ".app-screen" panes
+// gated by an ".active" class.  showScreen flips which pane is visible
+// and toggles a body-level "preview-active" flag for CSS hooks; the back
+// button is a UI affordance that hides itself on the upload screen.
 
 export function showScreen(name) {
-  document.querySelectorAll('.app-screen').forEach(s => s.classList.remove('active'));
-  document.getElementById('screen-' + name).classList.add('active');
+  document.querySelectorAll('.app-screen').forEach(s =>
+    s.classList.remove('active')
+  );
+  const target = document.getElementById('screen-' + name);
+  if (target) target.classList.add('active');
 
-  // Hide hero section on all screens except upload
+  // Hide hero on every screen except the upload landing page.
   const hero = document.querySelector('.hero');
-  if (hero) hero.style.display = (name === 'upload') ? '' : 'none';
+  if (hero) hero.style.display = name === 'upload' ? '' : 'none';
 
-  // Prevent outer scrolling when preview screen is active
+  // Lock outer scroll while the editor preview is active.
   document.body.classList.toggle('preview-active', name === 'preview');
 
-  // Show back button on all screens except upload
+  // Back button visible everywhere except the dashboard.
   const navBackBtn = document.getElementById('navBackBtn');
   if (navBackBtn) navBackBtn.classList.toggle('hidden', name === 'upload');
 }
 
+/**
+ * Swap the top-level workspace tab.  Tab IDs are the data-tab attribute
+ * on each ``.nav-tab`` button: "subtitle" | "clipfinder" | "shortmaker".
+ */
 export function switchTab(tab) {
-  activeTab = tab;
-  document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  document.querySelectorAll('.nav-tab').forEach(btn =>
+    btn.classList.toggle('active', btn.dataset.tab === tab)
+  );
 
   if (tab === 'clipfinder' || tab === 'shortmaker') {
-    // Hide all subtitle screens, show the selected screen
-    document.querySelectorAll('.app-screen').forEach(s => s.classList.remove('active'));
-    document.getElementById('screen-' + tab).classList.add('active');
+    document.querySelectorAll('.app-screen').forEach(s =>
+      s.classList.remove('active')
+    );
+    const target = document.getElementById('screen-' + tab);
+    if (target) target.classList.add('active');
+
     const hero = document.querySelector('.hero');
     if (hero) hero.style.display = 'none';
     document.body.classList.remove('preview-active');
+
     const navBackBtn = document.getElementById('navBackBtn');
     if (navBackBtn) navBackBtn.classList.add('hidden');
-  } else {
-    // Show upload screen (default)
-    showScreen('upload');
+    return;
   }
+
+  // Default: show the upload / dashboard screen.
+  showScreen('upload');
 }
 
 export function setupNavTabs() {
@@ -115,288 +174,201 @@ export function setupNavTabs() {
   });
 }
 
-// ── Toast Notifications ──────────────────────────────────────────────────
+// ── Toast notifications ──────────────────────────────────────────────
 //
-// Replacement for native alert().  Native alert() is modal-blocking,
-// looks like a system dialog, and breaks the visual rhythm of the app.
-// This toast system shows a non-blocking, dismissable banner anchored
-// to the bottom-right of the viewport.
-//
-// Usage:
-//   import { toast } from './utils.js';
-//   toast('Saved');
-//   toast.error('Upload failed: ' + err.message);
-//   toast.warn('Cannot split a single-word segment');
-//   toast.success('Render complete');
-//
-// The container is created lazily on first call.  Each toast lives for
-// 4 s by default, with the timer paused on hover so users can read
-// long messages without rushing.
+// Drop-in replacement for the legacy native ``alert()`` / ``confirm()``.
+// Markup matches the rules already shipped in ``css/polish.css`` so this
+// module needs no new styles.  Toasts auto-dismiss after a configurable
+// timeout and can be dismissed early via the close button.
 
-let _toastContainer = null;
-const _TOAST_DEFAULT_MS = 4000;
+const _TOAST_DEFAULT_DURATION_MS = 4500;
 
 function _ensureToastContainer() {
-  if (_toastContainer && document.body.contains(_toastContainer)) {
-    return _toastContainer;
-  }
-  _toastContainer = document.createElement('div');
-  _toastContainer.id = 'toastContainer';
-  _toastContainer.className = 'toast-container';
-  // aria-live=polite so screen readers announce new toasts without
-  // interrupting the user.
-  _toastContainer.setAttribute('aria-live', 'polite');
-  _toastContainer.setAttribute('aria-atomic', 'false');
-  document.body.appendChild(_toastContainer);
-  return _toastContainer;
+  let host = document.querySelector('.toast-container');
+  if (host) return host;
+  host = document.createElement('div');
+  host.className = 'toast-container';
+  host.setAttribute('role', 'region');
+  host.setAttribute('aria-live', 'polite');
+  document.body.appendChild(host);
+  return host;
 }
 
-function _showToast(message, variant = 'info', durationMs = _TOAST_DEFAULT_MS) {
-  if (!message) return null;
-  const container = _ensureToastContainer();
+function _showToast(message, kind, duration) {
+  const host = _ensureToastContainer();
 
   const el = document.createElement('div');
-  el.className = `toast toast--${variant}`;
-  el.setAttribute('role', variant === 'error' ? 'alert' : 'status');
+  el.className = `toast toast-${kind}`;
+  el.setAttribute('role', kind === 'error' ? 'alert' : 'status');
 
-  const iconMap = {
-    info: 'ℹ',
-    success: '✓',
-    warn: '⚠',
-    error: '✕',
-  };
-  el.innerHTML = `
-    <span class="toast-icon" aria-hidden="true">${iconMap[variant] || iconMap.info}</span>
-    <span class="toast-text"></span>
-    <button class="toast-close" aria-label="Dismiss">×</button>
-  `;
-  // Use textContent to neutralise any HTML in user/error messages.
-  el.querySelector('.toast-text').textContent = String(message);
+  const icon = document.createElement('span');
+  icon.className = `toast-icon toast-icon-${kind}`;
+  const iconChar =
+    kind === 'success' ? '\u2713' :
+    kind === 'error'   ? '\u2715' :
+    kind === 'warn'    ? '!' : 'i';
+  icon.textContent = iconChar;
 
-  let timer = null;
-  let remaining = durationMs;
-  let openedAt = Date.now();
+  const text = document.createElement('div');
+  text.className = 'toast-text';
+  text.textContent = String(message);
 
+  const close = document.createElement('button');
+  close.className = 'toast-close';
+  close.type = 'button';
+  close.setAttribute('aria-label', 'Dismiss notification');
+  close.textContent = '\u00D7';
+
+  el.append(icon, text, close);
+  host.appendChild(el);
+
+  // Force a reflow before adding the enter class so the transition runs.
+  // eslint-disable-next-line no-unused-expressions
+  el.offsetWidth;
+  el.classList.add('toast-enter');
+
+  let dismissed = false;
   const dismiss = () => {
-    if (!el.isConnected) return;
+    if (dismissed) return;
+    dismissed = true;
+    el.classList.remove('toast-enter');
     el.classList.add('toast-leave');
-    // Animation duration must match polish.css .toast leave transition.
-    setTimeout(() => el.remove(), 200);
-    if (timer) clearTimeout(timer);
+    el.addEventListener('transitionend', () => el.remove(), { once: true });
+    // Safety net in case transitionend never fires (display:none, etc).
+    setTimeout(() => el.remove(), 600);
   };
 
-  const startTimer = () => {
-    openedAt = Date.now();
-    timer = setTimeout(dismiss, remaining);
-  };
-
-  // Pause timer while the user is hovering — prevents fast flickers
-  // from being unreadable.
-  el.addEventListener('mouseenter', () => {
-    if (timer) {
-      clearTimeout(timer);
-      remaining -= Date.now() - openedAt;
-      timer = null;
-    }
-  });
-  el.addEventListener('mouseleave', () => {
-    if (!timer && remaining > 0) startTimer();
-  });
-
-  el.querySelector('.toast-close').addEventListener('click', dismiss);
-
-  container.appendChild(el);
-  // Trigger entrance transition on next frame.
-  requestAnimationFrame(() => el.classList.add('toast-enter'));
-  startTimer();
-
-  return { dismiss };
+  close.addEventListener('click', dismiss);
+  setTimeout(dismiss, Math.max(1200, Number(duration) || _TOAST_DEFAULT_DURATION_MS));
+  return dismiss;
 }
 
-/**
- * Show a non-blocking toast.  Default variant is 'info'.
- * Static methods .success/.error/.warn/.info are provided for clarity.
- */
-export function toast(message, opts = {}) {
-  const variant = opts.variant || 'info';
-  const duration = opts.duration ?? _TOAST_DEFAULT_MS;
-  return _showToast(message, variant, duration);
+export const toast = {
+  info:    (msg, ms) => _showToast(msg, 'info', ms),
+  success: (msg, ms) => _showToast(msg, 'success', ms),
+  warn:    (msg, ms) => _showToast(msg, 'warn', ms),
+  error:   (msg, ms) => _showToast(msg, 'error', ms),
+};
+
+// ── Confirm / prompt dialogs ────────────────────────────────────────
+//
+// Promise-based replacements for window.confirm / window.prompt.  The
+// modal markup is built on demand so the helper has no DOM dependency
+// at module load.  Dialogs trap focus on the primary button and resolve
+// when the user clicks Confirm/Cancel, presses Enter/Escape, or clicks
+// the backdrop.
+
+function _buildDialog({ title, message, confirmText, cancelText, danger, isPrompt, defaultValue }) {
+  const overlay = document.createElement('div');
+  overlay.className = 'modal-overlay confirm-dialog-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+
+  const modal = document.createElement('div');
+  modal.className = 'modal confirm-dialog';
+
+  if (title) {
+    const h = document.createElement('div');
+    h.className = 'modal-title confirm-dialog-title';
+    h.textContent = title;
+    modal.appendChild(h);
+  }
+
+  const body = document.createElement('div');
+  body.className = 'modal-body confirm-dialog-body';
+  body.textContent = message || '';
+  modal.appendChild(body);
+
+  let input = null;
+  if (isPrompt) {
+    input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'confirm-dialog-input';
+    input.value = defaultValue == null ? '' : String(defaultValue);
+    modal.appendChild(input);
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'confirm-dialog-actions';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.type = 'button';
+  cancelBtn.className = 'btn-secondary';
+  cancelBtn.textContent = cancelText || 'Cancel';
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.type = 'button';
+  confirmBtn.className = danger ? 'btn-danger' : 'btn-success';
+  confirmBtn.textContent = confirmText || 'OK';
+
+  actions.append(cancelBtn, confirmBtn);
+  modal.appendChild(actions);
+  overlay.appendChild(modal);
+
+  return { overlay, modal, cancelBtn, confirmBtn, input };
 }
-toast.info    = (msg, opts = {}) => _showToast(msg, 'info',    opts.duration);
-toast.success = (msg, opts = {}) => _showToast(msg, 'success', opts.duration);
-toast.warn    = (msg, opts = {}) => _showToast(msg, 'warn',    opts.duration);
-toast.error   = (msg, opts = {}) => _showToast(msg, 'error',   opts.duration ?? 6000);
 
-// ── Confirm + Prompt Modals ──────────────────────────────────────────────
-//
-// Promise-based replacements for the native ``window.confirm`` /
-// ``window.prompt`` dialogs.  Native dialogs are modal-blocking, hard
-// to style, and look like an OS popup — out of place inside the app's
-// dark theme.  These replacements share the same DOM scaffolding and
-// resolve the returned promise when the user picks an option.
-//
-// Usage:
-//   const ok = await confirmDialog('Delete this segment?');
-//   if (!ok) return;
-//
-//   const newName = await promptDialog({
-//     title: 'Rename speaker',
-//     defaultValue: 'SPEAKER_02',
-//     placeholder: 'e.g. SPEAKER_02',
-//   });
-//   if (newName === null) return;  // user cancelled
-
-function _trapFocus(modal) {
-  // Keep Tab cycling within the dialog so keyboard users don't reach
-  // the page behind.  Simple two-element trap: shift+Tab on first
-  // focusable goes to last, Tab on last goes to first.
-  const focusables = modal.querySelectorAll(
-    'button, [href], input, textarea, [tabindex]:not([tabindex="-1"])'
-  );
-  if (focusables.length === 0) return;
-  const first = focusables[0];
-  const last = focusables[focusables.length - 1];
-  modal.addEventListener('keydown', (e) => {
-    if (e.key !== 'Tab') return;
-    if (e.shiftKey && document.activeElement === first) {
-      last.focus();
-      e.preventDefault();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      first.focus();
-      e.preventDefault();
-    }
-  });
-}
-
-function _openDialog({ title, body, confirmText, cancelText, variant, onMount }) {
-  return new Promise((resolve) => {
-    const overlay = document.createElement('div');
-    overlay.className = 'app-dialog-overlay';
-    overlay.setAttribute('role', 'dialog');
-    overlay.setAttribute('aria-modal', 'true');
-    overlay.innerHTML = `
-      <div class="app-dialog app-dialog--${variant || 'info'}">
-        ${title ? `<h3 class="app-dialog-title"></h3>` : ''}
-        <div class="app-dialog-body"></div>
-        <div class="app-dialog-actions">
-          <button type="button" class="btn-secondary app-dialog-cancel">${escHtml(cancelText || 'Cancel')}</button>
-          <button type="button" class="btn-primary app-dialog-confirm">${escHtml(confirmText || 'OK')}</button>
-        </div>
-      </div>
-    `;
-
-    if (title) overlay.querySelector('.app-dialog-title').textContent = title;
-    const bodyEl = overlay.querySelector('.app-dialog-body');
-    if (typeof body === 'string') {
-      bodyEl.textContent = body;
-    } else if (body instanceof Node) {
-      bodyEl.appendChild(body);
-    }
-
+function _showDialog(opts) {
+  return new Promise(resolve => {
+    const { overlay, cancelBtn, confirmBtn, input } = _buildDialog(opts);
     document.body.appendChild(overlay);
-    requestAnimationFrame(() => overlay.classList.add('app-dialog-open'));
 
-    let value;
-    if (typeof onMount === 'function') {
-      value = onMount(overlay);
-    }
-
-    const close = (result) => {
-      overlay.classList.add('app-dialog-leave');
-      setTimeout(() => overlay.remove(), 180);
+    const cleanup = (value) => {
       document.removeEventListener('keydown', onKey);
-      resolve(result);
+      overlay.remove();
+      resolve(value);
     };
+
     const onKey = (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        close(variant === 'prompt' ? null : false);
-      } else if (e.key === 'Enter' && variant === 'prompt') {
-        const input = overlay.querySelector('.app-dialog-input');
-        if (input && document.activeElement === input) {
-          e.preventDefault();
-          close(input.value);
-        }
+        cleanup(opts.isPrompt ? null : false);
+      } else if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        cleanup(opts.isPrompt ? (input ? input.value : '') : true);
       }
     };
+
+    cancelBtn.addEventListener('click', () => cleanup(opts.isPrompt ? null : false));
+    confirmBtn.addEventListener('click', () =>
+      cleanup(opts.isPrompt ? (input ? input.value : '') : true)
+    );
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) cleanup(opts.isPrompt ? null : false);
+    });
     document.addEventListener('keydown', onKey);
 
-    overlay.querySelector('.app-dialog-cancel').addEventListener('click', () =>
-      close(variant === 'prompt' ? null : false)
-    );
-    overlay.querySelector('.app-dialog-confirm').addEventListener('click', () => {
-      if (variant === 'prompt') {
-        const input = overlay.querySelector('.app-dialog-input');
-        close(input ? input.value : '');
+    // Focus management: input first when prompting, else the primary action.
+    requestAnimationFrame(() => {
+      if (input) {
+        input.focus();
+        input.select();
       } else {
-        close(true);
+        confirmBtn.focus();
       }
     });
-    // Click on the overlay (outside the dialog box) cancels.
-    overlay.addEventListener('mousedown', (e) => {
-      if (e.target === overlay) close(variant === 'prompt' ? null : false);
-    });
-
-    _trapFocus(overlay);
-    // Default focus: confirm button for confirm dialogs, input for prompts
-    setTimeout(() => {
-      const inputEl = overlay.querySelector('.app-dialog-input');
-      if (inputEl) {
-        inputEl.focus();
-        inputEl.select();
-      } else {
-        overlay.querySelector('.app-dialog-confirm').focus();
-      }
-    }, 50);
   });
 }
 
-/**
- * Show a yes/no confirmation dialog.  Returns a promise that resolves
- * to true (confirm), false (cancel), or false (Esc / overlay click).
- *
- * @param {string} message
- * @param {object} [opts] - { title, confirmText, cancelText, danger }
- */
-export function confirmDialog(message, opts = {}) {
-  const variant = opts.danger ? 'danger' : 'info';
-  return _openDialog({
-    title: opts.title || 'Confirm',
-    body: message,
-    confirmText: opts.confirmText || (opts.danger ? 'Delete' : 'Confirm'),
-    cancelText: opts.cancelText || 'Cancel',
-    variant,
+export function confirmDialog(message, options = {}) {
+  return _showDialog({
+    message,
+    title: options.title || 'Confirm',
+    confirmText: options.confirmText,
+    cancelText: options.cancelText,
+    danger: !!options.danger,
+    isPrompt: false,
   });
 }
 
-/**
- * Show a single-line text-input dialog.  Returns a promise that
- * resolves to the entered string, or null if the user cancelled.
- *
- * @param {object} opts - { title, message, defaultValue, placeholder, confirmText }
- */
-export function promptDialog(opts = {}) {
-  const message = opts.message || '';
-  const wrap = document.createElement('div');
-  wrap.className = 'app-dialog-prompt-body';
-  if (message) {
-    const p = document.createElement('p');
-    p.className = 'app-dialog-prompt-message';
-    p.textContent = message;
-    wrap.appendChild(p);
-  }
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'app-dialog-input';
-  input.value = opts.defaultValue || '';
-  if (opts.placeholder) input.placeholder = opts.placeholder;
-  wrap.appendChild(input);
-
-  return _openDialog({
-    title: opts.title || 'Input',
-    body: wrap,
-    confirmText: opts.confirmText || 'OK',
-    cancelText: opts.cancelText || 'Cancel',
-    variant: 'prompt',
+export function promptDialog(message, options = {}) {
+  return _showDialog({
+    message,
+    title: options.title || 'Input required',
+    confirmText: options.confirmText,
+    cancelText: options.cancelText,
+    danger: !!options.danger,
+    isPrompt: true,
+    defaultValue: options.defaultValue,
   });
 }

@@ -336,20 +336,36 @@ def _restore_exact_timestamps(
     """For each segment word, snap to nearest ElevenLabs word within 100 ms.
 
     Returns the number of timestamps restored.
+
+    Optimisation: ``original_words`` is sorted chronologically, so the
+    nearest neighbour by ``start`` time can be located via binary search
+    in O(log N) per word instead of the previous O(N) linear scan.
     """
+    import bisect
+
+    if not original_words:
+        return 0
+
+    # Sort once and capture (start, original_word) pairs so the index
+    # ordering matches the sorted starts list.
+    sorted_originals = sorted(original_words, key=lambda w: w.start)
+    sorted_starts = [w.start for w in sorted_originals]
+
     fixes = 0
     for seg in translated_segments:
         for w in seg.words:
+            # Bisect to find the insertion point, then compare neighbours
+            # at idx-1 and idx for the closer match.
+            insert = bisect.bisect_left(sorted_starts, w.start)
             best_match: WordTimestamp | None = None
             best_dist = float("inf")
-            for ow in original_words:
-                dist = abs(w.start - ow.start)
-                if dist < best_dist:
-                    best_dist = dist
-                    best_match = ow
-                elif dist > best_dist + 1.0:
-                    # original_words is sorted; further entries can't beat us.
-                    break
+            for cand_idx in (insert - 1, insert):
+                if 0 <= cand_idx < len(sorted_originals):
+                    ow = sorted_originals[cand_idx]
+                    dist = abs(w.start - ow.start)
+                    if dist < best_dist:
+                        best_dist = dist
+                        best_match = ow
 
             if best_match and best_dist < 0.1:
                 if (abs(w.start - best_match.start) > 0.001

@@ -53,6 +53,29 @@ def _make_phase_setter(job: Job, log_fn):
     return set_phase
 
 
+def _persist_job_meta(job: Job, output_dir: Path) -> None:
+    """Write job_meta.json so the FastAPI restore handler can rehydrate
+    this job after a server restart.
+
+    Persisting after every terminal status change (not just transcription)
+    keeps ``target_language`` and ``transcribe_only`` accurate so the
+    Recent Jobs list shows the correct language instead of the literal
+    fallback "en" the restore handler used to assume.
+    """
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        meta_path = output_dir / "job_meta.json"
+        with meta_path.open("w", encoding="utf-8") as f:
+            json.dump(
+                job.model_dump(exclude={"log_lines"}),
+                f, ensure_ascii=False, indent=2,
+            )
+    except Exception as exc:  # noqa: BLE001 — meta is best-effort
+        logger.warning(
+            "[Job {}] Could not save job_meta.json: {}", job.id[:8], exc,
+        )
+
+
 # ─── Phase 1 only ─────────────────────────────────────────────────────────
 
 async def run_transcription_only(
@@ -131,6 +154,11 @@ async def run_transcription_only(
         # Auto-translate via Gemini if a target language is set.
         if target_language and config.GEMINI_API_KEYS:
             log(f"Auto-translating to '{target_language}' via Gemini...")
+            if not getattr(config, "DEEPL_API_KEY", ""):
+                log(
+                    "Note: DEEPL_API_KEY not set. If Gemini fails, subtitles "
+                    "will be left in the SOURCE language (no fallback)."
+                )
             from processors.translator import TranslatorProcessor
             translator = TranslatorProcessor(target_language=target_language)
             segments, _ = await translator.translate(
@@ -182,16 +210,7 @@ async def run_transcription_only(
         log(f"✓ Transkripsi selesai dalam {elapsed}s → Siap untuk preview")
 
         # Persist metadata so jobs survive a server restart.
-        try:
-            meta_path = output_dir / "job_meta.json"
-            output_dir.mkdir(parents=True, exist_ok=True)
-            with meta_path.open("w", encoding="utf-8") as f:
-                json.dump(
-                    job.model_dump(exclude={"log_lines"}),
-                    f, ensure_ascii=False, indent=2,
-                )
-        except Exception as meta_exc:  # noqa: BLE001
-            logger.warning("[Job {}] Could not save job_meta.json: {}", job.id[:8], meta_exc)
+        _persist_job_meta(job, output_dir)
 
     except asyncio.CancelledError:
         job.status = JobStatus.CANCELLED
@@ -329,19 +348,19 @@ async def run_render_pipeline(
             )
 
         # ── Recheck word-level alignment before rendering ────────────────
-        # Skip recheck when the user supplied an edited transcript: the
-        # proportional word redistribution done by sync_segment_words_with_text
-        # produces timestamps that no longer match the ElevenLabs source.
+        # Translator.translate() already runs recheck_word_level_alignment
+        # internally against the words present at translate-time, so a
+        # second pass here used to double the work for every render job.
+        # We only need a fresh recheck when the user supplied an edited
+        # transcript that was NOT translated this run — and even then
+        # the proportional word redistribution done by
+        # ``sync_segment_words_with_text`` produces timestamps that no
+        # longer match the ElevenLabs source, so a recheck would only
+        # introduce drift.  Hence: never recheck here.
         skip_recheck = bool(
             user_transcript
             and isinstance(user_transcript, list)
             and len(user_transcript) > 0
-        )
-        translated_segments = await _maybe_recheck(
-            output_dir=output_dir,
-            segments=translated_segments,
-            log=log,
-            skip=skip_recheck,
         )
 
         # Sanitize timing.  Word-level passes are skipped when the user
@@ -384,10 +403,15 @@ async def run_render_pipeline(
         elapsed = round((job.completed_at or 0) - (job.started_at or 0), 1)
         log(f"✓ Render selesai dalam {elapsed}s → {final_output.name}")
 
+        # Persist final state so the Recent Jobs list survives a restart
+        # with target_language / output_file / status all preserved.
+        _persist_job_meta(job, output_dir)
+
     except asyncio.CancelledError:
         job.status = JobStatus.CANCELLED
         job.phase_label = "Cancelled"
         log("Render dibatalkan")
+        _persist_job_meta(job, output_dir)
 
     except Exception as exc:  # noqa: BLE001
         job.status = JobStatus.FAILED
@@ -395,6 +419,7 @@ async def run_render_pipeline(
         job.error = str(exc)
         log(f"✗ Error: {exc}")
         logger.exception("[Job {}] Render pipeline failed", job.id[:8])
+        _persist_job_meta(job, output_dir)
 
 
 async def _maybe_recheck(

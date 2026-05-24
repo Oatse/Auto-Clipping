@@ -25,12 +25,74 @@ export let draggingSegEdge  = null; // {segIdx, edge: 'start'|'end'}
 export let draggingSegBody  = null; // {segIdx, offsetTime, segDuration} for whole-segment drag
 export let subtitleDragState = null; // {segIdx, startX, startY, origPosX, origPosY}
 
+// Cached speaker row layout from last renderTimeline() — used for cross-speaker drag
+export let timelineSpeakers = []; // sorted array of speaker IDs as rendered in timeline rows
+
 // Merge / split state
 export let splitDialogIdx     = null;  // which segment is being split
 export let splitDialogWordIdx = 1;     // words[0..wordIdx-1] → part 1, rest → part 2
 
 // Per-speaker custom styles: { "SPEAKER_00": { color: "#ffffff" }, ... }
 export let speakerStyles  = {};
+
+// ── Effects / Filters state ─────────────────────────────────────────────
+// Each FX: { id, type, start, end, label, params: {...per-type} }
+//   zoom-vtuber / zoom-in-center: { zoomLevel:1-200, transition:'smooth'|'instant', cropX:0-1, cropY:0-1 }
+//   red-flash / flash-white: { intensity:10-100 }
+//   shake: { intensity:10-100 }
+//   vignette: { intensity:10-100 }
+//   volume-boost: { gain:1-5 }
+//   bass-boost: { gain:1-12 }
+export let effectsData = [];
+export let selectedFxId = null;
+export let draggingFx = null;     // { id, offsetTime } for whole-block drag
+export let draggingFxEdge = null; // { id, edge: 'start'|'end' }
+export let fxLayerCount = 1;       // number of FX track layers (1+)
+// Global filter (applied to whole video)
+export let activeFilter = 'none';
+export let filterBrightness = 0;
+export let filterContrast   = 0;
+export let filterSaturation = 0;
+
+let _fxIdCounter = 0;
+export function nextFxId() { return ++_fxIdCounter; }
+
+// Undo / Redo stacks — store deep copies of transcriptData around each mutation
+export let undoStack = [];
+export let redoStack = [];
+const UNDO_MAX = 50;  // keep at most 50 undo snapshots
+
+/** Call BEFORE mutating transcriptData to save a restorable snapshot.
+ *  Also clears the redo stack — new edits invalidate any redoable history. */
+export function pushUndoSnapshot() {
+  undoStack.push(JSON.parse(JSON.stringify(transcriptData)));
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  // New mutation → forward history is no longer reachable
+  redoStack = [];
+}
+
+/** Pop the most recent snapshot. Returns the array or null if empty. */
+export function popUndoSnapshot() {
+  if (undoStack.length === 0) return null;
+  return undoStack.pop();
+}
+
+/** Push current transcript onto the redo stack (used by undo() before restoring). */
+export function pushRedoSnapshot() {
+  redoStack.push(JSON.parse(JSON.stringify(transcriptData)));
+  if (redoStack.length > UNDO_MAX) redoStack.shift();
+}
+
+/** Pop the most recent redo snapshot. Returns the array or null if empty. */
+export function popRedoSnapshot() {
+  if (redoStack.length === 0) return null;
+  return redoStack.pop();
+}
+
+export function clearUndoStack() {
+  undoStack = [];
+  redoStack = [];
+}
 
 // Auto-save state
 export let autoSaveTimer  = null;
@@ -64,6 +126,7 @@ export function setDraggingPlayhead(d) { draggingPlayhead = d; }
 export function setDraggingSegEdge(d) { draggingSegEdge = d; }
 export function setDraggingSegBody(d) { draggingSegBody = d; }
 export function setSubtitleDragState(d) { subtitleDragState = d; }
+export function setTimelineSpeakers(s) { timelineSpeakers = s; }
 export function setSplitDialogIdx(i) { splitDialogIdx = i; }
 export function setSplitDialogWordIdx(i) { splitDialogWordIdx = i; }
 export function setSpeakerStyles(s) { speakerStyles = s; }
@@ -73,6 +136,17 @@ export function setFsScale(s) { fsScale = s; }
 export function setPreviewWidthBeforeFs(w) { previewWidthBeforeFs = w; }
 export function setJobsPanelTab(t) { jobsPanelTab = t; }
 export function setNumSpeakersCount(n) { numSpeakersCount = n; }
+
+// Effects / Filters setters
+export function setEffectsData(d) { effectsData = d; }
+export function setSelectedFxId(id) { selectedFxId = id; }
+export function setDraggingFx(d) { draggingFx = d; }
+export function setDraggingFxEdge(d) { draggingFxEdge = d; }
+export function setFxLayerCount(n) { fxLayerCount = Math.max(1, Math.min(8, n)); }
+export function setActiveFilter(f) { activeFilter = f; }
+export function setFilterBrightness(v) { filterBrightness = v; }
+export function setFilterContrast(v) { filterContrast = v; }
+export function setFilterSaturation(v) { filterSaturation = v; }
 
 // Speaker color palette — index maps to SPEAKER_00, SPEAKER_01, etc.
 export const SPEAKER_COLORS = [

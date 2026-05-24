@@ -1,0 +1,251 @@
+{# editor_right.html — Style / FX / Filters panel (right column) #}
+<aside class="editor__right">
+  <div class="editor__pane editor__pane--style">
+    <div class="style-panel-tabs" id="stylePanelTabs">
+      <button class="sp-tab active" data-sp-tab="subtitle-style">Subtitle</button>
+      <button class="sp-tab" data-sp-tab="effects">Effects</button>
+      <button class="sp-tab" data-sp-tab="filters">Filters</button>
+    </div>
+
+    {# ── PANE: Subtitle Style ───────────────────────────────────────── #}
+    <div class="sp-tab-pane active" id="spPane-subtitle-style">
+
+      <div class="style-section">
+        <label class="style-label">Quick presets</label>
+        <div class="preset-grid" id="presetGrid">
+          <button class="preset is-active" data-preset="vtuber-pop">
+            <span class="preset__preview" style="font-family: 'Bangers', cursive; color:#fff; -webkit-text-stroke:2px #ff006e;">Pop!</span>
+            <span class="preset__name">VTuber</span>
+          </button>
+          <button class="preset" data-preset="vtuber-neon">
+            <span class="preset__preview" style="font-family:'Orbitron', sans-serif; color:#00f5ff; text-shadow:0 0 8px #00f5ff;">NEON</span>
+            <span class="preset__name">Neon</span>
+          </button>
+          <button class="preset" data-preset="anime-bold">
+            <span class="preset__preview" style="font-family:'Fredoka One', cursive; color:#ffe600; -webkit-text-stroke:2px #000;">Anime</span>
+            <span class="preset__name">Anime</span>
+          </button>
+          <button class="preset" data-preset="clean-white">
+            <span class="preset__preview" style="color:#fff; text-shadow:0 2px 8px rgba(0,0,0,.8);">Clean</span>
+            <span class="preset__name">Clean</span>
+          </button>
+          <button class="preset" data-preset="retro-game">
+            <span class="preset__preview" style="font-family:'Press Start 2P', monospace; color:#00ff41; font-size:9px;">GAME</span>
+            <span class="preset__name">Retro</span>
+          </button>
+          <button class="preset" data-preset="idol-pink">
+            <span class="preset__preview" style="font-family:'Righteous', cursive; color:#ff85c2; -webkit-text-stroke:1px #fff;">Idol</span>
+            <span class="preset__name">Idol</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="style-section">
+        <label class="style-label" for="fontFamily">Font family</label>
+        <select class="select select--square" id="fontFamily">
+          <option value="'Inter', sans-serif">Inter</option>
+          <option value="'Bangers', cursive">Bangers</option>
+          <option value="'Fredoka One', cursive">Fredoka One</option>
+          <option value="'Bebas Neue', cursive">Bebas Neue</option>
+          <option value="'Righteous', cursive">Righteous</option>
+          <option value="'Orbitron', sans-serif">Orbitron</option>
+          <option value="'Press Start 2P', monospace">Press Start 2P</option>
+          <option value="'JetBrains Mono', monospace">JetBrains Mono</option>
+          <option value="Impact, sans-serif">Impact</option>
+          <option value="Arial, sans-serif">Arial</option>
+        </select>
+      </div>
+
+      <div class="style-section">
+        <label class="style-label">Font size <span class="style-value" id="fontSizeVal">42</span> px</label>
+        <input type="range" class="range" id="fontSize" min="20" max="90" value="42" step="1" />
+      </div>
+
+      <div class="style-section">
+        <label class="style-label">Text colour</label>
+        <div class="color-row" style="display:flex; align-items:center; gap: var(--s-3);">
+          <input type="color" class="color color-input" id="fontColor" value="#ffffff" />
+          <div class="color-swatches" id="colorSwatches" style="display:flex; gap: 6px; flex-wrap:wrap;">
+            <button class="swatch active" data-color="#ffffff" style="background:#fff;" title="White"></button>
+            <button class="swatch" data-color="#ffe600" style="background:#ffe600;" title="Yellow"></button>
+            <button class="swatch" data-color="#ff006e" style="background:#ff006e;" title="Pink"></button>
+            <button class="swatch" data-color="#00f5ff" style="background:#00f5ff;" title="Cyan"></button>
+            <button class="swatch" data-color="#00ff41" style="background:#00ff41;" title="Green"></button>
+            <button class="swatch" data-color="#ff8c00" style="background:#ff8c00;" title="Orange"></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="style-section">
+        <label class="style-label" style="display:flex; justify-content:space-between; align-items:center;">
+          <span>Stroke (outline)</span>
+          <label class="switch"><input type="checkbox" id="strokeEnabled" checked /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+        </label>
+        <div class="stroke-controls" id="strokeControls">
+          <div class="stroke-row" style="display:grid; grid-template-columns: auto 1fr; gap: var(--s-3); align-items:center;">
+            <input type="color" class="color color-input" id="strokeColor" value="#000000" />
+            <div>
+              <span class="stroke-sublabel">Width <span class="style-value" id="strokeWidthVal">3</span> px</span>
+              <input type="range" class="range" id="strokeWidth" min="0" max="12" value="3" step="1" />
+            </div>
+          </div>
+          <div id="extraStrokesContainer"></div>
+          <button type="button" class="btn btn--sm btn--ghost" id="addStrokeBtn" style="margin-top: var(--s-3);">＋ Add stroke layer</button>
+        </div>
+      </div>
+
+      <div class="style-section">
+        <label class="style-label" style="display:flex; justify-content:space-between; align-items:center;">
+          <span>Glow / shadow</span>
+          <label class="switch"><input type="checkbox" id="glowEnabled" /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+        </label>
+        <div class="glow-controls hidden" id="glowControls">
+          <div class="stroke-row" style="display:grid; grid-template-columns: auto 1fr; gap: var(--s-3); align-items:center;">
+            <input type="color" class="color color-input" id="glowColor" value="#ff006e" />
+            <div>
+              <span class="stroke-sublabel">Blur <span class="style-value" id="glowBlurVal">12</span> px</span>
+              <input type="range" class="range" id="glowBlur" min="0" max="40" value="12" step="1" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="style-section">
+        <label class="style-label">Animation</label>
+        <div class="anim-grid" id="animGrid" style="display:grid; grid-template-columns: repeat(2, 1fr); gap: 6px;">
+          <button class="anim-btn tag is-active" data-anim="word-pop">Word Pop</button>
+          <button class="anim-btn tag" data-anim="narration-pop">Narration</button>
+          <button class="anim-btn tag" data-anim="bounce-in">Bounce</button>
+          <button class="anim-btn tag" data-anim="slide-up">Slide Up</button>
+          <button class="anim-btn tag" data-anim="zoom-flash">Zoom</button>
+          <button class="anim-btn tag" data-anim="typewriter">Typewriter</button>
+          <button class="anim-btn tag" data-anim="karaoke">Karaoke</button>
+        </div>
+      </div>
+
+      <div class="style-section">
+        <label class="style-label">Position</label>
+        <div class="position-grid segmented" id="positionGrid">
+          <button class="pos-btn" data-pos="top">Top</button>
+          <button class="pos-btn is-active" data-pos="bottom">Bottom</button>
+          <button class="pos-btn" data-pos="center">Center</button>
+        </div>
+      </div>
+
+      <div class="style-section">
+        <label class="style-label" style="display:flex; justify-content:space-between; align-items:center;">
+          <span>Background box</span>
+          <label class="switch"><input type="checkbox" id="bgBoxEnabled" /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+        </label>
+        <div class="bgbox-controls hidden" id="bgBoxControls">
+          <div class="stroke-row" style="display:grid; grid-template-columns: auto 1fr; gap: var(--s-3); align-items:center;">
+            <input type="color" class="color color-input" id="bgBoxColor" value="#000000" />
+            <div>
+              <span class="stroke-sublabel">Opacity <span class="style-value" id="bgOpacityVal">60</span>%</span>
+              <input type="range" class="range" id="bgOpacity" min="0" max="100" value="60" step="5" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="style-section" id="speakerStylesSection" style="display:none;">
+        <label class="style-label">
+          Per-speaker colours
+          <span class="speaker-style-hint badge badge--lime">Multi-speaker</span>
+        </label>
+        <div class="speaker-styles-panel" id="speakerStylesPanel"></div>
+      </div>
+    </div>
+
+    {# ── PANE: Effects ──────────────────────────────────────────────── #}
+    <div class="sp-tab-pane" id="spPane-effects">
+      <p class="fx-tab-hint">Drag a preset onto the timeline FX track to apply.</p>
+
+      <div class="fx-settings-panel" id="fxSettingsPanel" style="display:none;">
+        <div class="fx-settings-header">
+          <span class="fx-settings-title" id="fxSettingsTitle">Effect settings</span>
+          <button class="icon-btn fx-settings-close" id="fxSettingsClose" title="Close">
+            <svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 3l6 6M9 3l-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="fx-settings-body" id="fxSettingsBody"></div>
+      </div>
+
+      <div class="style-section">
+        <label class="style-label">Visual</label>
+        <div class="fx-preset-grid" id="fxPresetGrid">
+          {# FX preset cards are still rendered statically; legacy effects.js attaches drag-handlers by data-fx-type #}
+          <div class="fx-preset-card" draggable="true" data-fx-type="red-flash"><div class="fx-preset-info"><span class="fx-preset-name">Red flash</span><span class="fx-preset-desc">Overlay + voice boost</span></div></div>
+          <div class="fx-preset-card" draggable="true" data-fx-type="zoom-vtuber"><div class="fx-preset-info"><span class="fx-preset-name">Auto zoom</span><span class="fx-preset-desc">Zoom into face area</span></div></div>
+          <div class="fx-preset-card" draggable="true" data-fx-type="shake"><div class="fx-preset-info"><span class="fx-preset-name">Shake</span><span class="fx-preset-desc">Camera shake</span></div></div>
+          <div class="fx-preset-card" draggable="true" data-fx-type="flash-white"><div class="fx-preset-info"><span class="fx-preset-name">Flash white</span><span class="fx-preset-desc">Bright burst</span></div></div>
+          <div class="fx-preset-card" draggable="true" data-fx-type="zoom-in-center"><div class="fx-preset-info"><span class="fx-preset-name">Zoom center</span><span class="fx-preset-desc">Slow zoom-in</span></div></div>
+          <div class="fx-preset-card" draggable="true" data-fx-type="vignette"><div class="fx-preset-info"><span class="fx-preset-name">Vignette</span><span class="fx-preset-desc">Dark edges</span></div></div>
+        </div>
+      </div>
+
+      <div class="style-section">
+        <label class="style-label">Audio</label>
+        <div class="fx-preset-grid" id="fxAudioPresetGrid">
+          <div class="fx-preset-card" draggable="true" data-fx-type="volume-boost"><div class="fx-preset-info"><span class="fx-preset-name">Volume boost</span><span class="fx-preset-desc">Adjustable boost</span></div></div>
+          <div class="fx-preset-card" draggable="true" data-fx-type="bass-boost"><div class="fx-preset-info"><span class="fx-preset-name">Bass boost</span><span class="fx-preset-desc">Low-frequency lift</span></div></div>
+        </div>
+      </div>
+
+      <div class="style-section">
+        <label class="style-label">Timeline FX</label>
+        <p class="field__hint">Effects in timeline: <strong id="fxTrackCount">0</strong></p>
+        <div class="fx-layer-controls" style="display:flex; gap: var(--s-2); align-items:center; margin-top: var(--s-2);">
+          <span class="fx-layer-label">Layers: <strong id="fxLayerCountDisplay">1</strong></span>
+          <button class="btn btn--sm btn--ghost" id="addFxLayerBtn">＋ Layer</button>
+          <button class="btn btn--sm btn--ghost" id="removeFxLayerBtn">−</button>
+          <button class="btn btn--sm btn--ghost" id="clearAllFxBtn">Clear</button>
+        </div>
+      </div>
+    </div>
+
+    {# ── PANE: Filters ──────────────────────────────────────────────── #}
+    <div class="sp-tab-pane" id="spPane-filters">
+      <div class="style-section">
+        <label class="style-label">Brightness <span class="style-value" id="brightnessVal">100</span>%</label>
+        <input type="range" class="range" id="brightnessRange" min="50" max="150" value="100" />
+      </div>
+      <div class="style-section">
+        <label class="style-label">Contrast <span class="style-value" id="contrastVal">100</span>%</label>
+        <input type="range" class="range" id="contrastRange" min="50" max="150" value="100" />
+      </div>
+      <div class="style-section">
+        <label class="style-label">Saturation <span class="style-value" id="saturationVal">100</span>%</label>
+        <input type="range" class="range" id="saturationRange" min="0" max="200" value="100" />
+      </div>
+      <div class="style-section">
+        <label class="style-label">Filter</label>
+        <div class="filter-grid" id="filterGrid" style="display:grid; grid-template-columns: repeat(3, 1fr); gap: 6px;">
+          <button class="filter-btn tag is-active" data-filter="none">None</button>
+          <button class="filter-btn tag" data-filter="warm">Warm</button>
+          <button class="filter-btn tag" data-filter="cool">Cool</button>
+          <button class="filter-btn tag" data-filter="vintage">Vintage</button>
+          <button class="filter-btn tag" data-filter="bw">B&amp;W</button>
+          <button class="filter-btn tag" data-filter="cinema">Cinema</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</aside>
+
+<button class="icon-btn fx-context-menu hidden" id="fxContextMenu" style="display:none;"></button>
+<div id="fxCropWrap" style="display:none;"><canvas id="fxCropCanvas"></canvas></div>
+<button id="emptyJobsCta" class="hidden"></button>
+<button id="clipPickerBtn" class="hidden"></button>
+<div id="clipPickerList" class="hidden"></div>
+<input id="backToUploadBtn" class="hidden" />
+<input id="fxSetStart" class="hidden" />
+<input id="fxSetEnd" class="hidden" />
+<input id="fxSetGain" class="hidden" />
+<span id="fxSetGainVal" class="hidden"></span>
+<input id="fxSetIntensity" class="hidden" />
+<span id="fxSetIntensityVal" class="hidden"></span>
+<input id="fxSetLayer" class="hidden" />
+<input id="fxSetTransition" class="hidden" />
+<input id="fxSetZoomLevel" class="hidden" />
+<span id="fxSetZoomLevelVal" class="hidden"></span>

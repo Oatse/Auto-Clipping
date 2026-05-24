@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}Clip Finder — ClipAuto{% endblock %}
+{% block body_class %}p-clipfinder{% endblock %}
+
+{% block content %}
+<section class="hero" data-reveal>
+  <div class="container container--wide">
+    <div class="hero__split">
+      <div>
+        <span class="eyebrow is-lime" data-reveal-item><span class="dot"></span>Workspace · 02</span>
+        <h1 class="hero__title" data-reveal-item>
+          Find the moments<br/>worth <em>cutting.</em>
+        </h1>
+        <p class="hero__sub" data-reveal-item>
+          Paste a YouTube URL, describe the type of moments you want, and Gemini scans the full transcript with audio + chat signals to score the highest-impact clips.
+        </p>
+      </div>
+      <aside class="hero__aside" data-reveal-item>
+        <div class="surface surface--ink">
+          <div class="metric">
+            <span class="metric__value" style="color: var(--c-lime);" data-counter data-target="12">0</span>
+            <span class="metric__label" style="color: rgba(255,255,255,0.72);">Clips per analysis (typical)</span>
+          </div>
+        </div>
+        <dl class="hero__aside-meta">
+          <div><dt>Source</dt><dd>YouTube · livestream</dd></div>
+          <div><dt>Mode</dt><dd>Single · Multi-stage</dd></div>
+        </dl>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="screen-clipfinder">
+  <div class="container container--wide">
+    <div class="workbench">
+      <!-- LEFT: query form + log -->
+      <div style="display:grid; gap: var(--s-6);">
+        <div class="surface" data-reveal>
+          <div class="surface__head">
+            <div>
+              <h2 class="surface__title">Find clips from a URL</h2>
+              <p class="surface__desc">Works with public YouTube videos, livestreams, and unlisted links you have access to.</p>
+            </div>
+          </div>
+
+          <div style="display:grid; gap: var(--s-5);">
+            <div class="field">
+              <label class="field__label" for="cfUrl">YouTube URL</label>
+              <input class="input" id="cfUrl" type="url" placeholder="https://www.youtube.com/watch?v=…" />
+            </div>
+
+            <div class="field">
+              <label class="field__label" for="cfInstructions">What are you looking for?</label>
+              <textarea class="textarea" id="cfInstructions" rows="3" placeholder="e.g. funny VTuber reactions, key product reveals, emotional peaks. Leave empty for 'all interesting moments'."></textarea>
+              <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top: var(--s-2);">
+                <button type="button" class="tag" id="cfPresetVtuber">VTuber highlights</button>
+                <button type="button" class="tag" id="cfPresetClear">Clear</button>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="field">
+                <label class="field__label" for="cfLang">Subtitle language</label>
+                <select class="select" id="cfLang">
+                  <option value="en" selected>English</option>
+                  <option value="id">Indonesian</option>
+                  <option value="ja">Japanese</option>
+                  <option value="es">Spanish</option>
+                  <option value="zh">Chinese</option>
+                  <option value="fr">French</option>
+                  <option value="de">German</option>
+                  <option value="ko">Korean</option>
+                </select>
+              </div>
+              <div class="field">
+                <label class="field__label" for="cfStartOffset">Start offset (s)</label>
+                <input class="input input--mono" id="cfStartOffset" type="number" min="0" step="10" value="0" placeholder="0" />
+                <p class="field__hint">Skip first N seconds (good for livestream waiting screens).</p>
+              </div>
+            </div>
+
+            <div class="field">
+              <span class="field__label">Detection mode</span>
+              <div class="segmented" role="tablist">
+                <button type="button" class="is-active" id="cfModeSingle" data-mode="single-shot">Single-shot</button>
+                <button type="button" id="cfModeMulti" data-mode="multi-stage">Multi-stage (deeper)</button>
+              </div>
+            </div>
+
+            <div class="row">
+              <label class="def-list__row" style="border-bottom:0; padding:0;">
+                <div>
+                  <div style="font-size: var(--fs-14); color: var(--c-ink);">Audio signals</div>
+                  <div class="field__hint">Detect loud peaks and crowd reactions.</div>
+                </div>
+                <label class="switch"><input type="checkbox" id="cfEnableAudio" checked /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+              </label>
+              <label class="def-list__row" style="border-bottom:0; padding:0;">
+                <div>
+                  <div style="font-size: var(--fs-14); color: var(--c-ink);">Chat signals</div>
+                  <div class="field__hint">Score moments using live-chat spikes (livestreams).</div>
+                </div>
+                <label class="switch"><input type="checkbox" id="cfEnableChat" checked /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+              </label>
+            </div>
+
+            <button type="button" class="btn btn--lg" id="cfFindBtn" style="justify-self:start;">
+              <span>Analyse video</span>
+              <span class="btn__icon"><svg width="14" height="14" viewBox="0 0 14 14"><circle cx="6" cy="6" r="4" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M9.5 9.5L12 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Progress + log surface -->
+        <div class="surface" id="cfProgress" style="display:none;" data-reveal>
+          <div class="surface__head">
+            <div>
+              <h3 class="surface__title" style="font-size: var(--fs-18);">Analysis in progress</h3>
+              <p class="surface__desc" id="cfPhaseLabel">Starting…</p>
+            </div>
+            <span class="badge badge--lime"><span class="pulse"></span>Live</span>
+          </div>
+          <div class="process__progress">
+            <div class="process__progress-bar" id="cfProgressBar" style="width: 0%;"></div>
+          </div>
+          <div class="cf-steps" style="display:grid; grid-template-columns: repeat(4, 1fr); gap: var(--s-3); margin-top: var(--s-5); font-family: var(--f-mono); font-size: var(--fs-12); letter-spacing: 0.04em; text-transform: uppercase; color: var(--c-ink-mute);">
+            <div class="cf-step-line" data-step="transcribing"><span>01</span> Transcript</div>
+            <div class="cf-step-line" data-step="signals"><span>02</span> Signals</div>
+            <div class="cf-step-line" data-step="analyzing"><span>03</span> AI analysis</div>
+            <div class="cf-step-line" data-step="analyzed"><span>04</span> Done</div>
+          </div>
+          <div class="process__log" id="cfLog" style="margin-top: var(--s-5);">Waiting…</div>
+        </div>
+      </div>
+
+      <!-- RIGHT: results sidebar -->
+      <aside class="surface surface--cream" data-reveal>
+        <div class="surface__head">
+          <div>
+            <h2 class="surface__title" style="font-size: var(--fs-20);">Results</h2>
+            <p class="surface__desc"><span id="cfResultCount">0</span> clips detected.</p>
+          </div>
+          <button class="btn btn--sm btn--ghost" id="cfDownloadAllBtn" style="display:none;">
+            Download all
+            <span class="btn__icon"><svg width="12" height="12" viewBox="0 0 12 12"><path d="M6 1v8M3 6l3 3 3-3M1 11h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </button>
+        </div>
+
+        <div id="cfClipsGrid" style="display:grid; gap: var(--s-3);">
+          <div class="state state--empty">
+            <div class="state__icon"><svg width="22" height="22" viewBox="0 0 22 22"><path d="M5 5h12v12H5z M9 8l5 3-5 3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <h4 class="state__title">No clips yet</h4>
+            <p class="state__desc">Run an analysis to see scored highlight clips here.</p>
+          </div>
+        </div>
+
+        <div id="cfDownloadAll" class="hairline" style="display:none; margin-top: var(--s-6);"></div>
+      </aside>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/app.module.js"></script>
+{% endblock %}

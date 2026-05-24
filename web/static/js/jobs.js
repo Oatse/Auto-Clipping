@@ -38,15 +38,19 @@ export function setupJobs() {
 export async function loadSystemInfo() {
   try {
     const data = await apiFetch('/api/system');
-    const dot  = systemStatus.querySelector('.status-dot');
-    const text = systemStatus.querySelector('.status-text');
+    // The new floating-pill nav uses a different status badge that's wired
+    // up by nav.js. Older legacy markup exposed `.status-dot` / `.status-text`
+    // — guard so we silently skip when those nodes don't exist on the page.
+    const dot  = systemStatus ? systemStatus.querySelector('.status-dot')  : null;
+    const text = systemStatus ? systemStatus.querySelector('.status-text') : null;
 
     const ffmpegOk     = !!data.packages.ffmpeg;
     const elevenlabsOk = !!data.packages.elevenlabs;
     const geminiOk     = !!(data.env && data.env.gemini_keys_set);
     const deeplOk      = !!(data.env && data.env.deepl_key_set);
     const allOk        = ffmpegOk && elevenlabsOk && geminiOk;
-    dot.className = 'status-dot ' + (allOk ? 'ok' : 'warn');
+    if (dot) dot.className = 'status-dot ' + (allOk ? 'ok' : 'warn');
+    if (text) {
     if (allOk) {
       const gpuLabel = data.cuda_available
         ? (data.gpu_name || 'GPU')
@@ -62,6 +66,7 @@ export async function loadSystemInfo() {
     } else {
       text.textContent = 'Setup required — FFmpeg missing';
     }
+    } /* end if(text) */
 
     // System status grid surfaces the same backend env signals so the
     // user sees Gemini + DeepL availability at a glance.  DeepL is
@@ -78,11 +83,14 @@ export async function loadSystemInfo() {
       { label: 'Pycaps',     ok: !!data.packages.pycaps },
       { label: 'GPU',        ok: !!data.cuda_available, warn: !data.cuda_available },
     ];
-    sysGrid.innerHTML = items.map(i => `
-      <div class="sys-item ${i.ok ? 'ok' : i.warn ? 'warn' : 'err'}"${i.title ? ` title="${i.title}"` : ''}>
-        <span class="dot"></span>${i.label}
-      </div>
-    `).join('');
+    if (sysGrid) {
+      sysGrid.innerHTML = items.map(i => `
+        <div class="def-list__row sys-item ${i.ok ? 'ok' : i.warn ? 'warn' : 'err'}"${i.title ? ` title="${i.title}"` : ''}>
+          <span class="def-list__key"><span class="dot" style="display:inline-block;width:6px;height:6px;border-radius:999px;background:${i.ok ? 'var(--c-success)' : i.warn ? 'var(--c-warning)' : 'var(--c-danger)'};margin-right:8px;"></span>${i.label}</span>
+          <span class="def-list__val">${i.ok ? 'OK' : (i.warn ? 'optional' : 'missing')}</span>
+        </div>
+      `).join('');
+    }
 
     // Populate transcription engine dropdown.
     // The server now returns a single ElevenLabs entry, but we keep the
@@ -259,6 +267,13 @@ function renderJobs(jobs) {
 
 // ── Resume Job ─────────────────────────────────────────────────────────────
 async function resumeJob(jobId) {
+  // The editor lives on its own route now. If we're on a non-editor page,
+  // hop to /editor/{id} so the editor templates + DOM are loaded fresh.
+  const onEditor = document.body && document.body.classList.contains('p-editor');
+  if (!onEditor) {
+    window.location.href = `/editor/${jobId}`;
+    return;
+  }
   try {
     const transcript = await fetchTranscript(jobId);
     if (!transcript || !transcript.length) {
@@ -281,6 +296,8 @@ async function resumeJob(jobId) {
 
 // ── Modal ──────────────────────────────────────────────────────────────────
 function setupModal() {
+  // Modal markup is editor-only. Skip wiring on pages that don't ship it.
+  if (!modalClose || !modalOverlay) return;
   modalClose.addEventListener('click', closeModal);
   modalOverlay.addEventListener('click', (e) => {
     if (e.target === modalOverlay) closeModal();

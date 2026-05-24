@@ -1,0 +1,33 @@
+{# nav.html — Floating pill navbar partial. Used across all pages. #}
+<nav class="nav" role="navigation" aria-label="Primary">
+  <a class="nav__brand" href="/">
+    <span class="nav__brand-mark">C</span>
+    <span class="nav__brand-name">Clip<span class="accent">Auto</span><span class="registered">®</span></span>
+  </a>
+
+  <div class="nav__center" role="tablist" aria-label="Workspaces">
+    <a class="nav__link {% if active == 'subtitle' %}is-active{% endif %}" href="/auto-subtitle">
+      <span class="nav__link-dot"></span>Auto Subtitle
+    </a>
+    <a class="nav__link {% if active == 'clipfinder' %}is-active{% endif %}" href="/clip-finder">
+      <span class="nav__link-dot"></span>Clip Finder
+    </a>
+    <a class="nav__link {% if active == 'shortmaker' %}is-active{% endif %}" href="/short-maker">
+      <span class="nav__link-dot"></span>Short Maker
+    </a>
+    <a class="nav__link {% if active == 'editor' %}is-active{% endif %}" href="/editor">
+      <span class="nav__link-dot"></span>Editor
+    </a>
+  </div>
+
+  <div class="nav__right">
+    <div class="nav__status" id="systemStatus" data-state="warn">
+      <span class="dot"></span>
+      <span class="status-text">Checking system…</span>
+    </div>
+
+    <button class="nav__menu-btn" id="navMenuBtn" aria-label="Open menu" aria-controls="navSheet" aria-expanded="false">
+      <span></span>
+    </button>
+  </div>
+</nav>

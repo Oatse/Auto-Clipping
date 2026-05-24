@@ -1,8 +1,11 @@
 """
 processors/muxer.py — Phase 4: Final FFmpeg Muxing.
 
-Re-encodes the subtitle-rendered video using NVIDIA NVENC (h264_nvenc).
-Audio is copied directly from the subtitled video (original audio preserved).
+Re-encodes the subtitle-rendered video.  Tries NVIDIA NVENC (h264_nvenc)
+first for fast GPU encode and automatically falls back to CPU libx264 when
+NVENC is unavailable (no NVIDIA GPU, missing driver, NVENC session limit).
+Audio is copied directly from the subtitled video so the original track
+is preserved bit-for-bit.
 """
 
 from __future__ import annotations
@@ -11,16 +14,19 @@ from pathlib import Path
 
 from loguru import logger
 
-from utils.ffmpeg_utils import run_ffmpeg
+from utils.ffmpeg_utils import FFmpegError, run_ffmpeg
 from utils.file_utils import ensure_dir
 
 
 class MuxerProcessor:
     """
-    Phase 4: Re-encode Pycaps subtitle video using NVENC → final MP4.
+    Phase 4: Re-encode the subtitle video to the final MP4 output.
 
-    The video from Pycaps already has burned-in subtitles and original audio.
-    Uses h264_nvenc (NVIDIA GPU) for fast encode, audio stream is copied.
+    Encoder priority:
+      1. ``h264_nvenc`` (NVIDIA GPU) — fast path.
+      2. ``libx264`` (CPU)         — fallback when NVENC fails.
+
+    Audio stream is copied directly from the input.
     """
 
     async def mux(
@@ -48,20 +54,53 @@ class MuxerProcessor:
         ensure_dir(output_path.parent)
 
         logger.info(
-            "Muxing: '{}' → '{}'",
+            "Muxing: '{}' -> '{}'",
             video_path.name,
             output_path.name,
         )
 
-        await run_ffmpeg([
-            "-hwaccel", "cuda",
-            "-i", str(video_path),
-            "-c:v", "h264_nvenc",
-            "-preset", "p4",
-            "-cq", "18",
-            "-c:a", "copy",
-            str(output_path),
-        ])
+        for use_nvenc in (True, False):
+            encoder_label = "NVENC/GPU" if use_nvenc else "libx264/CPU"
+            try:
+                await run_ffmpeg(self._build_args(
+                    video_path, output_path, use_nvenc=use_nvenc,
+                ))
+                logger.info(
+                    "Final output ({} encoder): {}", encoder_label, output_path,
+                )
+                return output_path
+            except FFmpegError as exc:
+                if use_nvenc:
+                    logger.warning(
+                        "Muxer NVENC failed, falling back to CPU encoder: {}",
+                        str(exc).splitlines()[0] if str(exc) else exc,
+                    )
+                    continue
+                # CPU fallback also failed — propagate the original error.
+                raise
 
-        logger.info("✓ Final output: {}", output_path)
-        return output_path
+        # Should be unreachable: the for-loop either returns or raises.
+        raise FFmpegError("Muxer exhausted all encoder fallbacks")
+
+    @staticmethod
+    def _build_args(
+        video_path: Path,
+        output_path: Path,
+        *,
+        use_nvenc: bool,
+    ) -> list[str]:
+        """Build the FFmpeg argv for a given encoder choice."""
+        args: list[str] = []
+        if use_nvenc:
+            args += ["-hwaccel", "cuda"]
+        args += ["-i", str(video_path)]
+
+        if use_nvenc:
+            args += ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18"]
+        else:
+            # libx264 CRF 18 ≈ NVENC cq 18 in perceptual quality.
+            args += ["-c:v", "libx264", "-preset", "medium", "-crf", "18"]
+
+        # Copy audio bit-for-bit, strip embedded subtitle streams.
+        args += ["-c:a", "copy", "-sn", str(output_path)]
+        return args

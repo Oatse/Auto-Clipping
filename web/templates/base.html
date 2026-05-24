@@ -1,0 +1,56 @@
+{# ============================================================================
+   base.html — Root template. Floema-inspired editorial shell.
+   Page templates extend this and override {% block content %}.
+   ============================================================================ #}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="{% block theme_color %}#FBFAF6{% endblock %}" />
+    <title>{% block title %}ClipAuto — Creative subtitle workspace{% endblock %}</title>
+    <meta name="description" content="{% block description %}ClipAuto — auto subtitles, clip finder, short maker, and a precision video subtitle editor for creators.{% endblock %}" />
+
+    {# Fonts — Satoshi via Fontshare (loaded once, cached) #}
+    <link rel="preconnect" href="https://api.fontshare.com" crossorigin />
+    <link rel="preconnect" href="https://cdn.fontshare.com" crossorigin />
+
+    {# Design system — load order matters (tokens → reset → ui → shell → page) #}
+    <link rel="stylesheet" href="/static/css/fonts.css" />
+    <link rel="stylesheet" href="/static/css/tokens.css" />
+    <link rel="stylesheet" href="/static/css/reset.css" />
+    <link rel="stylesheet" href="/static/css/ui.css" />
+    <link rel="stylesheet" href="/static/css/shell.css" />
+    <link rel="stylesheet" href="/static/css/forms.css" />
+    <link rel="stylesheet" href="/static/css/cards.css" />
+    <link rel="stylesheet" href="/static/css/pages.css" />
+    <link rel="stylesheet" href="/static/css/states.css" />
+    <link rel="stylesheet" href="/static/css/legacy-compat.css" />
+
+    {% block extra_styles %}{% endblock %}
+  </head>
+  <body class="{% block body_class %}{% endblock %}" data-mode="{% block body_mode %}light{% endblock %}">
+    {% include "_partials/nav.html" %}
+
+    <div class="page {% block page_class %}{% endblock %}">
+      <main id="main">
+        {% block content %}{% endblock %}
+      </main>
+
+      {% block footer %}{% include "_partials/footer.html" %}{% endblock %}
+    </div>
+
+    {# Mobile sheet — rendered once, controlled by nav.js #}
+    <div class="nav__sheet" id="navSheet" aria-hidden="true">
+      <a href="/auto-subtitle">Auto Subtitle</a>
+      <a href="/clip-finder">Clip Finder</a>
+      <a href="/short-maker">Short Maker</a>
+      <a href="/editor">Editor</a>
+    </div>
+
+    {# Page-level scripts #}
+    <script type="module" src="/static/js/nav.js"></script>
+    <script type="module" src="/static/js/motion.js"></script>
+    {% block scripts %}{% endblock %}
+  </body>
+</html>

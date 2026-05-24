@@ -62,14 +62,39 @@ YTDLP_COOKIES_FILE: str = os.getenv(
 )  # path to cookies.txt file (takes priority over browser)
 
 
+# ─── Gemini Models ───────────────────────────────────────────────────────────
+# Gemini model used for translation + word regrouping in Phase 2.
+# Override by setting TRANSLATOR_GEMINI_MODEL in .env (e.g. "gemini-2.5-flash"
+# if the preview model is not available on your project).
+TRANSLATOR_GEMINI_MODEL: str = os.getenv(
+    "TRANSLATOR_GEMINI_MODEL",
+    "gemini-3.5-flash",
+)
+# Fallback chain for translator when the primary model is deprecated / regional.
+# Tried in order; first one that returns 200 wins.
+TRANSLATOR_GEMINI_FALLBACK_MODELS: list[str] = [
+    m.strip() for m in os.getenv(
+        "TRANSLATOR_GEMINI_FALLBACK_MODELS",
+        "gemini-3.5-flash,gemini-2.5-flash",
+    ).split(",") if m.strip()
+]
+
+
 # ─── Clip Finder ─────────────────────────────────────────────────────────────
 # Gemini model used for clip detection / scoring. Override by setting
 # CLIP_FINDER_GEMINI_MODEL in .env (e.g. "gemini-2.5-flash" if 3-flash-preview
 # is not available on your project).
 CLIP_FINDER_GEMINI_MODEL: str = os.getenv(
     "CLIP_FINDER_GEMINI_MODEL",
-    "gemini-3-flash-preview",
+    "gemini-3.5-flash",
 )
+# Fallback chain for clip-finder when primary model unavailable.
+CLIP_FINDER_GEMINI_FALLBACK_MODELS: list[str] = [
+    m.strip() for m in os.getenv(
+        "CLIP_FINDER_GEMINI_FALLBACK_MODELS",
+        "gemini-3.5-flash,gemini-2.5-flash",
+    ).split(",") if m.strip()
+]
 
 # Default detection mode. "single-shot" = legacy 1-prompt path. "multi-stage"
 # enables the Hunters → Score → Refine → Diversify pipeline (higher quality
@@ -103,4 +128,16 @@ FFPROBE_PATH: str = os.getenv("FFPROBE_PATH", "ffprobe")
 # ─── Audio Settings ───────────────────────────────────────────────────────────
 AUDIO_SAMPLE_RATE: int = 44100
 AUDIO_CHANNELS: int = 1  # Mono for speech
+
+
+# ─── Web Upload Limits ────────────────────────────────────────────────────────
+# Maximum allowed video upload size (bytes).  Default 4 GiB.  Override via
+# .env when serving from constrained hosts (e.g. shared VPS) or relax for
+# self-hosted batch jobs.
+MAX_UPLOAD_BYTES: int = int(
+    os.getenv("MAX_UPLOAD_BYTES", str(4 * 1024 * 1024 * 1024))
+)
+# Chunk size for streaming uploads to disk (bytes).  1 MiB balances syscall
+# overhead vs. memory pressure for many concurrent uploads.
+UPLOAD_CHUNK_BYTES: int = int(os.getenv("UPLOAD_CHUNK_BYTES", str(1024 * 1024)))
 

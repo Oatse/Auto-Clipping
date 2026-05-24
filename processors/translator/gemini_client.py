@@ -23,7 +23,7 @@ from loguru import logger
 
 from models.transcript import WordTimestamp
 
-from .constants import GEMINI_API_URL
+from .constants import gemini_url, translator_models
 
 
 def _build_translate_prompt(texts: list[str], target_lang_name: str) -> str:
@@ -186,71 +186,95 @@ async def call_gemini_translate(
     }
 
     last_error = None
-    for key_idx, api_key in enumerate(api_keys):
-        try:
-            url = f"{GEMINI_API_URL}?key={api_key}"
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                response = await client.post(url, json=payload)
+    models = translator_models()
+    for model in models:
+        url = gemini_url(model)
+        for key_idx, api_key in enumerate(api_keys):
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    response = await client.post(
+                        url,
+                        json=payload,
+                        headers={"x-goog-api-key": api_key},
+                    )
 
-            if response.status_code in (429, 403):
+                if response.status_code in (429, 403):
+                    logger.warning(
+                        "Gemini translate model={} key#{} rate-limited (HTTP {}), trying next key...",
+                        model, key_idx + 1, response.status_code,
+                    )
+                    last_error = f"HTTP {response.status_code}"
+                    continue
+
+                if response.status_code == 404:
+                    logger.warning(
+                        "Gemini model '{}' not available (HTTP 404) — falling back to next model",
+                        model,
+                    )
+                    last_error = f"Model '{model}' not found"
+                    break  # break key loop, try next model
+
+                if response.status_code >= 500:
+                    logger.warning(
+                        "Gemini translate model={} key#{} server error (HTTP {}), trying next key...",
+                        model, key_idx + 1, response.status_code,
+                    )
+                    last_error = f"HTTP {response.status_code}"
+                    continue
+
+                if response.status_code != 200:
+                    logger.error(
+                        "Gemini API error (HTTP {}): {}",
+                        response.status_code,
+                        response.text[:300],
+                    )
+                    last_error = f"HTTP {response.status_code}"
+                    continue
+
+                result = response.json()
+                candidates = result.get("candidates", [])
+                if not candidates:
+                    logger.warning("Gemini returned no candidates")
+                    last_error = "No candidates"
+                    continue
+
+                content = candidates[0].get("content", {})
+                parts = content.get("parts", [])
+                raw_text = parts[0].get("text", "") if parts else ""
+
+                translated = json.loads(raw_text)
+                if isinstance(translated, list) and len(translated) == len(texts):
+                    return [str(t) for t in translated]
+
+                if isinstance(translated, list):
+                    logger.warning(
+                        "Translation count mismatch: got {} expected {}",
+                        len(translated),
+                        len(texts),
+                    )
+                    result_list = [str(t) for t in translated]
+                    while len(result_list) < len(texts):
+                        result_list.append(texts[len(result_list)])
+                    return result_list[: len(texts)]
+
+                logger.warning("Unexpected Gemini response format: {}", raw_text[:200])
+                last_error = "Unexpected response format"
+                continue
+
+            except json.JSONDecodeError as exc:
+                logger.warning("Failed to parse Gemini JSON response: {}", exc)
+                last_error = f"JSON parse error: {exc}"
+                continue
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
                 logger.warning(
-                    "Gemini Key #{} rate-limited (HTTP {}), trying next...",
-                    key_idx + 1,
-                    response.status_code,
+                    "Gemini translate model={} key#{} network error: {}",
+                    model, key_idx + 1, exc,
                 )
-                last_error = f"HTTP {response.status_code}"
+                last_error = str(exc)
                 continue
-
-            if response.status_code != 200:
-                logger.error(
-                    "Gemini API error (HTTP {}): {}",
-                    response.status_code,
-                    response.text[:300],
-                )
-                last_error = f"HTTP {response.status_code}"
-                continue
-
-            result = response.json()
-            candidates = result.get("candidates", [])
-            if not candidates:
-                logger.warning("Gemini returned no candidates")
-                last_error = "No candidates"
-                continue
-
-            content = candidates[0].get("content", {})
-            parts = content.get("parts", [])
-            raw_text = parts[0].get("text", "") if parts else ""
-
-            translated = json.loads(raw_text)
-            if isinstance(translated, list) and len(translated) == len(texts):
-                return [str(t) for t in translated]
-
-            if isinstance(translated, list):
-                logger.warning(
-                    "Translation count mismatch: got {} expected {}",
-                    len(translated),
-                    len(texts),
-                )
-                result_list = [str(t) for t in translated]
-                while len(result_list) < len(texts):
-                    result_list.append(texts[len(result_list)])
-                return result_list[: len(texts)]
-
-            logger.warning("Unexpected Gemini response format: {}", raw_text[:200])
-            last_error = "Unexpected response format"
-            continue
-
-        except json.JSONDecodeError as exc:
-            logger.warning("Failed to parse Gemini JSON response: {}", exc)
-            last_error = f"JSON parse error: {exc}"
-            continue
-        except (httpx.TimeoutException, httpx.ConnectError) as exc:
-            logger.warning("Gemini Key #{} network error: {}", key_idx + 1, exc)
-            last_error = str(exc)
-            continue
 
     logger.error(
-        "All Gemini API keys failed for translation. Last error: {}", last_error,
+        "All Gemini API keys/models failed for translation. Last error: {}", last_error,
     )
     return None
 
@@ -284,98 +308,121 @@ async def call_gemini_regroup(
     last_error = None
     best_partial_groups: list[dict] | None = None
 
-    for key_idx, api_key in enumerate(api_keys):
-        try:
-            url = f"{GEMINI_API_URL}?key={api_key}"
-            async with httpx.AsyncClient(timeout=180.0) as client:
-                response = await client.post(url, json=payload)
-
-            if response.status_code in (429, 403):
-                logger.warning(
-                    "Gemini Key #{} rate-limited (HTTP {}), trying next...",
-                    key_idx + 1,
-                    response.status_code,
-                )
-                last_error = f"HTTP {response.status_code}"
-                continue
-
-            if response.status_code != 200:
-                logger.error(
-                    "Gemini regroup API error (HTTP {}): {}",
-                    response.status_code,
-                    response.text[:300],
-                )
-                last_error = f"HTTP {response.status_code}"
-                continue
-
-            result = response.json()
-            candidates = result.get("candidates", [])
-            if not candidates:
-                logger.warning("Gemini returned no candidates for regrouping")
-                last_error = "No candidates"
-                continue
-
-            finish_reason = candidates[0].get("finishReason", "")
-            is_truncated = finish_reason in ("MAX_TOKENS", "RECITATION")
-
-            content = candidates[0].get("content", {})
-            parts = content.get("parts", [])
-            raw_text = parts[0].get("text", "") if parts else ""
-
-            # Clean up the raw text to handle common Gemini JSON formatting issues
-            raw_text = raw_text.strip()
-            if raw_text.startswith("```"):
-                raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
-                raw_text = re.sub(r"\s*```$", "", raw_text)
-            raw_text = re.sub(r",(\s*[\]}])", r"\1", raw_text)
-
-            if is_truncated:
-                logger.warning(
-                    "Gemini Key #{} output truncated (finishReason={}). "
-                    "Attempting to salvage partial JSON...",
-                    key_idx + 1,
-                    finish_reason,
-                )
-                salvaged = repair_truncated_json(raw_text)
-                if salvaged and (
-                    not best_partial_groups
-                    or len(salvaged) > len(best_partial_groups)
-                ):
-                    best_partial_groups = salvaged
-                last_error = f"Output truncated ({finish_reason})"
-                continue
-
+    models = translator_models()
+    for model in models:
+        url = gemini_url(model)
+        for key_idx, api_key in enumerate(api_keys):
             try:
-                groups = json.loads(raw_text)
-            except json.JSONDecodeError as parse_exc:
+                async with httpx.AsyncClient(timeout=180.0) as client:
+                    response = await client.post(
+                        url,
+                        json=payload,
+                        headers={"x-goog-api-key": api_key},
+                    )
+
+                if response.status_code in (429, 403):
+                    logger.warning(
+                        "Gemini regroup model={} key#{} rate-limited (HTTP {}), trying next key...",
+                        model, key_idx + 1, response.status_code,
+                    )
+                    last_error = f"HTTP {response.status_code}"
+                    continue
+
+                if response.status_code == 404:
+                    logger.warning(
+                        "Gemini regroup model '{}' not available (HTTP 404) — trying next model",
+                        model,
+                    )
+                    last_error = f"Model '{model}' not found"
+                    break
+
+                if response.status_code >= 500:
+                    logger.warning(
+                        "Gemini regroup model={} key#{} server error (HTTP {}), trying next key...",
+                        model, key_idx + 1, response.status_code,
+                    )
+                    last_error = f"HTTP {response.status_code}"
+                    continue
+
+                if response.status_code != 200:
+                    logger.error(
+                        "Gemini regroup API error (HTTP {}): {}",
+                        response.status_code,
+                        response.text[:300],
+                    )
+                    last_error = f"HTTP {response.status_code}"
+                    continue
+
+                result = response.json()
+                candidates = result.get("candidates", [])
+                if not candidates:
+                    logger.warning("Gemini returned no candidates for regrouping")
+                    last_error = "No candidates"
+                    continue
+
+                finish_reason = candidates[0].get("finishReason", "")
+                is_truncated = finish_reason in ("MAX_TOKENS", "RECITATION")
+
+                content = candidates[0].get("content", {})
+                parts = content.get("parts", [])
+                raw_text = parts[0].get("text", "") if parts else ""
+
+                # Clean up the raw text to handle common Gemini JSON formatting issues
+                raw_text = raw_text.strip()
+                if raw_text.startswith("```"):
+                    raw_text = re.sub(r"^```(?:json)?\s*", "", raw_text)
+                    raw_text = re.sub(r"\s*```$", "", raw_text)
+                raw_text = re.sub(r",(\s*[\]}])", r"\1", raw_text)
+
+                if is_truncated:
+                    logger.warning(
+                        "Gemini regroup model={} key#{} output truncated (finishReason={}). "
+                        "Attempting to salvage partial JSON...",
+                        model, key_idx + 1, finish_reason,
+                    )
+                    salvaged = repair_truncated_json(raw_text)
+                    if salvaged and (
+                        not best_partial_groups
+                        or len(salvaged) > len(best_partial_groups)
+                    ):
+                        best_partial_groups = salvaged
+                    last_error = f"Output truncated ({finish_reason})"
+                    continue
+
+                try:
+                    groups = json.loads(raw_text)
+                except json.JSONDecodeError as parse_exc:
+                    logger.warning(
+                        "Failed to parse Gemini regroup JSON: {} (Snippet: {})",
+                        parse_exc,
+                        raw_text[max(0, parse_exc.pos - 50):parse_exc.pos + 50]
+                        if hasattr(parse_exc, "pos") else raw_text[:200],
+                    )
+                    salvaged = repair_truncated_json(raw_text)
+                    if salvaged and (
+                        not best_partial_groups
+                        or len(salvaged) > len(best_partial_groups)
+                    ):
+                        best_partial_groups = salvaged
+                    last_error = f"JSON parse: {parse_exc}"
+                    continue
+
+                if not isinstance(groups, list) or not groups:
+                    logger.warning(
+                        "Unexpected Gemini regroup response: {}", raw_text[:200],
+                    )
+                    last_error = "Unexpected format"
+                    continue
+
+                return groups, best_partial_groups
+
+            except (httpx.TimeoutException, httpx.ConnectError) as exc:
                 logger.warning(
-                    "Failed to parse Gemini regroup JSON: {} (Snippet: {})",
-                    parse_exc,
-                    raw_text[max(0, parse_exc.pos - 50):parse_exc.pos + 50]
-                    if hasattr(parse_exc, "pos") else raw_text[:200],
+                    "Gemini regroup model={} key#{} network error: {}",
+                    model, key_idx + 1, exc,
                 )
-                salvaged = repair_truncated_json(raw_text)
-                if salvaged and (
-                    not best_partial_groups
-                    or len(salvaged) > len(best_partial_groups)
-                ):
-                    best_partial_groups = salvaged
-                last_error = f"JSON parse: {parse_exc}"
+                last_error = str(exc)
                 continue
-
-            if not isinstance(groups, list) or not groups:
-                logger.warning(
-                    "Unexpected Gemini regroup response: {}", raw_text[:200],
-                )
-                last_error = "Unexpected format"
-                continue
-
-            return groups, best_partial_groups
-
-        except (httpx.TimeoutException, httpx.ConnectError) as exc:
-            logger.warning("Gemini Key #{} network error: {}", key_idx + 1, exc)
-            last_error = str(exc)
-            continue
 
     logger.error(
         "All Gemini API keys failed for regrouping. Last error: {}", last_error,

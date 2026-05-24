@@ -1,0 +1,125 @@
+{# editor_center.html — Video preview + timeline #}
+<section class="editor__center">
+  <div class="video-preview-wrap">
+    <video id="previewVideo" class="preview-video" preload="metadata"></video>
+    <div class="subtitle-overlay" id="subtitleOverlay">
+      <div class="subtitle-container" id="subtitleContainer">
+        {# Live subtitles rendered by subtitleEngine.js #}
+      </div>
+    </div>
+  </div>
+
+  <div class="timeline-panel" id="timelinePanel">
+    <div class="timeline-resize-handle" id="timelineResizeHandle">
+      <div class="timeline-resize-handle-grip"></div>
+    </div>
+
+    <header class="timeline-toolbar">
+      <div class="timeline-playback-btns">
+        <button class="btn btn--sm btn--ghost" id="previewPlayBtn">
+          <svg width="12" height="12" viewBox="0 0 12 12"><path d="M3 2v8l7-4z" fill="currentColor"/></svg>
+          <span>Play</span>
+        </button>
+        <button class="btn btn--sm btn--ghost" id="previewRestartBtn">
+          <svg width="12" height="12" viewBox="0 0 12 12"><path d="M2 6a4 4 0 1 0 4-4M2 2v3h3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+          <span>Restart</span>
+        </button>
+        <button class="icon-btn" id="fullscreenBtn" title="Fullscreen (F)">
+          <svg width="14" height="14" viewBox="0 0 14 14"><path d="M2 5V2h3M9 2h3v3M2 9v3h3M12 9v3h-3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        </button>
+      </div>
+
+      <span class="timeline-title">Timeline</span>
+
+      <div class="timeline-tools">
+        <button class="btn btn--sm btn--ghost" id="addSegmentBtn" title="Add subtitle at playhead">
+          <span>＋ Add</span>
+        </button>
+        <button class="btn btn--sm btn--ghost" id="deleteSegmentBtn" disabled title="Delete selected segment">
+          <span>Delete</span>
+        </button>
+        <button class="btn btn--sm btn--ghost" id="duplicateSegmentBtn" disabled title="Duplicate (Ctrl+D)">
+          <span>Duplicate</span>
+        </button>
+        <span class="tl-zoom-badge" id="tlZoomBadge" title="Zoom level">100%</span>
+        <span class="timeline-time-display" id="tlTimeDisplay">0:00 / 0:00</span>
+      </div>
+    </header>
+
+    <div class="timeline-body" id="timelineBody">
+      <div class="timeline-labels-col" id="timelineLabelsCol">
+        <div class="timeline-ruler-spacer"></div>
+        {# Speaker label rows injected by JS #}
+      </div>
+      <div class="timeline-scroll-area" id="timelineScrollArea">
+        <div class="timeline-ruler" id="timelineRuler"></div>
+        <div class="timeline-track-area" id="timelineTrackArea">
+          <div class="timeline-track" id="timelineTrack">
+            {# Segment blocks + playhead rendered by JS #}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  {# ── Add segment dialog ─────────────────────────────────────────── #}
+  <div class="segment-dialog hidden" id="segmentDialog">
+    <div class="segment-dialog-inner">
+      <h4 class="segment-dialog-title">Add subtitle</h4>
+      <div class="segment-dialog-fields">
+        <div class="segment-dialog-row">
+          <div class="segment-dialog-field">
+            <label>Start</label>
+            <input class="input input--mono input--square" type="text" id="newSegStart" placeholder="0:00.0" />
+          </div>
+          <div class="segment-dialog-field">
+            <label>End</label>
+            <input class="input input--mono input--square" type="text" id="newSegEnd" placeholder="0:02.0" />
+          </div>
+          <div class="segment-dialog-field">
+            <label>Speaker</label>
+            <select class="select select--square" id="newSegSpeaker">
+              <option value="SPEAKER_00">S0</option>
+              <option value="SPEAKER_01">S1</option>
+              <option value="SPEAKER_02">S2</option>
+            </select>
+          </div>
+        </div>
+        <div class="segment-dialog-field full">
+          <label>Text</label>
+          <textarea class="textarea textarea--square" id="newSegText" rows="2" placeholder="Enter subtitle text…"></textarea>
+        </div>
+      </div>
+      <div class="segment-dialog-actions">
+        <button class="btn btn--sm btn--ghost" id="cancelNewSeg">Cancel</button>
+        <button class="btn btn--sm btn--lime" id="confirmNewSeg">Add</button>
+      </div>
+    </div>
+  </div>
+
+  {# ── Split segment dialog ────────────────────────────────────────── #}
+  <div class="segment-dialog hidden" id="splitDialog">
+    <div class="segment-dialog-inner">
+      <h4 class="segment-dialog-title">Split segment</h4>
+      <p class="split-dialog-hint">Click a word to set the split point. Words after the marker start the second segment.</p>
+      <div class="split-words-wrap" id="splitDialogWords"></div>
+      <div class="split-preview">
+        <div class="split-preview-part">
+          <span class="split-preview-label split-label-1">Part 1</span>
+          <span class="split-preview-time" id="splitPart1Time"></span>
+          <span class="split-preview-text" id="splitPart1Text"></span>
+        </div>
+        <div class="split-preview-divider">→</div>
+        <div class="split-preview-part">
+          <span class="split-preview-label split-label-2">Part 2</span>
+          <span class="split-preview-time" id="splitPart2Time"></span>
+          <span class="split-preview-text" id="splitPart2Text"></span>
+        </div>
+      </div>
+      <div class="segment-dialog-actions">
+        <button class="btn btn--sm btn--ghost" id="cancelSplitSeg">Cancel</button>
+        <button class="btn btn--sm btn--lime" id="confirmSplitSeg">Split</button>
+      </div>
+    </div>
+  </div>
+</section>

@@ -1,0 +1,40 @@
+{# process_screen.html — Shared transcribing/rendering full-page state #}
+<div id="screen-transcribing" class="app-screen process hidden">
+  <div class="container container--narrow">
+    <div class="process__card">
+      <div class="process__file" id="transcribingFile">video.mp4</div>
+      <h2 class="process__title">Transcribing voice</h2>
+      <p class="process__sub" id="transcribingStatus">Running ElevenLabs Speech-to-Text on your video.</p>
+
+      <div class="process__progress">
+        <div class="process__progress-bar" id="transcribingBar" style="width: 0%;"></div>
+      </div>
+
+      <div class="process__waves" id="processWaves" aria-hidden="true">
+        <span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span>
+        <span class="wave-bar"></span><span class="wave-bar"></span><span class="wave-bar"></span>
+        <span class="wave-bar"></span>
+      </div>
+
+      <div class="process__log" id="transcribingLog">Waiting for the engine to warm up…</div>
+    </div>
+  </div>
+</div>
+
+<div id="screen-rendering" class="app-screen process hidden">
+  <div class="container container--narrow">
+    <div class="process__card">
+      <div class="process__file" id="renderFile">final.mp4</div>
+      <h2 class="process__title">Rendering subtitles</h2>
+      <p class="process__sub" id="renderStatus">Burning subtitles into the video frame-by-frame.</p>
+
+      <div class="process__progress">
+        <div class="process__progress-bar" id="renderBar" style="width: 0%;"></div>
+      </div>
+
+      <div class="render-phases" id="renderPhases" style="display:flex; gap: var(--s-2); justify-content: center; margin-top: var(--s-5); flex-wrap:wrap;"></div>
+
+      <div class="process__log" id="renderLog">Queueing render…</div>
+    </div>
+  </div>
+</div>

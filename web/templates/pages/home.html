@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}ClipAuto — Subtitle, find, and ship video faster{% endblock %}
+{% block body_class %}p-home{% endblock %}
+
+{% block content %}
+<section class="hero" data-reveal>
+  <div class="container container--wide">
+    <div class="hero__split">
+      <div>
+        <span class="eyebrow is-outline" data-reveal-item><span class="dot"></span>Creative editing workspace</span>
+        <h1 class="hero__title" data-reveal-item>
+          Subtitle, cut,<br/>
+          and <em>publish.</em><br/>
+          <span class="accent-bg">Faster.</span>
+        </h1>
+        <p class="hero__sub" data-reveal-item>
+          Four tools for the parts of editing that drain hours. Auto subtitles in any language, AI clip detection from any YouTube, vertical short maker, and a precision subtitle editor — wired into one workspace.
+        </p>
+        <div class="hero__ctas" data-reveal-item>
+          <a href="/auto-subtitle" class="btn btn--lg">
+            Start a project
+            <span class="btn__icon" aria-hidden="true">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M3 11L11 3M11 3H5M11 3V9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </span>
+          </a>
+          <a href="#workspaces" class="btn btn--lg btn--ghost">
+            Tour the tools
+            <span class="btn__icon"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 7h8M7 3l4 4-4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg></span>
+          </a>
+        </div>
+      </div>
+
+      <aside class="hero__aside" data-reveal-item>
+        <div class="surface surface--lime">
+          <div class="metric">
+            <span class="metric__value" data-counter data-target="47.2">0.0</span>
+            <span class="metric__label">Average minutes saved per 10-min upload</span>
+          </div>
+        </div>
+        <dl class="hero__aside-meta">
+          <div><dt>Engines</dt><dd>ElevenLabs · Gemini</dd></div>
+          <div><dt>Output</dt><dd>MP4 · ASS · JSX</dd></div>
+          <div><dt>Languages</dt><dd>32+</dd></div>
+          <div><dt>Status</dt><dd>v2.0 · Stable</dd></div>
+        </dl>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<section class="section--tight">
+  <div class="container container--wide">
+    <div class="marquee" aria-hidden="true">
+      <div class="marquee__track">
+        <span class="marquee__item">Auto-subtitles<span class="marquee__star"></span></span>
+        <span class="marquee__item">Clip Finder<span class="marquee__star"></span></span>
+        <span class="marquee__item">Short Maker<span class="marquee__star"></span></span>
+        <span class="marquee__item">Subtitle Editor<span class="marquee__star"></span></span>
+        <span class="marquee__item">Auto-subtitles<span class="marquee__star"></span></span>
+        <span class="marquee__item">Clip Finder<span class="marquee__star"></span></span>
+        <span class="marquee__item">Short Maker<span class="marquee__star"></span></span>
+        <span class="marquee__item">Subtitle Editor<span class="marquee__star"></span></span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="workspaces" data-reveal>
+  <div class="container container--wide">
+    <div class="hero__split" style="margin-bottom: var(--s-12);">
+      <div>
+        <span class="eyebrow is-cream"><span class="dot"></span>Workspaces</span>
+        <h2 style="margin-top: var(--s-3); font-size: clamp(var(--fs-32), 5vw, var(--fs-72));">
+          Four rooms,<br/>one editing brain.
+        </h2>
+      </div>
+      <p style="font-size: var(--fs-16); align-self: end; padding-bottom: var(--s-3);">Each workspace handles a single hard problem end-to-end, then hands the result to the next one. No copy-paste between tools.</p>
+    </div>
+
+    <div class="bento">
+      <a class="bento-tile col-7 bento-tile--ink" href="/auto-subtitle" data-reveal-item>
+        <span class="badge badge--lime"><span class="pulse"></span>Most used</span>
+        <h4 style="font-size: clamp(var(--fs-32), 3vw, var(--fs-44)); color: inherit;">Auto Subtitle</h4>
+        <p style="color: rgba(255,255,255,0.78);">Drop a video, get word-accurate subtitles in 32 languages. Speaker detection, timing review, and native export to MP4 / ASS / After Effects.</p>
+        <div class="tile-footer">
+          <span class="link-arrow" style="color: var(--c-lime);">
+            Open workspace
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 11L11 3M11 3H5M11 3V9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+          </span>
+          <span class="badge" style="background: rgba(255,255,255,0.12); color: var(--c-paper);">ElevenLabs Scribe</span>
+        </div>
+      </a>
+
+      <a class="bento-tile col-5 bento-tile--lime" href="/clip-finder" data-reveal-item>
+        <span class="eyebrow is-outline" style="background: var(--c-ink); color: var(--c-lime);">02</span>
+        <h4>Clip Finder</h4>
+        <p>Paste a YouTube URL, describe what you want, get scored highlight clips with timestamps and reasoning.</p>
+        <div class="tile-footer">
+          <span class="link-arrow">Find clips
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 11L11 3M11 3H5M11 3V9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+          </span>
+          <span class="badge badge--ink">Gemini AI</span>
+        </div>
+      </a>
+
+      <a class="bento-tile col-4 bento-tile--cream" href="/short-maker" data-reveal-item>
+        <span class="eyebrow is-outline">03</span>
+        <h4>Short Maker</h4>
+        <p>Crop horizontal video into vertical 9:16 with smart subject tracking. Pick frame, render, ship.</p>
+        <div class="tile-footer">
+          <span class="link-arrow">Make a short
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 11L11 3M11 3H5M11 3V9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+          </span>
+        </div>
+      </a>
+
+      <a class="bento-tile col-8" href="/editor" data-reveal-item>
+        <span class="eyebrow is-cream">04</span>
+        <h4>Subtitle Editor</h4>
+        <p>Precision timeline. Speaker tracks. Word-level timing. Stroke + glow + animation per segment. Effects layers. Exports to MP4 or After Effects ExtendScript.</p>
+        <div class="tile-footer">
+          <span class="link-arrow">Open editor
+            <svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 11L11 3M11 3H5M11 3V9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+          </span>
+          <span class="badge badge--ink">Timeline + FX + Export</span>
+        </div>
+      </a>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/page-home.js"></script>
+{% endblock %}

@@ -9,6 +9,26 @@ let cfJobId = null;
 let cfSSE   = null;
 let cfMode  = 'single-shot';
 
+// ── VTuber Highlights Preset Instructions ─────────────────────────────────
+const VTUBER_HIGHLIGHTS_PRESET = `Find high-engagement VTuber highlights using these criteria:
+
+PEAK MOMENTS (prioritize these):
+• Karma Arc: Extreme overconfidence immediately followed by a disastrous fail
+• Genuine Reactions: Non-scripted scares, wheezing laughter, or unhinged rants that show personality
+• High-Intensity Gameplay: Clutch plays or epic fails where chat reactions are too fast to read
+• Chaotic Pleas: Hilarious screaming, begging NPCs/enemies for mercy, or panic-induced noise
+
+STRUCTURE (required for every clip):
+• Setup (Bridge): Include 15–45 seconds of buildup — the calm before the storm
+• Hook: If the VTuber sets a goal or tells a story, include that narrative so viewers feel invested
+• Full Cycle (No Cliffhangers): Include the Aftermath — VTuber's reaction after the peak event (speechless, reading funny chat, making excuses). Only end the clip when the topic changes or the energy settles.
+
+DURATION & PACING:
+• Target clip length: 2–5 minutes per clip
+• Flag any silence longer than 5 seconds inside the clip as a potential edit point
+
+For each clip output highlight_type (karma_arc | genuine_reaction | clutch_play | chaotic_plea | other) and dead_air_timestamps (array of timestamps in seconds where silence > 5s occurs inside the clip).`;
+
 // ── Setup ──────────────────────────────────────────────────────────────────
 export function setupClipFinder() {
   const cfUrl          = document.getElementById('cfUrl');
@@ -21,13 +41,52 @@ export function setupClipFinder() {
   const cfModeMulti    = document.getElementById('cfModeMulti');
   const cfEnableAudio  = document.getElementById('cfEnableAudio');
   const cfEnableChat   = document.getElementById('cfEnableChat');
+  const cfPresetVtuber = document.getElementById('cfPresetVtuber');
+  const cfPresetClear  = document.getElementById('cfPresetClear');
 
   function updateFindBtn() {
     cfFindBtn.disabled = !cfUrl.value.trim();
   }
   cfUrl.addEventListener('input', updateFindBtn);
-  cfInstructions.addEventListener('input', updateFindBtn);
+  cfInstructions.addEventListener('input', () => {
+    updateFindBtn();
+    if (cfPresetClear) {
+      const hasContent = cfInstructions.value.trim().length > 0;
+      cfPresetClear.classList.toggle('hidden', !hasContent);
+    }
+    // Deactivate preset chip if user manually edits away from preset text
+    if (cfPresetVtuber && cfInstructions.value !== VTUBER_HIGHLIGHTS_PRESET) {
+      cfPresetVtuber.classList.remove('active');
+    }
+  });
   updateFindBtn();
+
+  // VTuber Highlights preset chip — toggle preset text in/out
+  if (cfPresetVtuber) {
+    cfPresetVtuber.addEventListener('click', () => {
+      const isActive = cfPresetVtuber.classList.contains('active');
+      if (isActive) {
+        cfInstructions.value = '';
+        cfPresetVtuber.classList.remove('active');
+        if (cfPresetClear) cfPresetClear.classList.add('hidden');
+      } else {
+        cfInstructions.value = VTUBER_HIGHLIGHTS_PRESET;
+        cfPresetVtuber.classList.add('active');
+        if (cfPresetClear) cfPresetClear.classList.remove('hidden');
+      }
+      cfInstructions.dispatchEvent(new Event('input'));
+    });
+  }
+
+  // Clear chip — wipe textarea + reset preset state
+  if (cfPresetClear) {
+    cfPresetClear.addEventListener('click', () => {
+      cfInstructions.value = '';
+      if (cfPresetVtuber) cfPresetVtuber.classList.remove('active');
+      cfPresetClear.classList.add('hidden');
+      cfInstructions.dispatchEvent(new Event('input'));
+    });
+  }
 
   // Mode toggle (single-shot ↔ multi-stage)
   function setMode(mode) {

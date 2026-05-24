@@ -1,0 +1,168 @@
+/* ============================================================================
+ * tokens.css — ClipAuto design tokens
+ *
+ * Floema-inspired editorial-minimalist palette + Studio Noir editor mode.
+ * Single source of truth for color, type, motion, and surface metrics.
+ * ============================================================================ */
+
+:root {
+  /* ── Brand surfaces (Floema light mode) ─────────────────────────────── */
+  --c-lime:        #E9E778;
+  --c-lime-soft:   #F2F0A8;
+  --c-lime-deep:   #C9C658;
+
+  --c-cream:       #EDEAE3;
+  --c-cream-soft:  #F4F2EC;
+  --c-cream-warm:  #E2DED5;
+
+  --c-paper:       #FBFAF6;     /* primary page bg */
+  --c-paper-2:     #F4F2EC;     /* alt section bg */
+
+  --c-ink:         #241F21;     /* espresso — primary text & CTA */
+  --c-ink-2:       #2E292A;
+  --c-ink-soft:    rgba(36, 31, 33, 0.72);
+  --c-ink-mute:    rgba(36, 31, 33, 0.54);
+  --c-ink-faint:   rgba(36, 31, 33, 0.28);
+  --c-hairline:    rgba(36, 31, 33, 0.10);
+  --c-hairline-2:  rgba(36, 31, 33, 0.06);
+
+  --c-white:       #FFFFFF;
+  --c-white-soft:  rgba(255, 255, 255, 0.78);
+
+  /* Functional accents — desaturated, single-tone */
+  --c-accent:      var(--c-lime);
+  --c-success:     #2F7D5C;
+  --c-warning:     #C8782A;
+  --c-danger:      #C03434;
+  --c-info:        #3568B0;
+
+  /* Speaker palette — used by editor */
+  --c-spk-0:       #FFFFFF;
+  --c-spk-1:       #FFE600;
+  --c-spk-2:       #00F5FF;
+  --c-spk-3:       #FF85C2;
+  --c-spk-4:       #7FFF00;
+  --c-spk-5:       #FF8C00;
+
+  /* ── Editor / dark mode (preserved AE-feel) ─────────────────────────── */
+  --c-noir-bg:     #0E0C0D;
+  --c-noir-surf:   #161314;
+  --c-noir-surf-2: #1D1819;
+  --c-noir-line:   rgba(255, 255, 255, 0.08);
+  --c-noir-line-2: rgba(255, 255, 255, 0.04);
+  --c-noir-text:   rgba(255, 255, 255, 0.92);
+  --c-noir-mute:   rgba(255, 255, 255, 0.58);
+  --c-noir-faint:  rgba(255, 255, 255, 0.32);
+
+  /* ── Typography ─────────────────────────────────────────────────────── */
+  --f-sans:        "Satoshi", "Satoshi-Variable",
+                   ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+                   "Segoe UI", Helvetica, Arial, sans-serif;
+  --f-mono:        "JetBrains Mono", ui-monospace, "SFMono-Regular",
+                   Menlo, Consolas, monospace;
+  --f-display:     var(--f-sans);
+
+  /* Type scale (modular, optical) */
+  --fs-12:    0.6875rem;   /* 11px */
+  --fs-13:    0.78125rem;  /* 12.5px */
+  --fs-14:    0.875rem;    /* 14px */
+  --fs-15:    0.9375rem;   /* 15px */
+  --fs-16:    1rem;        /* 16px */
+  --fs-18:    1.125rem;    /* 18px */
+  --fs-20:    1.25rem;     /* 20px */
+  --fs-24:    1.5rem;      /* 24px */
+  --fs-32:    2rem;        /* 32px */
+  --fs-44:    2.75rem;     /* 44px */
+  --fs-56:    3.5rem;      /* 56px */
+  --fs-72:    4.5rem;      /* 72px */
+  --fs-96:    6rem;        /* 96px */
+  --fs-128:   8rem;        /* 128px */
+
+  --lh-tight:   1.02;
+  --lh-snug:    1.12;
+  --lh-base:    1.5;
+  --lh-loose:   1.7;
+
+  --tr-tight:    -0.04em;
+  --tr-snug:     -0.02em;
+  --tr-normal:   -0.005em;
+  --tr-eyebrow:   0.18em;
+
+  /* ── Spacing (8px rhythm) ───────────────────────────────────────────── */
+  --s-1:   4px;
+  --s-2:   8px;
+  --s-3:   12px;
+  --s-4:   16px;
+  --s-5:   20px;
+  --s-6:   24px;
+  --s-8:   32px;
+  --s-10:  40px;
+  --s-12:  48px;
+  --s-16:  64px;
+  --s-20:  80px;
+  --s-24:  96px;
+  --s-32:  128px;
+  --s-40:  160px;
+
+  /* ── Radii ──────────────────────────────────────────────────────────── */
+  --r-2:    4px;
+  --r-3:    8px;
+  --r-4:    12px;
+  --r-5:    16px;
+  --r-6:    20px;
+  --r-7:    24px;
+  --r-8:    28px;
+  --r-pill: 999px;
+
+  /* ── Shadows (warm, tinted to background) ───────────────────────────── */
+  --sh-1: 0 1px 2px rgba(36, 31, 33, 0.06);
+  --sh-2: 0 6px 16px -8px rgba(36, 31, 33, 0.10);
+  --sh-3: 0 12px 32px -12px rgba(36, 31, 33, 0.14);
+  --sh-4: 0 24px 60px -24px rgba(36, 31, 33, 0.18);
+  --sh-inset-hl: inset 0 1px 0 rgba(255, 255, 255, 0.6);
+
+  /* ── Motion ─────────────────────────────────────────────────────────── */
+  --ease-out:    cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-spring: cubic-bezier(0.16, 1.0, 0.3, 1);
+  --ease-snap:   cubic-bezier(0.65, 0, 0.35, 1);
+  --d-1: 120ms;
+  --d-2: 220ms;
+  --d-3: 380ms;
+  --d-4: 600ms;
+  --d-5: 900ms;
+
+  /* ── Z-index scale ──────────────────────────────────────────────────── */
+  --z-base:    1;
+  --z-sticky:  20;
+  --z-nav:     40;
+  --z-overlay: 80;
+  --z-modal:   100;
+  --z-toast:   200;
+
+  /* Layout */
+  --container:        1320px;
+  --container-narrow: 980px;
+  --container-wide:   1480px;
+  --gutter:           clamp(20px, 4vw, 56px);
+  --nav-h:            72px;
+}
+
+/* Editor scope — applied to <body data-mode="editor"> via JS or html attr */
+[data-mode="editor"] {
+  --c-paper:    var(--c-noir-bg);
+  --c-paper-2:  var(--c-noir-surf);
+  --c-ink:      var(--c-noir-text);
+  --c-ink-soft: rgba(255, 255, 255, 0.72);
+  --c-ink-mute: var(--c-noir-mute);
+  --c-ink-faint: var(--c-noir-faint);
+  --c-hairline:  var(--c-noir-line);
+  --c-hairline-2: var(--c-noir-line-2);
+  --c-white:     var(--c-noir-surf);
+  --c-cream:     var(--c-noir-surf-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --d-1: 0ms; --d-2: 0ms; --d-3: 0ms; --d-4: 0ms; --d-5: 0ms;
+  }
+}

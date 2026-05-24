@@ -35,8 +35,15 @@ def local_group_words(
                 flush = True
             elif len(cur) >= 12:
                 flush = True
-            elif cur[-1].word.rstrip()[-1:] in ".!?" and len(cur) >= 3:
-                flush = True
+            else:
+                # Sentence-boundary split: only when the previous word actually
+                # ends with terminal punctuation.  Without the explicit length
+                # guard, an empty ``cur[-1].word`` produces an empty string
+                # whose [-1:] slice is still "" — and "" in ".!?" is True in
+                # Python, so we'd split spuriously on punctuation-only stubs.
+                prev_text = cur[-1].word.rstrip()
+                if prev_text and prev_text[-1] in ".!?" and len(cur) >= 3:
+                    flush = True
 
         if flush:
             segments.append(
