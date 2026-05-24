@@ -9,6 +9,11 @@
 <link rel="stylesheet" href="/static/css/editor.css" />
 {% endblock %}
 
+{# Editor uses its own topbar (editor__topbar) and runs full-workspace.
+   Suppress the global nav + footer so the entire viewport is workspace. #}
+{% block nav %}{% endblock %}
+{% block footer %}{% endblock %}
+
 {% block content %}
 <div id="editorRoot" class="editor" data-job-id="{{ job_id or '' }}">
   <!-- ── App screens ──────────────────────────────────────────────── -->

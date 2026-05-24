@@ -12,7 +12,7 @@ const jobsList        = document.getElementById('jobsList');
 const clipJobsList    = document.getElementById('clipJobsList');
 const jobsPane        = document.getElementById('jobsPane');
 const clipsPane       = document.getElementById('clipsPane');
-const jobsToggleBtns  = document.querySelectorAll('.jobs-toggle-btn');
+const jobsToggleBtns  = document.querySelectorAll('#jobsToggle button[data-jobs-tab]');
 const systemStatus    = document.getElementById('systemStatus');
 const sysGrid         = document.getElementById('sysGrid');
 const modalOverlay    = document.getElementById('modalOverlay');
@@ -38,12 +38,11 @@ export function setupJobs() {
 export async function loadSystemInfo() {
   try {
     const data = await apiFetch('/api/system');
-    // The new floating-pill nav uses a different status badge that's wired
-    // up by nav.js. Older legacy markup exposed `.status-dot` / `.status-text`
-    // — guard so we silently skip when those nodes don't exist on the page.
-    const dot  = systemStatus ? systemStatus.querySelector('.status-dot')  : null;
-    const text = systemStatus ? systemStatus.querySelector('.status-text') : null;
-
+    // The floating-pill nav status is owned by nav.js (it renders the
+    // clickable "All systems online" pill + popup). Older legacy markup
+    // exposed `.status-dot` / `.status-text` on this same element — we
+    // explicitly skip touching them here so we don't fight nav.js for
+    // the pill text.
     const ffmpegOk     = !!data.packages.ffmpeg;
     const elevenlabsOk = !!data.packages.elevenlabs;
     const geminiOk     = !!(data.env && data.env.gemini_keys_set);
@@ -132,7 +131,7 @@ function setupJobsPanelToggle() {
 
 function switchJobsPanelTab(tab) {
   S.setJobsPanelTab(tab);
-  jobsToggleBtns.forEach(btn => btn.classList.toggle('active', btn.dataset.jobsTab === tab));
+  jobsToggleBtns.forEach(btn => btn.classList.toggle('is-active', btn.dataset.jobsTab === tab));
 
   if (jobsPane) jobsPane.classList.toggle('hidden', tab !== 'jobs');
   if (clipsPane) clipsPane.classList.toggle('hidden', tab !== 'clips');

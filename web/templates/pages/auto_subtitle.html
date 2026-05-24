@@ -75,7 +75,7 @@
           </div>
 
           <div class="row">
-            <div class="field">
+            <div class="field" hidden aria-hidden="true">
               <label class="field__label" for="whisperModel">Transcription engine</label>
               <select class="select" id="whisperModel" name="whisper_model">
                 <option value="elevenlabs" selected>ElevenLabs Scribe — cloud STT + Gemini translate</option>
@@ -145,9 +145,9 @@
           </button>
         </form>
 
-        <div class="hairline" style="margin-block: var(--s-8);"></div>
+        <div class="hairline" hidden style="margin-block: var(--s-8);"></div>
 
-        <div>
+        <div hidden aria-hidden="true">
           <div class="surface__head" style="margin-bottom: var(--s-4);">
             <div>
               <h3 class="surface__title" style="font-size: var(--fs-20);">System status</h3>
@@ -160,8 +160,8 @@
         </div>
       </div>
 
-      <!-- RIGHT: Recent jobs sidebar -->
-      <aside class="surface surface--cream" data-reveal style="position: sticky; top: calc(var(--nav-h) + var(--s-8));">
+      <!-- BELOW: Recent jobs (stacked) -->
+      <aside class="surface surface--cream" data-reveal>
         <div class="surface__head">
           <div>
             <h2 class="surface__title" style="font-size: var(--fs-20);">Recent</h2>

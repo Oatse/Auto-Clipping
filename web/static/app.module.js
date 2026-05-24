@@ -16,7 +16,6 @@ import { setupRender } from './js/render.js';
 import { setupShortMaker } from './js/shortmaker.js';
 import { setupEffects } from './js/effects.js';
 import * as S from './js/state.js';
-import { fetchTranscript } from './js/utils.js';
 
 function safeRun(label, fn) {
   try { fn(); }

@@ -98,11 +98,15 @@ export function clearFile() {
 
 // ── Advanced Options ────────────────────────────────────────────────────────
 function setupAdvancedOptions() {
-  // Accordion open/close
+  const advWrap = document.getElementById('advancedSection');
+
+  // Accordion open/close — CSS keys off `.adv.is-open` on the wrapper.
+  // We also keep the `.hidden` toggle on the body for legacy guard rails.
   advancedToggle.addEventListener('click', () => {
-    const open = !advancedBody.classList.contains('hidden');
-    advancedBody.classList.toggle('hidden', open);
-    advancedArrow.style.transform = open ? '' : 'rotate(180deg)';
+    const willOpen = !advWrap.classList.contains('is-open');
+    advWrap.classList.toggle('is-open', willOpen);
+    advancedBody.classList.toggle('hidden', !willOpen);
+    if (advancedArrow) advancedArrow.style.transform = willOpen ? 'rotate(180deg)' : '';
   });
 
   // Speaker detection ON/OFF — controls visibility of num-speakers row
@@ -125,7 +129,7 @@ function setupAdvancedOptions() {
   speakerCountInc.addEventListener('click', () => setSpeakerCount(S.numSpeakersCount + 1));
 
   // Quick-select pills
-  speakerCountPills.querySelectorAll('.speaker-pill').forEach(btn => {
+  speakerCountPills.querySelectorAll('.tag').forEach(btn => {
     btn.addEventListener('click', () => setSpeakerCount(parseInt(btn.dataset.count, 10)));
   });
 }
@@ -133,8 +137,8 @@ function setupAdvancedOptions() {
 function setSpeakerCount(n) {
   S.setNumSpeakersCount(Math.min(6, Math.max(1, n)));
   speakerCountVal.textContent = S.numSpeakersCount;
-  speakerCountPills.querySelectorAll('.speaker-pill').forEach(btn => {
-    btn.classList.toggle('active', parseInt(btn.dataset.count, 10) === S.numSpeakersCount);
+  speakerCountPills.querySelectorAll('.tag').forEach(btn => {
+    btn.classList.toggle('is-active', parseInt(btn.dataset.count, 10) === S.numSpeakersCount);
   });
   speakerCountDec.disabled = S.numSpeakersCount <= 1;
   speakerCountInc.disabled = S.numSpeakersCount >= 6;

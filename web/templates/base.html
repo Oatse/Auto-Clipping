@@ -30,7 +30,7 @@
     {% block extra_styles %}{% endblock %}
   </head>
   <body class="{% block body_class %}{% endblock %}" data-mode="{% block body_mode %}light{% endblock %}">
-    {% include "_partials/nav.html" %}
+    {% block nav %}{% include "_partials/nav.html" %}{% endblock %}
 
     <div class="page {% block page_class %}{% endblock %}">
       <main id="main">

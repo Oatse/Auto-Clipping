@@ -92,9 +92,9 @@ export function setupClipFinder() {
   function setMode(mode) {
     cfMode = mode;
     [cfModeSingle, cfModeMulti].forEach(btn => {
-      const active = btn && btn.dataset.mode === mode;
       if (!btn) return;
-      btn.classList.toggle('active', active);
+      const active = btn.dataset.mode === mode;
+      btn.classList.toggle('is-active', active);
       btn.setAttribute('aria-checked', active ? 'true' : 'false');
     });
   }

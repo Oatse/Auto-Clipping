@@ -76,14 +76,23 @@
   .hero__title { font-size: clamp(var(--fs-44), 12vw, var(--fs-96)); }
 }
 
-/* ── Workbench: 7/5 split (form + jobs) ──────────────────────────────── */
+/* ── Workbench: stacked layout (form above, recent below) ─────────────
+   Previously a side-by-side grid. Now stacks vertically across all
+   workspace pages so each surface gets the full content width and
+   the page reads top-to-bottom. Cards use a flex column with a
+   sensible max-width so the layout stays readable on ultra-wide
+   monitors. */
 .workbench {
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(360px, 0.85fr);
+  display: flex;
+  flex-direction: column;
   gap: var(--s-8);
-  align-items: start;
+  width: 100%;
+  max-width: 1080px;
+  margin-inline: auto;
+  align-items: stretch;
 }
-@media (max-width: 1100px) { .workbench { grid-template-columns: 1fr; } }
+.workbench > * { width: 100%; min-width: 0; }
+.workbench > .surface { max-width: 100%; }
 
 /* ── Stepper (process indicator) ─────────────────────────────────────── */
 .stepper {
