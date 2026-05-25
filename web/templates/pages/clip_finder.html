@@ -74,9 +74,9 @@
                 </select>
               </div>
               <div class="field">
-                <label class="field__label" for="cfStartOffset">Start offset (s)</label>
-                <input class="input input--mono" id="cfStartOffset" type="number" min="0" step="10" value="0" placeholder="0" />
-                <p class="field__hint">Skip first N seconds (good for livestream waiting screens).</p>
+                <label class="field__label" for="cfStartOffset">Start offset (mm:ss)</label>
+                <input class="input input--mono" id="cfStartOffset" type="text" inputmode="text" pattern="^\s*(\d+:)?\d{1,2}:\d{1,2}\s*$|^\s*\d+(\.\d+)?\s*$" value="0" placeholder="03:54" autocomplete="off" />
+                <p class="field__hint">Skip everything before this point. Accepts <code>mm:ss</code>, <code>hh:mm:ss</code>, or raw seconds.</p>
               </div>
             </div>
 

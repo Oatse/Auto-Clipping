@@ -121,10 +121,21 @@ class ClipDownloader:
             "-preset", self._nvenc_preset,
             "-cq", self._nvenc_cq,
         ]
+        # Explicit height preference so we never silently settle for 360p
+        # when a degraded player_client (e.g. TV clients in the cookie
+        # fallback path) only advertises low-resolution formats.
+        format_chain = (
+            "bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/"
+            "bestvideo[height>=720][ext=mp4]+bestaudio[ext=m4a]/"
+            "bestvideo[height>=480][ext=mp4]+bestaudio[ext=m4a]/"
+            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
+            "bestvideo+bestaudio/best"
+        )
         return {
             "concurrent_fragment_downloads": 4,
             "download_ranges": yt_dlp.utils.download_range_func(None, [(start, end)]),
-            "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best",
+            "format": format_chain,
+            "format_sort": ["res", "fps", "vcodec:h264", "acodec:m4a"],
             "merge_output_format": "mp4",
             "noplaylist": True,
             "outtmpl": str(output_file),
@@ -159,8 +170,22 @@ class ClipDownloader:
             opts["cookiesfrombrowser"] = (self._cookies_browser,)
         else:
             return {}
+        # Order matters: high-res clients first so 1080p+ formats are
+        # advertised. The TV/creator clients are kept last as a SABR-bypass
+        # safety net but on their own they only expose ≤360–720p, which is
+        # what caused subsequent clips to drop to 640×360.
         opts["extractor_args"] = {
-            "youtube": {"player_client": ["tv_downgraded", "tv", "web_creator"]}
+            "youtube": {
+                "player_client": [
+                    "default",
+                    "android_vr",
+                    "mweb",
+                    "ios",
+                    "tv",
+                    "tv_downgraded",
+                    "web_creator",
+                ]
+            }
         }
         opts["js_runtimes"] = {"node": {}, "deno": {}}
         return opts

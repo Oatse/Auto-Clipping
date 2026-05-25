@@ -1,0 +1,369 @@
+{% extends "base.html" %}
+{% block title %}All In — ClipAuto{% endblock %}
+{% block body_class %}p-allin{% endblock %}
+
+{% block content %}
+<section class="hero" data-reveal>
+  <div class="container container--wide">
+    <div class="hero__split">
+      <div>
+        <span class="eyebrow is-lime" data-reveal-item><span class="dot"></span>Workspace · 04</span>
+        <h1 class="hero__title" data-reveal-item>
+          One link in,<br/>finished <em>clips</em> out.
+        </h1>
+        <p class="hero__sub" data-reveal-item>
+          Paste a YouTube URL. We download the source, score every moment with Gemini, cut and tighten the audio, reframe to your aspect, and burn captions. Clip Cards stream in as each finishes — no review screen, no manual handoff.
+        </p>
+      </div>
+      <aside class="hero__aside" data-reveal-item>
+        <div class="surface surface--ink">
+          <div class="metric">
+            <span class="metric__value" style="color: var(--c-lime);" data-counter data-target="1">0</span>
+            <span class="metric__label" style="color: rgba(255,255,255,0.72);">Hands-off run · zero gates</span>
+          </div>
+        </div>
+        <dl class="hero__aside-meta">
+          <div><dt>Source</dt><dd>YouTube · full download</dd></div>
+          <div><dt>Pipeline</dt><dd>Find · Cut · Reframe · Caption</dd></div>
+        </dl>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="screen-allin">
+  <div class="container container--wide">
+    <div class="workbench">
+      {# ─── LEFT: form + log ─────────────────────────────────────────── #}
+      <div style="display:grid; gap: var(--s-6);">
+        <div class="surface" data-reveal>
+          <div class="surface__head">
+            <div>
+              <h2 class="surface__title">Run All In on a URL</h2>
+              <p class="surface__desc">Works with public YouTube videos, livestreams, and unlisted links you have access to.</p>
+            </div>
+          </div>
+
+          <div style="display:grid; gap: var(--s-5);">
+            <div class="field">
+              <label class="field__label" for="aiUrl">YouTube URL</label>
+              <input class="input" id="aiUrl" type="url" placeholder="https://www.youtube.com/watch?v=…" />
+            </div>
+
+            <div class="field">
+              <label class="field__label" for="aiInstructions">What are you looking for?</label>
+              <textarea class="textarea" id="aiInstructions" rows="3" placeholder="e.g. funny VTuber reactions, key product reveals, emotional peaks. Leave empty for 'all interesting moments'."></textarea>
+              <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top: var(--s-2);">
+                <button type="button" class="tag" id="aiPresetVtuber">VTuber highlights</button>
+                <button type="button" class="tag" id="aiPresetClear">Clear</button>
+              </div>
+            </div>
+
+            {# ─── Languages (Q8 — separate analysis vs caption) ─── #}
+            <div class="row">
+              <div class="field">
+                <label class="field__label" for="aiAnalysisLang">Analysis language</label>
+                <select class="select" id="aiAnalysisLang">
+                  <option value="en" selected>English</option>
+                  <option value="id">Indonesian</option>
+                  <option value="ja">Japanese</option>
+                  <option value="es">Spanish</option>
+                  <option value="zh">Chinese</option>
+                  <option value="fr">French</option>
+                  <option value="de">German</option>
+                  <option value="ko">Korean</option>
+                </select>
+                <p class="field__hint">Which transcript track Gemini reads.</p>
+              </div>
+              <div class="field">
+                <label class="field__label" for="aiCaptionLang">Caption language</label>
+                <select class="select" id="aiCaptionLang">
+                  <option value="en" selected>English</option>
+                  <option value="id">Indonesian</option>
+                  <option value="ja">Japanese</option>
+                  <option value="es">Spanish</option>
+                  <option value="zh">Chinese</option>
+                  <option value="fr">French</option>
+                  <option value="de">German</option>
+                  <option value="ko">Korean</option>
+                </select>
+                <p class="field__hint">Burned-in subtitle language.</p>
+              </div>
+            </div>
+
+            {# ─── Aspect ratio (Q5) ─── #}
+            <div class="field">
+              <span class="field__label">Final aspect ratio</span>
+              <div class="segmented" role="tablist" id="aiAspectRatio">
+                <button type="button" data-ratio="original">Original</button>
+                <button type="button" class="is-active" data-ratio="9:16">9:16 Short</button>
+                <button type="button" data-ratio="1:1">1:1 Square</button>
+              </div>
+              <p class="field__hint">9:16 and 1:1 use smart-static face cropping; falls back to centre crop if no faces are detected.</p>
+            </div>
+
+            {# ─── Refinement toggles (Q4 / Q6 / Q7) ─── #}
+            <div class="row">
+              <label class="def-list__row" style="border-bottom:0; padding:0;">
+                <div>
+                  <div style="font-size: var(--fs-14); color: var(--c-ink);">Tighten silence</div>
+                  <div class="field__hint">Drop pauses longer than 800ms inside each clip.</div>
+                </div>
+                <label class="switch"><input type="checkbox" id="aiTightenSilence" checked /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+              </label>
+              <label class="def-list__row" style="border-bottom:0; padding:0;">
+                <div>
+                  <div style="font-size: var(--fs-14); color: var(--c-ink);">Speaker tinting</div>
+                  <div class="field__hint">Colour captions by speaker. Most-words wins on overlap.</div>
+                </div>
+                <label class="switch"><input type="checkbox" id="aiSpeakerTinting" /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+              </label>
+            </div>
+
+            {# ─── Auto-subtitle + preset (Q7) ─── #}
+            <div class="field">
+              <label class="def-list__row" style="border-bottom:0; padding:0;">
+                <div>
+                  <div style="font-size: var(--fs-14); color: var(--c-ink);">Auto-subtitle</div>
+                  <div class="field__hint">Burn captions onto each clip. Disable for raw cuts only.</div>
+                </div>
+                <label class="switch"><input type="checkbox" id="aiAutoSubtitle" checked /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+              </label>
+              <div style="margin-top: var(--s-3);">
+                <span class="field__label">Caption style</span>
+                <div class="segmented" role="tablist" id="aiCaptionPreset">
+                  <button type="button" class="is-active" data-preset="bold">Bold</button>
+                  <button type="button" data-preset="minimal">Minimal</button>
+                  <button type="button" data-preset="karaoke">Karaoke</button>
+                </div>
+              </div>
+            </div>
+
+            {# ─── Advanced disclosure (Q13 — mirror Clip Finder defaults) ─── #}
+            <details class="advanced" id="aiAdvanced">
+              <summary style="cursor:pointer; font-family: var(--f-mono); font-size: var(--fs-12); letter-spacing: 0.08em; text-transform: uppercase; color: var(--c-ink-mute); padding: var(--s-2) 0;">
+                Advanced — analysis tuning
+              </summary>
+              <div style="display:grid; gap: var(--s-4); margin-top: var(--s-3);">
+                <div class="field">
+                  <span class="field__label">Detection mode</span>
+                  <div class="segmented" role="tablist" id="aiMode">
+                    <button type="button" class="is-active" data-mode="single-shot">Single-shot</button>
+                    <button type="button" data-mode="multi-stage">Multi-stage (deeper)</button>
+                  </div>
+                </div>
+                <div class="row">
+                  <div class="field">
+                    <label class="field__label" for="aiStartOffset">Start offset (mm:ss)</label>
+                    <input class="input input--mono" id="aiStartOffset" type="text" inputmode="text" pattern="^\s*(\d+:)?\d{1,2}:\d{1,2}\s*$|^\s*\d+(\.\d+)?\s*$" value="0" placeholder="03:54" autocomplete="off" />
+                    <p class="field__hint">Skip everything before this point. Accepts <code>mm:ss</code>, <code>hh:mm:ss</code>, or raw seconds.</p>
+                  </div>
+                  <div class="field">
+                    <label class="field__label" for="aiMaxClips">Max clips</label>
+                    <input class="input input--mono" id="aiMaxClips" type="number" min="1" max="50" value="12" />
+                    <p class="field__hint">Cap for multi-stage detection.</p>
+                  </div>
+                </div>
+                <div class="row">
+                  <label class="def-list__row" style="border-bottom:0; padding:0;">
+                    <div>
+                      <div style="font-size: var(--fs-14); color: var(--c-ink);">Audio signals</div>
+                      <div class="field__hint">Detect loud peaks and crowd reactions.</div>
+                    </div>
+                    <label class="switch"><input type="checkbox" id="aiEnableAudio" checked /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+                  </label>
+                  <label class="def-list__row" style="border-bottom:0; padding:0;">
+                    <div>
+                      <div style="font-size: var(--fs-14); color: var(--c-ink);">Chat signals</div>
+                      <div class="field__hint">Score moments using live-chat spikes.</div>
+                    </div>
+                    <label class="switch"><input type="checkbox" id="aiEnableChat" checked /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+                  </label>
+                </div>
+              </div>
+            </details>
+
+            <button type="button" class="btn btn--lg" id="aiRunBtn" style="justify-self:start;">
+              <span class="btn-text">Run All In</span>
+              <span class="btn__icon"><svg width="14" height="14" viewBox="0 0 14 14"><path d="M3 2L11 7L3 12V2Z" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" fill="none"/></svg></span>
+            </button>
+          </div>
+        </div>
+
+        {# ─── RIGHT: results sidebar ─────────────────────────────────── #}
+      <aside class="surface surface--cream" data-reveal>
+        <div class="surface__head">
+          <div>
+            <h2 class="surface__title" style="font-size: var(--fs-20);">Clip Cards</h2>
+            <p class="surface__desc">
+              <span id="aiResultCount">0</span> finished ·
+              <span id="aiFailedCount">0</span> failed
+            </p>
+          </div>
+          <div style="display:flex; gap: var(--s-2); align-items:center;">
+            <div class="segmented" id="aiSortSegmented" role="tablist" style="font-size: var(--fs-12);">
+              <button type="button" class="is-active" data-sort="score">Score</button>
+              <button type="button" data-sort="time">Time</button>
+            </div>
+            <button class="btn btn--sm btn--ghost" id="aiDeleteJobBtn" style="display:none;" title="Delete this Job and its source video">
+              <span class="btn-text">Delete Job</span>
+            </button>
+          </div>
+        </div>
+
+        <div id="aiClipsGrid" class="ai-clips-grid">
+          <div class="state state--empty">
+            <div class="state__icon"><svg width="22" height="22" viewBox="0 0 22 22"><path d="M3 6h16v12H3z M8 9l5 3-5 3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+            <h4 class="state__title">No clips yet</h4>
+            <p class="state__desc">Run All In to stream finished Clip Cards here.</p>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+{# ───────────────────────────────────────────────────────────────────────────
+   Page-scoped styles: Clip Card composition (Q14)
+   - Numeric score badge + colour band: lime ≥ 8, cream 6–8, mute < 6
+   - Status pill (rendering / done / failed)
+   - Per-clip retry / download buttons
+   ───────────────────────────────────────────────────────────────────────────#}
+<style>
+  .ai-clips-grid {
+    display: grid;
+    gap: var(--s-3);
+    margin-top: var(--s-3);
+  }
+
+  .ai-card {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    gap: var(--s-3);
+    padding: var(--s-3);
+    border-radius: var(--r-4);
+    background: var(--c-paper);
+    border: 1px solid var(--c-hair);
+    position: relative;
+    transition: border-color 240ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .ai-card:hover { border-color: var(--c-ink-mute); }
+  .ai-card.is-failed { border-color: rgba(220, 60, 60, 0.45); }
+  .ai-card.is-rendering::after {
+    content: "";
+    position: absolute; inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(90deg,
+      transparent 0%, rgba(200, 255, 0, 0.08) 50%, transparent 100%);
+    animation: ai-shimmer 1.6s ease-in-out infinite;
+  }
+  @keyframes ai-shimmer {
+    0% { transform: translateX(-30%); }
+    100% { transform: translateX(30%); }
+  }
+
+  .ai-card__thumb {
+    width: 96px; height: 96px;
+    border-radius: var(--r-3);
+    overflow: hidden;
+    background: var(--c-ink);
+    display: flex; align-items: center; justify-content: center;
+    color: rgba(255,255,255,0.4);
+    font-family: var(--f-mono);
+    font-size: var(--fs-12);
+  }
+  .ai-card__thumb video,
+  .ai-card__thumb img {
+    width: 100%; height: 100%; object-fit: cover;
+  }
+
+  .ai-card__body { display: grid; gap: var(--s-1); align-content: start; }
+  .ai-card__title {
+    font-size: var(--fs-14);
+    font-weight: 700;
+    color: var(--c-ink);
+    line-height: 1.25;
+    overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical;
+  }
+  .ai-card__reason {
+    font-size: var(--fs-12);
+    color: var(--c-ink-mute);
+    line-height: 1.4;
+    overflow: hidden; text-overflow: ellipsis;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+
+  .ai-card__meta {
+    display: flex; align-items: center; gap: var(--s-2);
+    margin-top: var(--s-2);
+    flex-wrap: wrap;
+  }
+
+  .ai-score {
+    font-family: var(--f-mono);
+    font-size: var(--fs-12);
+    padding: 4px 8px;
+    border-radius: 999px;
+    background: rgba(0,0,0,0.04);
+    color: var(--c-ink-mute);
+    letter-spacing: 0.02em;
+  }
+  .ai-score.is-lime  { background: var(--c-lime); color: var(--c-ink); }
+  .ai-score.is-cream { background: var(--c-cream); color: var(--c-ink); }
+
+  .ai-card__pill {
+    font-family: var(--f-mono);
+    font-size: var(--fs-12);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid var(--c-hair);
+    color: var(--c-ink-mute);
+  }
+  .ai-card__pill.is-rendering { color: var(--c-ink); border-color: var(--c-ink); }
+  .ai-card__pill.is-done      { background: var(--c-lime); border-color: var(--c-lime); color: var(--c-ink); }
+  .ai-card__pill.is-failed    { background: rgba(220, 60, 60, 0.1); border-color: rgba(220, 60, 60, 0.35); color: rgb(180, 40, 40); }
+
+  .ai-card__actions {
+    display: flex; gap: 6px;
+    margin-left: auto;
+  }
+  .ai-card__icon-btn {
+    width: 28px; height: 28px;
+    border-radius: 999px;
+    border: 1px solid var(--c-hair);
+    background: transparent;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--c-ink);
+    cursor: pointer;
+    transition:
+      transform 200ms cubic-bezier(0.32, 0.72, 0, 1),
+      background 200ms cubic-bezier(0.32, 0.72, 0, 1);
+  }
+  .ai-card__icon-btn:hover { background: var(--c-ink); color: var(--c-paper); }
+  .ai-card__icon-btn:active { transform: scale(0.96); }
+  .ai-card__icon-btn[disabled] { opacity: 0.35; pointer-events: none; }
+
+  .ai-card__error {
+    grid-column: 1 / -1;
+    margin-top: var(--s-2);
+    font-family: var(--f-mono);
+    font-size: var(--fs-12);
+    color: rgb(180, 40, 40);
+    background: rgba(220, 60, 60, 0.06);
+    border-radius: var(--r-3);
+    padding: var(--s-2);
+    overflow-wrap: anywhere;
+  }
+
+  .ai-step-line.is-active { color: var(--c-ink); }
+  .ai-step-line.is-done   { color: var(--c-lime-dark, var(--c-ink)); }
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/pages/all_in.js"></script>
+{% endblock %}

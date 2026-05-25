@@ -334,3 +334,318 @@ def _validate_crop(crop: CropRegion, video_w: int, video_h: int, label: str):
             f"{label} crop exceeds video height: "
             f"y({crop.y}) + h({crop.h}) = {crop.y + crop.h} > {video_h}"
         )
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# All In Workspace — headless reframe API
+# ═══════════════════════════════════════════════════════════════════════════
+#
+# These helpers are the surgical extraction described in ADR-0002.  The
+# All In runner needs a function-callable reframe path: smart-static face
+# crop + single-frame output, no human draws-the-box step.  The existing
+# ``make_short()`` two-grid layout is unchanged and still drives the Short
+# Maker workspace UI.
+#
+# Public API:
+#   - aspect_ratio_to_dimensions(ratio)
+#   - CropBox (alias of CropRegion for callers that prefer the new name)
+#   - compute_smart_static_crop(video_path, ratio)
+#   - reframe_to_ratio(input, output, ratio, crop)
+
+
+# ``CropBox`` is the name the All In stages use; alias to CropRegion so we
+# don't introduce a parallel dataclass with the same shape.
+CropBox = CropRegion
+
+
+# Mapping from the ``models.AspectRatio`` enum's string value to the
+# (width, height) we ship.  ``None`` for ORIGINAL means "skip reframe".
+_RATIO_OUTPUT: dict[str, tuple[int, int] | None] = {
+    "original": None,
+    "9:16": (1080, 1920),
+    "1:1": (1080, 1080),
+}
+
+
+def aspect_ratio_to_dimensions(ratio: str) -> tuple[int, int] | None:
+    """Return ``(out_w, out_h)`` for the named ratio, or ``None`` for original.
+
+    Raises ``KeyError`` if the ratio is unknown — the caller should have
+    validated via the ``AspectRatio`` enum first.
+    """
+    return _RATIO_OUTPUT[ratio]
+
+
+# ─── Smart-static crop (face-detect once, lock crop for the whole clip) ─────
+
+# Number of frames sampled across the clip duration for face detection.
+# 20 is the sweet spot from grilling Q5 — enough samples to median over
+# transient occlusions, cheap enough to run in <1s per Clip.
+_FACE_SAMPLE_FRAMES = 20
+
+
+async def compute_smart_static_crop(
+    video_path: Path | str,
+    ratio: str,
+    *,
+    log_fn=None,
+) -> CropBox | None:
+    """Compute a single locked crop rectangle for an entire Clip.
+
+    Strategy (per design grilling Q5):
+      1. Probe the source for width/height/duration.
+      2. Sample ``_FACE_SAMPLE_FRAMES`` evenly-spaced frames.
+      3. Run a face detector on each sample; collect bounding-box centroids.
+      4. Take the median centroid → that's the crop centre.
+      5. Build the largest crop rectangle that:
+            - Has the target aspect ratio
+            - Fits inside the source frame
+            - Is centred on the median centroid (clamped to image bounds)
+      6. If detection finds zero faces across all samples, return ``None``
+         — the caller falls back to a centre crop.
+
+    Returns ``None`` for the ``original`` ratio (no reframe needed) and
+    when face detection cannot find any face in any sample frame.
+    """
+    if ratio == "original":
+        return None
+
+    out_dims = _RATIO_OUTPUT.get(ratio)
+    if out_dims is None:
+        return None
+    out_w, out_h = out_dims
+    target_ratio = out_w / out_h
+
+    info = await get_video_info(video_path)
+    if info.width <= 0 or info.height <= 0:
+        return _centre_crop_for_ratio(info.width, info.height, target_ratio)
+
+    centroids = await _sample_face_centroids(
+        Path(video_path),
+        info=info,
+        sample_count=_FACE_SAMPLE_FRAMES,
+        log_fn=log_fn,
+    )
+
+    if not centroids:
+        if log_fn:
+            log_fn("No faces detected in samples — falling back to centre crop")
+        return _centre_crop_for_ratio(info.width, info.height, target_ratio)
+
+    # Median centroid is robust to outliers (occluded frames, fast cuts)
+    # in a way that mean is not — one bad detection at the edge of the
+    # frame won't drag the crop with it.
+    cx = _median([c[0] for c in centroids])
+    cy = _median([c[1] for c in centroids])
+
+    return _crop_for_ratio_centred_on(
+        video_w=info.width,
+        video_h=info.height,
+        target_ratio=target_ratio,
+        centre_x=cx,
+        centre_y=cy,
+    )
+
+
+def _centre_crop_for_ratio(video_w: int, video_h: int, target_ratio: float) -> CropBox:
+    """Largest target-ratio rectangle centred in the source frame."""
+    return _crop_for_ratio_centred_on(
+        video_w=video_w,
+        video_h=video_h,
+        target_ratio=target_ratio,
+        centre_x=video_w / 2,
+        centre_y=video_h / 2,
+    )
+
+
+def _crop_for_ratio_centred_on(
+    *,
+    video_w: int,
+    video_h: int,
+    target_ratio: float,
+    centre_x: float,
+    centre_y: float,
+) -> CropBox:
+    """Build the largest target-ratio crop centred on (centre_x, centre_y).
+
+    Pure geometry — no I/O, no FFmpeg, easy to unit-test.  Ensures the
+    output rectangle never exits the source frame; clamps the centre
+    if it would.
+    """
+    src_ratio = video_w / video_h if video_h > 0 else target_ratio
+
+    if src_ratio > target_ratio:
+        # Source is wider than target → crop the width.
+        crop_h = video_h
+        crop_w = int(round(crop_h * target_ratio))
+    else:
+        # Source is taller than target → crop the height.
+        crop_w = video_w
+        crop_h = int(round(crop_w / target_ratio))
+
+    # Even pixel dimensions keep H.264 happy (chroma subsampling).
+    crop_w -= crop_w % 2
+    crop_h -= crop_h % 2
+
+    crop_x = int(round(centre_x - crop_w / 2))
+    crop_y = int(round(centre_y - crop_h / 2))
+    crop_x = max(0, min(crop_x, video_w - crop_w))
+    crop_y = max(0, min(crop_y, video_h - crop_h))
+    crop_x -= crop_x % 2
+    crop_y -= crop_y % 2
+
+    return CropBox(x=crop_x, y=crop_y, w=crop_w, h=crop_h)
+
+
+def _median(values: Sequence[float]) -> float:
+    """Median of a non-empty sequence; tie → average of middle pair."""
+    s = sorted(values)
+    n = len(s)
+    mid = n // 2
+    if n % 2 == 1:
+        return s[mid]
+    return (s[mid - 1] + s[mid]) / 2.0
+
+
+async def _sample_face_centroids(
+    video_path: Path,
+    *,
+    info: VideoInfo,
+    sample_count: int,
+    log_fn=None,
+) -> list[tuple[float, float]]:
+    """Sample N evenly-spaced frames and return face centroids in pixels.
+
+    Tries OpenCV's bundled Haar cascade first (zero new dependency, ships
+    with cv2).  If OpenCV isn't available, returns an empty list and the
+    caller falls back to centre crop — never blocks the pipeline.
+    """
+    try:
+        import cv2  # type: ignore
+    except ImportError:
+        if log_fn:
+            log_fn("OpenCV not installed — skipping face detection")
+        return []
+
+    cascade_path = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
+    cascade = cv2.CascadeClassifier(cascade_path)
+    if cascade.empty():
+        if log_fn:
+            log_fn("Haar cascade failed to load — skipping face detection")
+        return []
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        return []
+
+    try:
+        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        if frame_count <= 0:
+            # Fallback: derive from duration × fps so live VFR sources
+            # still get sampled.
+            frame_count = int(max(1.0, info.duration) * max(1.0, info.fps))
+
+        # Evenly-spaced frame indices across the whole clip.
+        step = max(1, frame_count // sample_count)
+        indices = [i * step for i in range(sample_count)]
+
+        centroids: list[tuple[float, float]] = []
+        for idx in indices:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, float(idx))
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                continue
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            faces = cascade.detectMultiScale(
+                gray,
+                scaleFactor=1.2,
+                minNeighbors=5,
+                minSize=(48, 48),
+            )
+            if len(faces) == 0:
+                continue
+            # Pick the largest face per frame — biggest face = closest
+            # speaker = the subject we want to keep on screen.
+            x, y, w, h = max(faces, key=lambda f: f[2] * f[3])
+            centroids.append((x + w / 2.0, y + h / 2.0))
+
+        if log_fn:
+            log_fn(
+                f"Face detection: {len(centroids)}/{len(indices)} sample frames "
+                "yielded a face"
+            )
+        return centroids
+    finally:
+        cap.release()
+
+
+# ─── Headless reframe-to-ratio renderer ─────────────────────────────────────
+
+async def reframe_to_ratio(
+    *,
+    input_path: Path | str,
+    output_path: Path | str,
+    ratio: str,
+    crop: CropBox | None = None,
+    log_fn=None,
+) -> Path:
+    """Reframe ``input_path`` to the target aspect ratio.
+
+    For ``ratio == "original"`` returns the input path unchanged
+    (caller decides whether to copy or reuse).  Otherwise burns the
+    crop + scale into the output via a single FFmpeg pass.
+
+    If ``crop`` is ``None`` and the ratio needs one, computes a
+    smart-static crop on the fly (or falls back to centre crop if
+    detection finds no faces).
+    """
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+    ensure_dir(output_path.parent)
+
+    if ratio == "original":
+        # No reframe — caller can copy or reuse the input directly.
+        return input_path
+
+    out_dims = aspect_ratio_to_dimensions(ratio)
+    if out_dims is None:
+        return input_path
+    out_w, out_h = out_dims
+
+    if crop is None:
+        crop = await compute_smart_static_crop(input_path, ratio, log_fn=log_fn)
+
+    if crop is None:
+        info = await get_video_info(input_path)
+        crop = _centre_crop_for_ratio(info.width, info.height, out_w / out_h)
+
+    _validate_crop(crop, *(await _wh(input_path)), label="reframe")
+
+    if log_fn:
+        log_fn(
+            f"Reframing to {ratio} ({out_w}×{out_h}) "
+            f"using crop ({crop.x},{crop.y},{crop.w}×{crop.h})"
+        )
+
+    filter_complex = (
+        f"[0:v]crop={crop.w}:{crop.h}:{crop.x}:{crop.y},"
+        f"scale={out_w}:{out_h}:flags=lanczos[v]"
+    )
+    await run_ffmpeg([
+        "-i", str(input_path),
+        "-filter_complex", filter_complex,
+        "-map", "[v]",
+        "-map", "0:a?",
+        "-c:v", "h264_nvenc",
+        "-preset", "p4",
+        "-cq", "20",
+        "-c:a", "copy",
+        "-movflags", "+faststart",
+        str(output_path),
+    ])
+    return output_path
+
+
+async def _wh(video_path: Path | str) -> tuple[int, int]:
+    info = await get_video_info(video_path)
+    return info.width, info.height
