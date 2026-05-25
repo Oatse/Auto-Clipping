@@ -80,10 +80,9 @@
               <select class="select" id="whisperModel" name="whisper_model">
                 <option value="elevenlabs" selected>ElevenLabs Scribe — cloud STT + Gemini translate</option>
               </select>
-              <p class="field__hint" id="elevenlabsNote" style="display:none;">ElevenLabs transcribes the source language, Gemini auto-translates to your target.</p>
-              <div id="elevenlabsQuota" style="display:none; font-family: var(--f-mono); font-size: var(--fs-12); color: var(--c-ink-mute);">
-                <span id="elQuotaContent">Loading quota…</span>
-              </div>
+              {# ElevenLabs quota was previously surfaced here, but it duplicated
+                 the floating system-status pill (which already shows per-key
+                 usage on click). Removed to keep the upload card uncluttered. #}
             </div>
             <div class="field">
               <label class="field__label" for="targetLang">Target language</label>

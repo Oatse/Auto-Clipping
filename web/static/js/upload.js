@@ -146,97 +146,22 @@ function setSpeakerCount(n) {
 
 // ── ElevenLabs model note & advanced options sync ───────────────────────────
 function setupModelSwitchNote() {
-  const note = document.getElementById('elevenlabsNote');
-  const quotaBox = document.getElementById('elevenlabsQuota');
-  const quotaContent = document.getElementById('elQuotaContent');
-  if (!whisperModel || !note) return;
+  // The transcription-engine field is hidden on the upload card now (only
+  // ElevenLabs is supported). The quota chip used to live here but it
+  // duplicated the floating nav pill, so the per-key quota lives there
+  // instead. Keep this stub so existing call sites don't break, but do
+  // not query DOM nodes that no longer exist.
+  if (!whisperModel) return;
 
-  let quotaLoaded = false;
-
-  function updateNote() {
-    const isEL = whisperModel.value === 'elevenlabs';
-    note.style.display = isEL ? 'block' : 'none';
-    if (quotaBox) quotaBox.style.display = isEL ? 'block' : 'none';
-
-    if (isEL && !quotaLoaded) {
-      quotaLoaded = true;
-      fetchElevenLabsQuota();
-    }
-
-    const descEl = document.querySelector('#speakerDetectionEnabled')
-      ?.closest('.advanced-row')
-      ?.querySelector('.advanced-row-desc');
-    if (descEl) {
-      descEl.textContent = isEL
-        ? 'ElevenLabs built-in speaker diarization. Disable for single-speaker content'
-        : 'Detect multiple speakers via timing gaps. Disable for single-speaker to use Pycaps animations';
-    }
+  // Make sure any stale advanced-row description label still reflects
+  // the engine we ship with.
+  const descEl = document.querySelector('#speakerDetectionEnabled')
+    ?.closest('.advanced-row')
+    ?.querySelector('.advanced-row-desc');
+  if (descEl) {
+    descEl.textContent =
+      'ElevenLabs built-in speaker diarization. Disable for single-speaker content';
   }
-
-  async function fetchElevenLabsQuota() {
-    if (!quotaContent) return;
-    quotaContent.textContent = 'Loading quota...';
-    try {
-      const data = await apiFetch('/api/elevenlabs/quota');
-      const keys = data.keys || [];
-
-      if (keys.length === 0) {
-        quotaContent.textContent = 'No keys configured';
-        return;
-      }
-
-      let html = '';
-      keys.forEach((k, i) => {
-        const isLast = i === keys.length - 1;
-        const sep = !isLast
-          ? 'margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid rgba(255,255,255,0.08);'
-          : '';
-
-        if (k.error) {
-          html += `<div style="${sep}">` +
-            `<span style="opacity:0.55;font-size:0.78rem;">${k.key_label}</span> ` +
-            `<span style="color:#f44336;font-size:0.78rem;">⚠ ${k.error}</span></div>`;
-          return;
-        }
-
-        const used = k.character_count || 0;
-        const limit = k.character_limit || 0;
-        const pct = limit > 0 ? Math.round((used / limit) * 100) : 0;
-        const remaining = Math.max(0, limit - used);
-        const tier = (k.tier || 'unknown').replace(/_/g, ' ');
-        let resetStr = '';
-        if (k.next_reset_unix) {
-          const d = new Date(k.next_reset_unix * 1000);
-          resetStr = ` · Reset ${d.toLocaleDateString()}`;
-        }
-        let barColor = '#4caf50';
-        if (pct > 80) barColor = '#f44336';
-        else if (pct > 50) barColor = '#ff9800';
-
-        html +=
-          `<div style="${sep}">` +
-            `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">` +
-              `<span><span style="opacity:0.5;font-size:0.78rem;">${k.key_label} · </span><strong>${tier}</strong>${resetStr}</span>` +
-              `<span style="color:${barColor};font-weight:600;">${pct}% used</span>` +
-            `</div>` +
-            `<div style="background:rgba(255,255,255,0.08);border-radius:4px;height:5px;overflow:hidden;">` +
-              `<div style="width:${pct}%;height:100%;background:${barColor};border-radius:4px;transition:width .3s;"></div>` +
-            `</div>` +
-            `<div style="margin-top:4px;font-size:0.77rem;opacity:0.65;">${remaining.toLocaleString()} / ${limit.toLocaleString()} chars remaining</div>` +
-          `</div>`;
-      });
-      quotaContent.innerHTML = html;
-    } catch (e) {
-      quotaContent.textContent = 'Could not load quota info';
-      console.error('ElevenLabs quota fetch failed:', e);
-    }
-  }
-
-  whisperModel.addEventListener('change', () => {
-    quotaLoaded = false;
-    updateNote();
-  });
-  updateNote();
 }
 
 // ── Form Submit → Transcribe Phase ────────────────────────────────────────

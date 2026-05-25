@@ -29,7 +29,8 @@ function bootMobileSheet() {
 
 // ── System status: pill + clickable popup ─────────────────────────────────
 let _systemPayload = null;       // last /api/system response, reused for popup
-let _quotaPromise  = null;       // memoised quota fetch (1 per page load)
+let _quotaPromise       = null;  // memoised ElevenLabs quota fetch (1 per page load)
+let _geminiQuotaPromise = null;  // memoised Gemini quota fetch (1 per page load)
 
 async function bootSystemStatus() {
   const el = $("systemStatus");
@@ -145,6 +146,7 @@ function renderStatusPopup() {
   }).join("");
 
   renderQuotaSection();
+  renderGeminiQuotaSection();
 }
 
 async function renderQuotaSection() {
@@ -205,6 +207,58 @@ function renderQuotaRow(k) {
     <div class="nav__status-popup-quota-bar"><span style="width:${pct}%"></span></div>
     <div class="nav__status-popup-quota-foot">
       ${remaining.toLocaleString()} / ${limit.toLocaleString()} chars remaining${resetStr}
+    </div>
+  </div>`;
+}
+
+async function renderGeminiQuotaSection() {
+  const body = $("systemStatusPopupGeminiQuotaBody");
+  if (!body) return;
+
+  if (!_geminiQuotaPromise) {
+    _geminiQuotaPromise = fetch("/api/gemini/quota")
+      .then(r => r.ok ? r.json() : Promise.reject(new Error("quota " + r.status)))
+      .catch(err => ({ _error: err.message || String(err) }));
+  }
+
+  body.innerHTML = `<div class="nav__status-popup-row is-loading"><span>Loading quota…</span><span>—</span></div>`;
+  const data = await _geminiQuotaPromise;
+
+  if (!data || data._error) {
+    body.innerHTML = `<div class="nav__status-popup-row is-warn"><span>Could not load quota</span><span>retry</span></div>`;
+    return;
+  }
+
+  const keys = Array.isArray(data.keys) ? data.keys : [];
+  if (!keys.length) {
+    body.innerHTML = `<div class="nav__status-popup-row is-warn"><span>No keys configured</span><span>—</span></div>`;
+    return;
+  }
+
+  body.innerHTML = keys.map(k => renderGeminiKeyRow(k)).join("");
+}
+
+function renderGeminiKeyRow(k) {
+  const label = escapeHtml(k.key_label || "key");
+
+  if (k.status === "error") {
+    return `<div class="nav__status-popup-quota" data-level="err">
+      <div class="nav__status-popup-quota-head"><strong>${label}</strong><span>error</span></div>
+      <div class="nav__status-popup-quota-foot">${escapeHtml(k.error || "unknown error")}</div>
+    </div>`;
+  }
+
+  const statusMap = {
+    active:       { level: "ok",   text: "active" },
+    rate_limited: { level: "warn", text: "rate limited" },
+    invalid:      { level: "err",  text: "invalid key" },
+  };
+  const { level, text } = statusMap[k.status] || { level: "warn", text: escapeHtml(k.status || "unknown") };
+
+  return `<div class="nav__status-popup-quota" data-level="${level}">
+    <div class="nav__status-popup-quota-head">
+      <span><strong>${label}</strong></span>
+      <span>${text}</span>
     </div>
   </div>`;
 }

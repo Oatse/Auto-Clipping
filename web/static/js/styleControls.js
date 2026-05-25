@@ -79,28 +79,39 @@ export function setupStyleControls() {
     });
   });
 
+  // Animation grid uses .tag.is-active in CSS (editor.css), so toggle the
+  // matching class — previously this set `.active` and the lime highlight
+  // never appeared even though setCurrentAnim ran.
   animGrid.querySelectorAll('.anim-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      animGrid.querySelectorAll('.anim-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+      animGrid.querySelectorAll('.anim-btn').forEach(b => b.classList.remove('is-active'));
+      btn.classList.add('is-active');
       S.setCurrentAnim(btn.dataset.anim);
       onStyleChange();
     });
   });
 
+  // Position selector is a `.segmented` group — its CSS keys off `is-active`.
+  // Same root cause as the animation grid: bumping the wrong class meant the
+  // pill highlight never followed the click, even though state.currentPos
+  // and the overlay class did update.
   positionGrid.querySelectorAll('.pos-btn').forEach(btn => {
     btn.addEventListener('click', () => {
-      positionGrid.querySelectorAll('.pos-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+      positionGrid.querySelectorAll('.pos-btn').forEach(b => b.classList.remove('is-active'));
+      btn.classList.add('is-active');
       S.setCurrentPos(btn.dataset.pos);
       subtitleOverlay.className = 'subtitle-overlay pos-' + S.currentPos;
+      onStyleChange();
     });
   });
 
-  presetGrid.querySelectorAll('.preset-btn').forEach(btn => {
+  // Quick-preset cards: the markup uses `.preset` (not `.preset-btn`) and
+  // the CSS active state is `.preset.is-active`. The previous selector
+  // `.preset-btn` matched zero elements, so clicks did nothing.
+  presetGrid.querySelectorAll('.preset').forEach(btn => {
     btn.addEventListener('click', () => {
-      presetGrid.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+      presetGrid.querySelectorAll('.preset').forEach(b => b.classList.remove('is-active'));
+      btn.classList.add('is-active');
       applyPreset(btn.dataset.preset);
     });
   });
@@ -134,13 +145,16 @@ export function applyPreset(name) {
   }
 
   S.setCurrentAnim(p.anim);
+  // Use `.is-active` to match the click handler + the CSS rule
+  // `.editor .tag.is-active`. Previously this set `.active` and the
+  // lime highlight didn't follow when a preset was applied.
   animGrid.querySelectorAll('.anim-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.anim === p.anim);
+    b.classList.toggle('is-active', b.dataset.anim === p.anim);
   });
 
   S.setCurrentPos(p.pos);
   positionGrid.querySelectorAll('.pos-btn').forEach(b => {
-    b.classList.toggle('active', b.dataset.pos === p.pos);
+    b.classList.toggle('is-active', b.dataset.pos === p.pos);
   });
   subtitleOverlay.className = 'subtitle-overlay pos-' + S.currentPos;
 

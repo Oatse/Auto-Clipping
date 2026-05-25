@@ -114,6 +114,22 @@ export function setupTimeline() {
   // Add segment button
   addSegmentBtn.addEventListener('click', () => openSegmentDialog(previewVideo.currentTime));
 
+  // Ruler click / drag → seek the video (Current Time Indicator).
+  // Clicking the ruler moves the playhead; click-and-drag scrubs.
+  timelineRuler.addEventListener('mousedown', (e) => {
+    if (!S.videoDuration) return;
+    e.preventDefault();
+    const seekFromEvent = (ev) => {
+      const trackRect = timelineTrack.getBoundingClientRect();
+      const x = ev.clientX - trackRect.left;
+      const trackWidth = getTrackWidth();
+      const t = Math.max(0, Math.min(S.videoDuration, (x / trackWidth) * S.videoDuration));
+      previewVideo.currentTime = t;
+    };
+    seekFromEvent(e);
+    S.setDraggingPlayhead(true);
+  });
+
   // Delete segment button
   deleteSegmentBtn.addEventListener('click', async () => {
     if (S.selectedSegIdx !== null && S.selectedSegIdx < S.transcriptData.length) {
@@ -191,13 +207,15 @@ export function setupTimeline() {
       e.preventDefault();
       return;
     }
-    // Click on empty area — seek playhead
+    // Click on empty area — seek playhead (and start drag-to-scrub)
     const trackRect = timelineTrack.getBoundingClientRect();
     const x = e.clientX - trackRect.left;
     const trackWidth = getTrackWidth();
     const t = (x / trackWidth) * S.videoDuration;
     if (t >= 0 && t <= S.videoDuration) {
       previewVideo.currentTime = t;
+      S.setDraggingPlayhead(true);
+      e.preventDefault();
     }
   });
 

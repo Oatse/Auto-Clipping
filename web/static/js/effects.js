@@ -689,13 +689,16 @@ function setupCropCanvas(fx) {
 // ── Filter Controls ─────────────────────────────────────────────────────────
 function setupFilterControls() {
   // Filter preset grid
+  // Filter buttons are styled as `.tag.is-active` (lime pill) per editor.css.
+  // Toggling `.active` instead would set state silently with no visual
+  // feedback, so click-to-active appeared dead.
   const filterGrid = document.getElementById('filterGrid');
   if (filterGrid) {
     filterGrid.addEventListener('click', (e) => {
       const btn = e.target.closest('.filter-btn');
       if (!btn) return;
-      filterGrid.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-      btn.classList.add('active');
+      filterGrid.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('is-active'));
+      btn.classList.add('is-active');
       S.setActiveFilter(btn.dataset.filter);
       applyFilterPreset(btn.dataset.filter);
     });

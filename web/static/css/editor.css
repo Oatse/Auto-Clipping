@@ -6,12 +6,19 @@
 
 /* ── Editor root (replace .page padding for full-screen) ────────────── */
 .editor {
-  min-height: 100dvh;
+  /* Lock the editor to a single viewport — the workspace fills the
+     window once and only the inner panes (transcript, style, timeline)
+     scroll internally. This prevents the whole page from gaining a
+     vertical scrollbar when the right-hand style panel grows. */
+  height: 100dvh;
   display: flex;
   flex-direction: column;
-  padding-top: calc(var(--nav-h) + var(--s-5));
+  /* Editor template suppresses the global nav + footer, so don't reserve
+     room for them. The editor__topbar is now the only header. */
+  padding-top: 0;
   background: var(--c-noir-bg);
   color: var(--c-noir-text);
+  overflow: hidden;
 }
 
 .editor .app-screen { display: none; }
@@ -142,10 +149,10 @@
 }
 
 .transcript-seg {
-  display: grid;
-  grid-template-columns: 56px 1fr auto;
-  gap: var(--s-3);
-  padding: 12px var(--s-3);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
   border-radius: var(--r-4);
   background: transparent;
   cursor: pointer;
@@ -160,18 +167,79 @@
   border-left-color: var(--c-lime);
 }
 
+.seg-row-time {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s-2);
+}
+.seg-row-content {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s-2);
+  min-width: 0;
+}
 .seg-time {
   font-family: var(--f-mono);
   font-size: var(--fs-12);
   color: var(--c-noir-mute);
   letter-spacing: 0.04em;
-  align-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
+.seg-time-btn {
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 6px;
+  transition: background-color var(--d-2) var(--ease-out), color var(--d-2) var(--ease-out);
+}
+.seg-time-btn:hover {
+  background: var(--c-noir-line);
+  color: var(--c-noir-text);
+}
+.seg-time-sep { opacity: 0.6; }
+.seg-time-edit-icon,
+.seg-speaker-edit-icon {
+  font-size: 9px;
+  opacity: 0;
+  transition: opacity var(--d-2) var(--ease-out);
+  margin-left: 2px;
+}
+.transcript-seg:hover .seg-time-edit-icon,
+.transcript-seg:hover .seg-speaker-edit-icon { opacity: 0.7; }
+
+.seg-actions {
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--d-2) var(--ease-out);
+}
+.transcript-seg:hover .seg-actions,
+.transcript-seg.active .seg-actions { opacity: 1; }
+
+.seg-btn,
+.seg-action-btn {
+  width: 24px; height: 24px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--c-noir-mute);
+  border: 0;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background-color var(--d-2) var(--ease-out), color var(--d-2) var(--ease-out);
+}
+.seg-btn:hover,
+.seg-action-btn:hover { background: var(--c-noir-line); color: var(--c-noir-text); }
+
 .seg-text {
+  flex: 1;
   font-size: var(--fs-14);
   color: var(--c-noir-text);
-  line-height: 1.5;
+  line-height: 1.45;
   word-break: break-word;
+  min-width: 0;
 }
 .seg-text[contenteditable="true"] {
   outline: none;
@@ -181,27 +249,23 @@
   margin: -2px -6px;
 }
 
-.seg-actions {
+.seg-speaker {
   display: inline-flex;
-  flex-direction: column;
-  gap: 4px;
-  opacity: 0;
-  transition: opacity var(--d-2) var(--ease-out);
-}
-.transcript-seg:hover .seg-actions,
-.transcript-seg.active .seg-actions { opacity: 1; }
-
-.seg-action-btn {
-  width: 24px; height: 24px;
-  display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 6px;
+  align-items: center;
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-family: var(--f-mono);
+  letter-spacing: 0.04em;
   background: transparent;
   color: var(--c-noir-mute);
-  border: 0;
+  border: 1px solid var(--c-noir-line);
   cursor: pointer;
-  transition: background-color var(--d-2) var(--ease-out), color var(--d-2) var(--ease-out);
+  transition: background-color var(--d-2) var(--ease-out);
 }
-.seg-action-btn:hover { background: var(--c-noir-line); color: var(--c-noir-text); }
+.seg-speaker:hover { background: var(--c-noir-line); }
+.transcript-seg.active .seg-speaker { background: rgba(255,255,255,0.06); }
 
 .seg-speaker-pill {
   display: inline-block;
@@ -262,13 +326,38 @@
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding: 5%;
+  padding: 4% 5% 6%;
 }
+.subtitle-overlay.pos-top    { align-items: flex-start; padding-top: 6%; padding-bottom: 4%; }
+.subtitle-overlay.pos-center { align-items: center; }
+.subtitle-overlay.pos-bottom { align-items: flex-end; }
 .subtitle-container {
   pointer-events: auto;
   text-align: center;
-  max-width: 90%;
+  max-width: 92%;
   user-select: none;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  align-items: center;
+}
+.subtitle-line {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: baseline;
+  gap: 0.32em 0.42em;
+  line-height: 1.18;
+  padding: 2px 4px;
+  cursor: grab;
+  max-width: 100%;
+  word-break: keep-all;
+  overflow-wrap: normal;
+}
+.subtitle-line.dragging { cursor: grabbing; opacity: 0.92; }
+.subtitle-line .sub-word {
+  display: inline-block;
+  white-space: nowrap;
 }
 
 /* ── Timeline panel ──────────────────────────────────────────────────── */
@@ -285,20 +374,33 @@
 
 .timeline-resize-handle {
   position: absolute;
-  top: -8px; left: 0; right: 0;
-  height: 16px;
+  /* Sit INSIDE the panel — the parent has overflow:hidden, so a negative
+     top:-8px got clipped and made the handle invisible / unclickable.
+     Tall enough hit-zone (12px) + padding-top on the toolbar keeps the
+     grip from overlapping the play buttons. */
+  top: 0; left: 0; right: 0;
+  height: 12px;
   cursor: ns-resize;
   display: flex; align-items: center; justify-content: center;
   z-index: 5;
+  /* Visual affordance — a faint top hairline so the user can see the
+     drag area without hovering. */
+  background: linear-gradient(to bottom, rgba(255,255,255,0.02), transparent);
 }
+.timeline-resize-handle.is-resizing { background: rgba(190, 255, 0, 0.06); }
 .timeline-resize-handle-grip {
-  width: 48px; height: 3px;
+  width: 56px; height: 3px;
   border-radius: 999px;
   background: var(--c-noir-mute);
-  opacity: 0.4;
-  transition: opacity var(--d-2) var(--ease-out);
+  opacity: 0.5;
+  transition: opacity var(--d-2) var(--ease-out), width var(--d-2) var(--ease-out);
 }
-.timeline-resize-handle:hover .timeline-resize-handle-grip { opacity: 0.8; }
+.timeline-resize-handle:hover .timeline-resize-handle-grip { opacity: 1; width: 72px; }
+.timeline-resize-handle.is-resizing .timeline-resize-handle-grip { opacity: 1; width: 80px; background: var(--c-lime); }
+
+/* Pad the toolbar so the resize-handle hit-zone doesn't overlap the
+   play / restart buttons. */
+.timeline-toolbar { padding-top: calc(var(--s-3) + 6px); }
 
 .timeline-toolbar {
   display: grid;
@@ -395,6 +497,35 @@
   font-family: var(--f-mono);
   font-size: 10px;
   color: var(--c-noir-mute);
+  cursor: pointer;
+}
+.timeline-ruler .ruler-tick {
+  position: absolute;
+  top: 18px;
+  width: 1px;
+  height: 6px;
+  background: var(--c-noir-mute);
+  opacity: 0.5;
+  pointer-events: none;
+}
+.timeline-ruler .ruler-tick.major {
+  top: 12px;
+  height: 12px;
+  opacity: 0.85;
+  background: var(--c-noir-text);
+}
+.timeline-ruler .ruler-label {
+  position: absolute;
+  top: 2px;
+  transform: translateX(-50%);
+  padding-inline: 2px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  color: var(--c-noir-mute);
+  letter-spacing: 0.02em;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
 }
 .timeline-track-area {
   position: relative;
@@ -404,6 +535,13 @@
   position: relative;
   min-height: 240px;
 }
+.timeline-row-line {
+  position: absolute;
+  left: 0; right: 0;
+  height: 1px;
+  background: var(--c-noir-line-2);
+  pointer-events: none;
+}
 
 .timeline-segment {
   position: absolute;
@@ -411,7 +549,7 @@
   background: var(--c-lime);
   color: var(--c-ink);
   border-radius: 6px;
-  padding: 0 8px;
+  padding: 0 12px;
   display: flex; align-items: center;
   font-family: var(--f-mono);
   font-size: var(--fs-12);
@@ -421,15 +559,23 @@
   overflow: hidden;
   text-overflow: ellipsis;
   box-shadow: var(--sh-1), inset 0 0 0 1px rgba(36, 31, 33, 0.18);
-  transition: transform var(--d-1), filter var(--d-1);
+  transition: filter var(--d-1), box-shadow var(--d-1);
+  user-select: none;
 }
-.timeline-segment:hover { filter: brightness(1.05); }
+.timeline-segment:hover { filter: brightness(1.06); }
 .timeline-segment.selected {
   outline: 2px solid var(--c-paper);
   outline-offset: 1px;
   z-index: 3;
+  box-shadow: var(--sh-2), inset 0 0 0 1px rgba(36, 31, 33, 0.24);
 }
-.timeline-segment.dragging-body { cursor: grabbing; opacity: 0.86; transform: translateY(-1px); }
+.timeline-segment.dragging-body {
+  cursor: grabbing;
+  opacity: 0.86;
+  transform: translateY(-1px);
+  filter: brightness(1.1);
+  z-index: 4;
+}
 
 .timeline-fx-track {
   position: relative;
@@ -452,24 +598,74 @@
 }
 .fx-block.dragging { opacity: 0.7; }
 
-#timelinePlayhead {
+#timelinePlayhead,
+.timeline-playhead {
   position: absolute;
   top: 0; bottom: 0;
-  width: 2px;
-  background: var(--c-paper);
+  width: 0;
   pointer-events: none;
   z-index: 6;
-  box-shadow: 0 0 12px rgba(255,255,255,0.4);
 }
-#timelinePlayhead::before {
+.timeline-playhead .playhead-line,
+#timelinePlayhead .playhead-line {
+  position: absolute;
+  top: 0; bottom: 0;
+  left: -1px;
+  width: 2px;
+  background: var(--c-paper);
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.4);
+  pointer-events: none;
+}
+.timeline-playhead .playhead-handle,
+#timelinePlayhead .playhead-handle {
+  position: absolute;
+  top: -2px;
+  left: -8px;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--c-paper);
+  box-shadow:
+    0 0 0 2px var(--c-noir-bg),
+    0 2px 6px rgba(0, 0, 0, 0.45);
+  pointer-events: auto;
+  cursor: ew-resize;
+  z-index: 7;
+}
+.timeline-playhead .playhead-handle:hover,
+#timelinePlayhead .playhead-handle:hover {
+  transform: scale(1.12);
+}
+.timeline-playhead .playhead-handle::after,
+#timelinePlayhead .playhead-handle::after {
+  /* Bigger invisible hit-zone so the indicator is easy to grab */
   content: "";
   position: absolute;
-  top: 0; left: -6px;
-  width: 14px; height: 14px;
-  background: var(--c-paper);
-  border-radius: 999px;
-  box-shadow: 0 0 0 2px var(--c-noir-bg);
+  inset: -6px;
 }
+
+/* Segment edge handles — make them visible & draggable */
+.seg-handle {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  background: rgba(0, 0, 0, 0.0);
+  z-index: 2;
+}
+.seg-handle-left  { left: 0;  border-left:  2px solid rgba(0, 0, 0, 0.35); border-radius: 6px 0 0 6px; }
+.seg-handle-right { right: 0; border-right: 2px solid rgba(0, 0, 0, 0.35); border-radius: 0 6px 6px 0; }
+.timeline-segment:hover .seg-handle { background: rgba(0, 0, 0, 0.18); }
+
+.fx-handle {
+  position: absolute;
+  top: 0; bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  z-index: 2;
+}
+.fx-handle-left  { left: 0; }
+.fx-handle-right { right: 0; }
 
 /* ============================================================================
  * Chunk 3/3 — Style panel, dialogs, modals.
@@ -534,7 +730,7 @@
 .editor .input,
 .editor .select,
 .editor .textarea {
-  background: var(--c-noir-surf-2);
+  background-color: var(--c-noir-surf-2);
   color: var(--c-noir-text);
   box-shadow: inset 0 0 0 1px var(--c-noir-line);
 }
@@ -542,11 +738,24 @@
   box-shadow: inset 0 0 0 1px var(--c-noir-text);
 }
 .editor .input:focus, .editor .select:focus, .editor .textarea:focus {
-  background: var(--c-noir-bg);
+  background-color: var(--c-noir-bg);
   box-shadow: inset 0 0 0 1.5px var(--c-lime), 0 0 0 4px rgba(233, 231, 120, 0.12);
 }
 .editor .select {
+  /* Override the light-mode caret with a lime version. Use background-image
+     (longhand) so we don't clobber background-repeat / background-position
+     set by forms.css — that was causing the SVG caret to tile across the
+     field like a striped pattern. */
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'><path d='M2 4l4 4 4-4' fill='none' stroke='%23E9E778' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 14px center;
+}
+/* Native dropdown options can't be themed cross-browser, but at least the
+   closed-state field text uses the system UI font so display fonts like
+   Bangers / Press Start 2P don't look broken at small sizes. */
+.editor #fontFamily {
+  font-family: var(--f-display);
+  letter-spacing: -0.01em;
 }
 
 /* Editor scope: tags & icon-btns adapt */
@@ -612,17 +821,47 @@
   gap: var(--s-2);
 }
 .fx-preset-card {
+  position: relative;
   display: flex; flex-direction: column;
   gap: 4px;
-  padding: var(--s-3);
+  padding: var(--s-3) var(--s-3);
   background: var(--c-noir-surf-2);
   border-radius: var(--r-4);
   cursor: grab;
   box-shadow: inset 0 0 0 1px var(--c-noir-line);
-  transition: transform var(--d-2) var(--ease-out), box-shadow var(--d-2) var(--ease-out);
+  transition:
+    transform var(--d-2) var(--ease-out),
+    box-shadow var(--d-2) var(--ease-out),
+    background-color var(--d-2) var(--ease-out);
+  /* Tiny grab affordance — a discrete dotted-grip in the top-right
+     corner so the user reads the card as draggable without us having to
+     spell it out in copy. */
 }
-.fx-preset-card:hover { transform: translateY(-1px); box-shadow: inset 0 0 0 1px var(--c-lime); }
-.fx-preset-name { font-size: var(--fs-13); color: var(--c-noir-text); font-weight: 500; }
+.fx-preset-card::after {
+  content: "";
+  position: absolute;
+  top: 10px; right: 10px;
+  width: 10px; height: 10px;
+  background-image: radial-gradient(circle, var(--c-noir-mute) 1px, transparent 1px);
+  background-size: 4px 4px;
+  opacity: 0.55;
+  pointer-events: none;
+  transition: opacity var(--d-2) var(--ease-out);
+}
+.fx-preset-card:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 0 0 0 1px var(--c-lime), 0 4px 14px rgba(0,0,0,0.18);
+  background: var(--c-noir-bg);
+}
+.fx-preset-card:hover::after { opacity: 1; }
+.fx-preset-card:active,
+.fx-preset-card.dragging {
+  cursor: grabbing;
+  transform: translateY(0) scale(0.98);
+  box-shadow: inset 0 0 0 1px var(--c-lime);
+}
+.fx-preset-info { display: flex; flex-direction: column; gap: 2px; }
+.fx-preset-name { font-size: var(--fs-13); color: var(--c-noir-text); font-weight: 600; letter-spacing: -0.01em; }
 .fx-preset-desc { font-size: var(--fs-12); color: var(--c-noir-mute); }
 
 .fx-settings-panel {
@@ -645,7 +884,94 @@
 
 /* Speaker styles panel */
 .speaker-styles-panel {
-  display: flex; flex-direction: column; gap: var(--s-2);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.speaker-style-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--c-noir-surf-2);
+  border-radius: var(--r-4);
+  box-shadow: inset 0 0 0 1px var(--c-noir-line);
+}
+.speaker-style-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid currentColor;
+}
+.speaker-style-name {
+  font-size: var(--fs-13);
+  color: var(--c-noir-text);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.speaker-color-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  background: var(--c-noir-bg);
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--c-noir-line);
+}
+.speaker-color-label {
+  font-family: var(--f-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--c-noir-mute);
+  padding-left: 4px;
+}
+.speaker-color-input,
+input[type="color"].speaker-color-input,
+input[type="color"].speaker-stroke-input {
+  width: 22px; height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 1px var(--c-noir-line);
+}
+input[type="color"].speaker-color-input::-webkit-color-swatch-wrapper,
+input[type="color"].speaker-stroke-input::-webkit-color-swatch-wrapper { padding: 2px; }
+input[type="color"].speaker-color-input::-webkit-color-swatch,
+input[type="color"].speaker-stroke-input::-webkit-color-swatch { border: 0; border-radius: 999px; }
+.speaker-stroke-input.active-override {
+  box-shadow: inset 0 0 0 2px var(--c-lime);
+}
+.speaker-stroke-clear {
+  width: 18px; height: 18px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 999px;
+  border: 0;
+  background: var(--c-noir-line);
+  color: var(--c-noir-mute);
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  transition: background-color var(--d-2) var(--ease-out), color var(--d-2) var(--ease-out);
+}
+.speaker-stroke-clear:hover { background: var(--c-noir-text); color: var(--c-noir-bg); }
+.speaker-stroke-clear.hidden { display: none; }
+.speaker-style-hint {
+  margin-left: 6px;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 500;
 }
 
 /* ── Segment dialogs (Add / Split) ───────────────────────────────────── */
@@ -766,12 +1092,17 @@
 }
 .modal-meta .modal-pct { font-family: var(--f-mono); }
 .phase-dots { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: var(--s-3); }
-.phase-dots span {
+.phase-dots span,
+.phase-dots .phase-dot {
   height: 6px; flex: 1; border-radius: 999px;
   background: var(--c-noir-line);
+  min-width: 24px;
+  transition: background-color var(--d-2) var(--ease-out);
 }
-.phase-dots span.is-done { background: var(--c-lime); }
-.phase-dots span.is-active { background: var(--c-paper); }
+.phase-dots span.is-done,
+.phase-dots .phase-dot.done { background: var(--c-lime); }
+.phase-dots span.is-active,
+.phase-dots .phase-dot.active { background: var(--c-paper); }
 .log-body {
   font-family: var(--f-mono);
   font-size: var(--fs-12);

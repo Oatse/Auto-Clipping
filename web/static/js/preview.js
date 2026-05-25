@@ -380,33 +380,56 @@ function setupPreviewControls() {
     }
   });
 
+  // Play / Pause button has structured markup (SVG icon + <span> label).
+  // Setting `previewPlayBtn.textContent = '⏸ Pause'` previously WIPED the
+  // SVG and replaced the entire button with a text node, after which the
+  // play/pause UI looked stuck (no icon, no clear visual state). Update
+  // only the label span and only swap the SVG `<path>` for the play /
+  // pause glyph so the button keeps its layout.
+  const PLAY_PATH  = 'M3 2v8l7-4z';
+  const PAUSE_PATH = 'M3 2h2v8H3zM7 2h2v8H7z';
+
+  function setPlayBtnState(isPlaying) {
+    if (!previewPlayBtn) return;
+    const labelEl = previewPlayBtn.querySelector('span');
+    const pathEl  = previewPlayBtn.querySelector('svg path');
+    if (labelEl) labelEl.textContent = isPlaying ? 'Pause' : 'Play';
+    if (pathEl)  pathEl.setAttribute('d', isPlaying ? PAUSE_PATH : PLAY_PATH);
+  }
+
   previewPlayBtn.addEventListener('click', () => {
     if (previewVideo.paused) {
-      previewVideo.play();
-      previewPlayBtn.textContent = '⏸ Pause';
+      // play() returns a promise — if it rejects (autoplay block, codec
+      // issue) we want the button to reflect the actual paused state
+      // instead of going out of sync.
+      const p = previewVideo.play();
+      if (p && typeof p.catch === 'function') {
+        p.catch(() => setPlayBtnState(false));
+      }
+      setPlayBtnState(true);
     } else {
       previewVideo.pause();
-      previewPlayBtn.textContent = '▶ Play';
+      setPlayBtnState(false);
     }
   });
 
   previewRestartBtn.addEventListener('click', () => {
     previewVideo.currentTime = 0;
-    previewVideo.play();
-    previewPlayBtn.textContent = '⏸ Pause';
+    const p = previewVideo.play();
+    if (p && typeof p.catch === 'function') p.catch(() => setPlayBtnState(false));
+    setPlayBtnState(true);
   });
 
   previewVideo.addEventListener('ended', () => {
-    previewPlayBtn.textContent = '▶ Play';
+    setPlayBtnState(false);
     subtitleContainer.innerHTML = '';
   });
 
-  previewVideo.addEventListener('pause', () => {
-    previewPlayBtn.textContent = '▶ Play';
-  });
-  previewVideo.addEventListener('play', () => {
-    previewPlayBtn.textContent = '⏸ Pause';
-  });
+  // The native `pause` / `play` events are the source of truth — bind the
+  // button label to them so external triggers (keyboard shortcut, ended,
+  // programmatic pause) keep the icon in sync.
+  previewVideo.addEventListener('pause', () => setPlayBtnState(false));
+  previewVideo.addEventListener('play',  () => setPlayBtnState(true));
 
   if (backToUploadBtn) {
     backToUploadBtn.addEventListener('click', () => {

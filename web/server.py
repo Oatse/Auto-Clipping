@@ -360,6 +360,43 @@ async def get_elevenlabs_quota():
     return {"keys": list(results)}
 
 
+# ─── Gemini Quota ────────────────────────────────────────────────────────────
+
+@app.get("/api/gemini/quota")
+async def get_gemini_quota():
+    """Check Gemini API key validity for every configured key."""
+    if not config.GEMINI_API_KEYS:
+        raise HTTPException(status_code=400, detail="No GEMINI_API_KEY configured")
+
+    import asyncio
+    import httpx
+
+    async def _check_one(api_key: str, key_idx: int) -> dict:
+        key_label = f"Key #{key_idx + 1}"
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    "https://generativelanguage.googleapis.com/v1beta/models",
+                    params={"key": api_key, "pageSize": 1},
+                )
+            if resp.status_code == 200:
+                return {"key_label": key_label, "status": "active"}
+            elif resp.status_code == 429:
+                return {"key_label": key_label, "status": "rate_limited"}
+            elif resp.status_code in (400, 403):
+                return {"key_label": key_label, "status": "invalid"}
+            else:
+                return {"key_label": key_label, "status": "error", "error": f"HTTP {resp.status_code}"}
+        except httpx.RequestError as exc:
+            return {"key_label": key_label, "status": "error", "error": str(exc)}
+
+    results = await asyncio.gather(*[
+        _check_one(key, idx)
+        for idx, key in enumerate(config.GEMINI_API_KEYS)
+    ])
+    return {"keys": list(results)}
+
+
 # ─── Job CRUD ─────────────────────────────────────────────────────────────────
 
 @app.get("/api/jobs")

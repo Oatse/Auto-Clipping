@@ -38,11 +38,15 @@ export function setupJobs() {
 export async function loadSystemInfo() {
   try {
     const data = await apiFetch('/api/system');
-    // The floating-pill nav status is owned by nav.js (it renders the
-    // clickable "All systems online" pill + popup). Older legacy markup
-    // exposed `.status-dot` / `.status-text` on this same element — we
-    // explicitly skip touching them here so we don't fight nav.js for
-    // the pill text.
+    // The floating-pill nav status (`#systemStatus .status-text`) is owned
+    // by nav.js — it renders "All systems online" / "Partial: …" etc.
+    // We must NOT touch that node from here, otherwise nav.js's text gets
+    // silently overwritten with "Ready · GPU · Torch …" a few seconds
+    // after page load. The in-page legacy `.status-dot` / `.status-text`
+    // markup (outside the nav) is what we actually want to update; scope
+    // the lookup to exclude any node living inside the nav pill.
+    const dot  = document.querySelector('.status-dot:not(#systemStatus *)');
+    const text = document.querySelector('.status-text:not(#systemStatus *)');
     const ffmpegOk     = !!data.packages.ffmpeg;
     const elevenlabsOk = !!data.packages.elevenlabs;
     const geminiOk     = !!(data.env && data.env.gemini_keys_set);
@@ -50,22 +54,22 @@ export async function loadSystemInfo() {
     const allOk        = ffmpegOk && elevenlabsOk && geminiOk;
     if (dot) dot.className = 'status-dot ' + (allOk ? 'ok' : 'warn');
     if (text) {
-    if (allOk) {
-      const gpuLabel = data.cuda_available
-        ? (data.gpu_name || 'GPU')
-        : 'CPU';
-      const torchPart = data.torch_version
-        ? ` · Torch ${data.torch_version}`
-        : '';
-      text.textContent = `Ready · ${gpuLabel}${torchPart}`;
-    } else if (!elevenlabsOk) {
-      text.textContent = 'Setup required — ELEVENLABS_API_KEY missing';
-    } else if (!geminiOk) {
-      text.textContent = 'Setup required — GEMINI_API_KEY missing (translate disabled)';
-    } else {
-      text.textContent = 'Setup required — FFmpeg missing';
+      if (allOk) {
+        const gpuLabel = data.cuda_available
+          ? (data.gpu_name || 'GPU')
+          : 'CPU';
+        const torchPart = data.torch_version
+          ? ` · Torch ${data.torch_version}`
+          : '';
+        text.textContent = `Ready · ${gpuLabel}${torchPart}`;
+      } else if (!elevenlabsOk) {
+        text.textContent = 'Setup required — ELEVENLABS_API_KEY missing';
+      } else if (!geminiOk) {
+        text.textContent = 'Setup required — GEMINI_API_KEY missing (translate disabled)';
+      } else {
+        text.textContent = 'Setup required — FFmpeg missing';
+      }
     }
-    } /* end if(text) */
 
     // System status grid surfaces the same backend env signals so the
     // user sees Gemini + DeepL availability at a glance.  DeepL is
@@ -215,24 +219,39 @@ function renderJobs(jobs) {
           Details
         </button>
       </div>` : '';
+    // Thumbnail: stream the first frame from the existing /video endpoint.
+    // preload="metadata" pulls just enough to render the poster, no audio.
+    const thumbHtml = `
+      <div class="job-card__thumb">
+        <video class="job-card__thumb-video"
+               src="/api/jobs/${job.id}/video#t=0.5"
+               preload="metadata"
+               muted
+               playsinline
+               disablepictureinpicture
+               aria-hidden="true"></video>
+        <span class="job-card__thumb-badge badge badge-${job.status}">${job.status}</span>
+      </div>`;
     return `
       <div class="job-card status-${job.status}" data-job-id="${job.id}">
-        <div class="job-top">
-          <div class="job-name" title="${job.filename}">${job.filename}</div>
-          <span class="job-badge badge-${job.status}">${job.status}</span>
-        </div>
-        <div class="job-meta">
-          <span>🌐 ${job.target_language.toUpperCase()}</span>
-          <span>📁 ${job.id.slice(0,8)}</span>
-          <span>${timeAgo(job.created_at)}${elapsed}</span>
-        </div>
-        <div class="job-progress-wrap">
-          <div class="job-progress-bar-bg">
-            <div class="job-progress-bar ${barClass}" style="width:${job.progress_pct}%"></div>
+        ${thumbHtml}
+        <div class="job-card__info">
+          <div class="job-top">
+            <div class="job-name" title="${job.filename}">${job.filename}</div>
           </div>
-          <span class="job-progress-pct">${Math.round(job.progress_pct)}%</span>
+          <div class="job-meta">
+            <span>🌐 ${job.target_language.toUpperCase()}</span>
+            <span>📁 ${job.id.slice(0,8)}</span>
+            <span>${timeAgo(job.created_at)}${elapsed}</span>
+          </div>
+          <div class="job-progress-wrap">
+            <div class="job-progress-bar-bg">
+              <div class="job-progress-bar ${barClass}" style="width:${job.progress_pct}%"></div>
+            </div>
+            <span class="job-progress-pct">${Math.round(job.progress_pct)}%</span>
+          </div>
+          ${actionsBtnHtml}
         </div>
-        ${actionsBtnHtml}
       </div>`;
   }).join('');
 
@@ -344,8 +363,12 @@ function updateModalUI(job) {
   modalPct.textContent = `${Math.round(job.progress_pct)}%`;
 
   modalProgressBar.style.width = `${job.progress_pct}%`;
-  modalProgressBar.className = 'progress-bar' +
-    (job.status === 'completed' ? ' done' : job.status === 'failed' ? ' failed' : '');
+  // Preserve the layout class (`modal-progress-bar`) and only toggle the
+  // status modifier. Previously this overwrote className entirely with
+  // `progress-bar`, which had no CSS rule, so the bar lost its lime fill.
+  modalProgressBar.classList.remove('done', 'failed');
+  if (job.status === 'completed') modalProgressBar.classList.add('done');
+  else if (job.status === 'failed') modalProgressBar.classList.add('failed');
 
   for (let i = 1; i <= 7; i++) {
     const dot = document.getElementById(`dot-${i}`);

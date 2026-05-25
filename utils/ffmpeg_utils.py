@@ -36,8 +36,79 @@ def _resolve_binary(env_path: str, fallback: str) -> str:
     return fallback
 
 
-FFMPEG_BIN: str = _resolve_binary(config.FFMPEG_PATH, "ffmpeg")
-FFPROBE_BIN: str = _resolve_binary(config.FFPROBE_PATH, "ffprobe")
+# ── Lazy binary resolution ──────────────────────────────────────────────────
+# Resolution must NOT happen at import time.  Several modules import this
+# helper just for its run_ffmpeg / FFmpegError exports (e.g. tests, /api/system
+# health probes) on systems without FFmpeg installed; raising at import time
+# would crash the whole app instead of letting the missing-binary error
+# surface where ffmpeg is actually invoked.
+_FFMPEG_BIN_CACHE: str | None = None
+_FFPROBE_BIN_CACHE: str | None = None
+
+
+def _ffmpeg_bin() -> str:
+    global _FFMPEG_BIN_CACHE
+    if _FFMPEG_BIN_CACHE is None:
+        _FFMPEG_BIN_CACHE = _resolve_binary(config.FFMPEG_PATH, "ffmpeg")
+    return _FFMPEG_BIN_CACHE
+
+
+def _ffprobe_bin() -> str:
+    global _FFPROBE_BIN_CACHE
+    if _FFPROBE_BIN_CACHE is None:
+        _FFPROBE_BIN_CACHE = _resolve_binary(config.FFPROBE_PATH, "ffprobe")
+    return _FFPROBE_BIN_CACHE
+
+
+class _LazyBin:
+    """Module-level proxy so ``FFMPEG_BIN`` / ``FFPROBE_BIN`` keep working
+    as drop-in strings without resolving the real binary path at import.
+
+    Only the operations actually used downstream (``str()``, ``+``,
+    ``f-string`` interpolation, equality) are forwarded.  Any consumer that
+    needs the resolved path can also call ``_ffmpeg_bin()`` directly.
+    """
+
+    __slots__ = ("_resolver",)
+
+    def __init__(self, resolver):
+        self._resolver = resolver
+
+    def _value(self) -> str:
+        return self._resolver()
+
+    def __str__(self) -> str:
+        return self._value()
+
+    def __repr__(self) -> str:  # pragma: no cover - debug aid
+        try:
+            return repr(self._value())
+        except EnvironmentError:
+            return "<unresolved binary>"
+
+    def __format__(self, spec: str) -> str:
+        return format(self._value(), spec)
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, _LazyBin):
+            other = other._value()
+        return self._value() == other
+
+    def __hash__(self) -> int:
+        return hash(self._value())
+
+    def __add__(self, other: str) -> str:
+        return self._value() + other
+
+    def __radd__(self, other: str) -> str:
+        return other + self._value()
+
+    def __fspath__(self) -> str:
+        return self._value()
+
+
+FFMPEG_BIN = _LazyBin(_ffmpeg_bin)
+FFPROBE_BIN = _LazyBin(_ffprobe_bin)
 
 
 async def run_ffmpeg(args: Sequence[str], *, log_cmd: bool = True) -> None:

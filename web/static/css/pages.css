@@ -77,22 +77,19 @@
 }
 
 /* ── Workbench: stacked layout (form above, recent below) ─────────────
-   Previously a side-by-side grid. Now stacks vertically across all
-   workspace pages so each surface gets the full content width and
-   the page reads top-to-bottom. Cards use a flex column with a
-   sensible max-width so the layout stays readable on ultra-wide
-   monitors. */
+   Each surface (Create-job, Recent, History) gets the FULL container
+   width so they line up with the hero and the rest of the page. No
+   artificial cap — the parent .container--wide already enforces a
+   sensible upper bound for ultra-wide monitors. */
 .workbench {
   display: flex;
   flex-direction: column;
   gap: var(--s-8);
   width: 100%;
-  max-width: 1080px;
   margin-inline: auto;
   align-items: stretch;
 }
-.workbench > * { width: 100%; min-width: 0; }
-.workbench > .surface { max-width: 100%; }
+.workbench > * { width: 100%; min-width: 0; max-width: 100%; }
 
 /* ── Stepper (process indicator) ─────────────────────────────────────── */
 .stepper {
