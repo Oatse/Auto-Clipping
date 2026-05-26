@@ -59,6 +59,24 @@ from web.services.upload_helpers import (
     safe_upload_name as _safe_upload_name,
     save_upload_streaming as _save_upload_streaming,
 )
+from web.services import job_state as _job_state
+# Re-export the shared workspace state under their legacy names so
+# every existing call site in this module keeps working unchanged.
+# The router-extraction commits introduce typed imports from
+# ``web.services.job_state`` directly; the aliases here cover the
+# transition window.
+_jobs = _job_state.jobs
+_job_tasks = _job_state.job_tasks
+_cf_jobs = _job_state.cf_jobs
+_cf_tasks = _job_state.cf_tasks
+_short_jobs = _job_state.short_jobs
+_short_tasks = _job_state.short_tasks
+_all_in_jobs = _job_state.all_in_jobs
+_all_in_tasks = _job_state.all_in_tasks
+UPLOADS_DIR = _job_state.UPLOADS_DIR
+OUTPUT_ROOT = _job_state.OUTPUT_ROOT
+CLIP_FINDER_DIR = _job_state.CLIP_FINDER_DIR
+ALL_IN_DIR = _job_state.ALL_IN_DIR
 
 # ─── App Setup ────────────────────────────────────────────────────────────────
 
@@ -94,12 +112,6 @@ templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 # it as an argument (keeps web/routes/pages.py free of filesystem I/O
 # at import time).
 app.include_router(build_page_router(templates))
-
-UPLOADS_DIR = Path("./output/uploads")
-UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-
-OUTPUT_ROOT = Path("./output")
-OUTPUT_ROOT.mkdir(parents=True, exist_ok=True)
 
 
 def _is_job_id(name: str) -> bool:
@@ -194,9 +206,9 @@ from web.services.transcript_sync import (  # noqa: E402
 )
 
 
-# In-memory job store (replace with Redis/DB for production)
-_jobs: dict[str, Job] = {}
-_job_tasks: dict[str, asyncio.Task] = {}
+# In-memory job store lives in ``web.services.job_state``. The names
+# ``_jobs`` and ``_job_tasks`` are aliased near the top of this module
+# so existing call sites keep working unchanged.
 
 
 def _track_job_task(job_id: str, task: asyncio.Task) -> None:
@@ -711,9 +723,8 @@ def _get_job_or_404(job_id: str) -> Job:
 # ═══════════════════════════════════════════════════════════════════════════════
 # CLIP FINDER — YouTube Clip Detection via yt-dlp + Gemini AI
 # ═══════════════════════════════════════════════════════════════════════════════
-
-CLIP_FINDER_DIR = Path("./output/clip_finder")
-CLIP_FINDER_DIR.mkdir(parents=True, exist_ok=True)
+# CLIP_FINDER_DIR is aliased from web.services.job_state at the top of
+# this module. The directory is created at job_state import time.
 
 
 class ClipFinderJob(BaseModel):
@@ -1391,9 +1402,8 @@ def _find_autosub_for_clip(clip_path: Path) -> Path | None:
 
 # ─── Short Maker ─────────────────────────────────────────────────────────────
 
-# In-memory store for short maker jobs
-_short_jobs: dict[str, dict] = {}
-_short_tasks: dict[str, asyncio.Task] = {}
+# Short Maker job state lives in web.services.job_state — aliased near
+# the top of this module as _short_jobs / _short_tasks.
 
 SHORTS_OUTPUT_DIR = Path("./output/shorts")
 SHORTS_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -1665,11 +1675,9 @@ from web.services.all_in.runner import (  # noqa: E402
 )
 from web.services.all_in.presets import list_preset_names  # noqa: E402
 
-ALL_IN_DIR = Path("./output/all_in")
-ALL_IN_DIR.mkdir(parents=True, exist_ok=True)
-
-_all_in_jobs: dict[str, AllInJob] = {}
-_all_in_tasks: dict[str, asyncio.Task] = {}
+# ALL_IN_DIR + _all_in_jobs / _all_in_tasks are aliased from
+# web.services.job_state at the top of this module. Directory creation
+# happens there at import time.
 
 
 def _persist_all_in_job(job: AllInJob) -> None:
