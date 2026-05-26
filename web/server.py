@@ -52,6 +52,8 @@ from pydantic import BaseModel
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
 
+from web.routes.system import router as system_router
+
 # ─── App Setup ────────────────────────────────────────────────────────────────
 
 app = FastAPI(
@@ -66,6 +68,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Mount workspace-scoped routers. Each router lives in web/routes/* and
+# owns its own URL prefix; ``web/server.py`` only handles wiring,
+# template responses, and Job lifecycle that pre-dates the split.
+app.include_router(system_router)
 
 # Serve static frontend files
 STATIC_DIR = Path(__file__).parent / "static"
@@ -262,139 +269,7 @@ def _track_job_task(job_id: str, task: asyncio.Task) -> None:
 
 
 # ─── System Info ──────────────────────────────────────────────────────────────
-
-@app.get("/api/system")
-async def get_system_info():
-    if _HAS_TORCH and torch is not None:
-        cuda_available = torch.cuda.is_available()
-        gpu_name = torch.cuda.get_device_name(0) if cuda_available else None
-        torch_version = torch.__version__
-    else:
-        cuda_available = False
-        gpu_name = None
-        torch_version = None
-    return {
-        "cuda_available": cuda_available,
-        "gpu_name": gpu_name,
-        "torch_version": torch_version,
-        "python_version": sys.version.split()[0],
-        "packages": {
-            "elevenlabs": bool(config.ELEVENLABS_API_KEYS),
-            "pycaps": _check_package("pycaps"),
-            "ffmpeg": _check_ffmpeg(),
-        },
-        "env": {
-            "elevenlabs_key_set": bool(config.ELEVENLABS_API_KEY),
-            "gemini_keys_set": bool(config.GEMINI_API_KEYS),
-            "deepl_key_set": bool(getattr(config, "DEEPL_API_KEY", "")),
-        },
-        # Always ElevenLabs — kept as a single-entry dict so existing UI
-        # code that expects a model dropdown still works (it will simply
-        # render one option).
-        "stt_engines": {
-            "elevenlabs": {
-                "label": "ElevenLabs Speech-to-Text",
-                "description": "Cloud-based STT — auto-translate via Gemini to target language",
-                "type": "elevenlabs",
-            },
-        },
-    }
-
-
-def _check_package(name: str) -> bool:
-    try:
-        __import__(name)
-        return True
-    except ImportError:
-        return False
-
-
-def _check_ffmpeg() -> bool:
-    if shutil.which("ffmpeg") is not None:
-        return True
-    try:
-        ffmpeg_path = getattr(config, "FFMPEG_PATH", None)
-        if ffmpeg_path and Path(ffmpeg_path).is_file():
-            return True
-    except Exception:
-        pass
-    return False
-
-
-# ─── ElevenLabs Quota ────────────────────────────────────────────────────────
-
-@app.get("/api/elevenlabs/quota")
-async def get_elevenlabs_quota():
-    """Fetch ElevenLabs subscription usage for every configured API key."""
-    if not config.ELEVENLABS_API_KEYS:
-        raise HTTPException(status_code=400, detail="No ELEVENLABS_API_KEY configured")
-
-    import asyncio
-    import httpx
-
-    async def _fetch_one(api_key: str, key_idx: int) -> dict:
-        key_label = f"Key #{key_idx + 1}"
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as client:
-                resp = await client.get(
-                    "https://api.elevenlabs.io/v1/user/subscription",
-                    headers={"xi-api-key": api_key},
-                )
-            if resp.status_code != 200:
-                return {"key_label": key_label, "error": f"HTTP {resp.status_code}"}
-            data = resp.json()
-            return {
-                "key_label": key_label,
-                "character_count": data.get("character_count", 0),
-                "character_limit": data.get("character_limit", 0),
-                "tier": data.get("tier", "unknown"),
-                "next_reset_unix": data.get("next_character_count_reset_unix", 0),
-            }
-        except httpx.RequestError as exc:
-            return {"key_label": key_label, "error": str(exc)}
-
-    results = await asyncio.gather(*[
-        _fetch_one(key, idx)
-        for idx, key in enumerate(config.ELEVENLABS_API_KEYS)
-    ])
-    return {"keys": list(results)}
-
-
-# ─── Gemini Quota ────────────────────────────────────────────────────────────
-
-@app.get("/api/gemini/quota")
-async def get_gemini_quota():
-    """Check Gemini API key validity for every configured key."""
-    if not config.GEMINI_API_KEYS:
-        raise HTTPException(status_code=400, detail="No GEMINI_API_KEY configured")
-
-    import asyncio
-    import httpx
-
-    async def _check_one(api_key: str, key_idx: int) -> dict:
-        key_label = f"Key #{key_idx + 1}"
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(
-                    "https://generativelanguage.googleapis.com/v1beta/models",
-                    params={"key": api_key, "pageSize": 1},
-                )
-            if resp.status_code == 200:
-                return {"key_label": key_label, "status": "active"}
-            elif resp.status_code == 429:
-                return {"key_label": key_label, "status": "rate_limited"}
-            elif resp.status_code in (400, 403):
-                return {"key_label": key_label, "status": "invalid"}
-            else:
-                return {"key_label": key_label, "status": "error", "error": f"HTTP {resp.status_code}"}
-        except httpx.RequestError as exc:
-            return {"key_label": key_label, "status": "error", "error": str(exc)}
-
-    results = await asyncio.gather(*[
-        _check_one(key, idx)
-        for idx, key in enumerate(config.GEMINI_API_KEYS)
-    ])
-    return {"keys": list(results)}
+# Implemented in web/routes/system.py — mounted via app.include_router above.
 
 
 # ─── Job CRUD ─────────────────────────────────────────────────────────────────
