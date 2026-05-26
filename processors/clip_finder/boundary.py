@@ -32,37 +32,56 @@ def refine_boundaries(
     signals: Sequence[SignalEvent],
     *,
     min_duration: float = 5.0,
+    transcript: Sequence[dict] | None = None,
+    hook_optimizer_enabled: bool = True,
 ) -> list[Clip]:
     """Return a copy of `clips` with boundaries snapped where useful.
 
     Original Clip objects are NOT mutated. Inner `dead_air_timestamps`
     are also re-derived from silence signals that fall inside the
     refined range so they reflect ground-truth audio rather than LLM guess.
+
+    When ``transcript`` is supplied and ``hook_optimizer_enabled`` is True
+    (default), runs a second pass via ``hook_optimizer.apply`` to shift
+    starts forward to a hook word (question / interjection / name-drop)
+    inside the first 3 s of each Moment. The shift is bounded — see
+    ADR-0003 and ``hook_optimizer.HookPolicy``.
     """
     if not signals:
-        return [_copy(c) for c in clips]
-
-    silences = sorted(
-        (s for s in signals if s.kind == SignalKind.AUDIO_SILENCE),
-        key=lambda s: s.start,
-    )
-    if not silences:
-        return [_copy(c) for c in clips]
-
-    out: list[Clip] = []
-    for clip in clips:
-        new_start, new_end = _snap_range(clip.start, clip.end, silences)
-        # Floor on duration
-        if new_end - new_start < min_duration:
-            new_start, new_end = clip.start, clip.end
-
-        clone = _copy(clip)
-        clone.start = round(new_start, 3)
-        clone.end = round(new_end, 3)
-        clone.dead_air_timestamps = _silences_inside(
-            new_start, new_end, silences
+        out = [_copy(c) for c in clips]
+    else:
+        silences = sorted(
+            (s for s in signals if s.kind == SignalKind.AUDIO_SILENCE),
+            key=lambda s: s.start,
         )
-        out.append(clone)
+        if not silences:
+            out = [_copy(c) for c in clips]
+        else:
+            out = []
+            for clip in clips:
+                new_start, new_end = _snap_range(clip.start, clip.end, silences)
+                # Floor on duration
+                if new_end - new_start < min_duration:
+                    new_start, new_end = clip.start, clip.end
+
+                clone = _copy(clip)
+                clone.start = round(new_start, 3)
+                clone.end = round(new_end, 3)
+                clone.dead_air_timestamps = _silences_inside(
+                    new_start, new_end, silences
+                )
+                out.append(clone)
+
+    if hook_optimizer_enabled and transcript:
+        # Lazy import keeps boundary.py importable in unit tests that
+        # don't pull in the rest of clip_finder.
+        from . import hook_optimizer
+        out = hook_optimizer.apply(
+            out,
+            transcript,
+            policy=hook_optimizer.HookPolicy(min_duration=min_duration),
+        )
+
     return out
 
 

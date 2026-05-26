@@ -42,7 +42,9 @@ from .models import (
     AllInJobStatus,
     AspectRatio,
     CaptionPreset,
+    CutStrategyChoice,
     DetectionMode,
+    ScoringProfileChoice,
 )
 from .stages.cut import CutError, cut_moment, tighten_silence
 from .stages.caption import CaptionError, burn_captions
@@ -91,6 +93,50 @@ def _clips_dir(job: AllInJob, output_root: Path) -> Path:
 
 
 # ─── Per-Clip render loop ────────────────────────────────────────────────────
+
+async def _write_clip_sidecar(
+    *,
+    job: AllInJob,
+    clip: AllInClip,
+    clip_path: Path,
+    log: LogFn,
+) -> None:
+    """Generate + write the Clip Sidecar (CONTEXT.md: "Clip Sidecar").
+
+    Wraps ``processors.clip_finder.clip_sidecar.generate`` with the
+    per-Clip transcript window and the Job's API keys. Failure is
+    contained inside this helper — the caller treats it as best-effort.
+    """
+    # Lazy import — keeps the all_in package importable in tests that
+    # don't pull in the full clip_finder deps.
+    from processors.clip_finder import clip_sidecar as _sidecar
+
+    # Slice the Job's transcript to just the words inside [start, end].
+    window = [
+        seg for seg in (job.transcript or [])
+        if isinstance(seg, dict)
+        and float(seg.get("end", 0.0)) >= clip.start
+        and float(seg.get("start", 0.0)) <= clip.end
+    ]
+
+    api_keys = list(getattr(config, "GEMINI_API_KEYS", []) or [])
+    sidecar = await _sidecar.generate(
+        clip_title=clip.title,
+        clip_reason=clip.reason,
+        clip_duration=max(0.0, clip.end - clip.start),
+        transcript_window=window,
+        api_keys=api_keys,
+        gemini_model=getattr(
+            config, "CLIP_FINDER_GEMINI_MODEL", "gemini-3.5-flash",
+        ),
+        fallback_models=getattr(
+            config, "CLIP_FINDER_GEMINI_FALLBACK_MODELS", [],
+        ),
+        log_fn=log,
+    )
+    written = _sidecar.write(sidecar, clip_path)
+    log(f"Clip {clip.index + 1}: sidecar → {written.name}")
+
 
 async def _render_clip(
     *,
@@ -169,6 +215,21 @@ async def _render_clip(
                 speaker_tinting=job.speaker_tinting,
                 log_fn=log,
             )
+
+        # ── Stage 5: Clip Sidecar (upload-ready metadata) ──────────────
+        # Best-effort: generate a metadata.json next to the finished Clip
+        # so the user can copy-paste title/description/hashtags. Failure
+        # never affects the Clip — generate() returns a default sidecar
+        # on any error path.
+        try:
+            await _write_clip_sidecar(
+                job=job,
+                clip=clip,
+                clip_path=current_path,
+                log=log,
+            )
+        except Exception as exc:  # noqa: BLE001 — sidecar is opportunistic.
+            log(f"Clip {clip.index + 1}: sidecar skipped — {exc}")
 
         # ── Done ───────────────────────────────────────────────────────
         clip.clip_file = str(current_path)
@@ -324,6 +385,19 @@ async def run_all_in_job(
             mode = job.mode
             if isinstance(mode, str):
                 mode = DetectionMode(mode)
+            # ADR-0003: forward Scoring Profile + Cut Strategies through to
+            # the detection stage so candidates are scored correctly and
+            # variants fan out before render. Empty cut_strategies preserves
+            # legacy 1 Moment → 1 Clip behaviour.
+            profile_value = (
+                job.scoring_profile.value
+                if isinstance(job.scoring_profile, ScoringProfileChoice)
+                else str(job.scoring_profile or "vtuber")
+            )
+            strategy_values = [
+                (s.value if isinstance(s, CutStrategyChoice) else str(s))
+                for s in (job.cut_strategies or [])
+            ]
             result = await detect_moments(
                 url=job.url,
                 instructions=job.instructions,
@@ -342,6 +416,13 @@ async def run_all_in_job(
                 ),
                 cache_dir=getattr(config, "CLIP_FINDER_CACHE_DIR", None),
                 ffmpeg_path=getattr(config, "FFMPEG_PATH", "ffmpeg"),
+                scoring_profile=profile_value,
+                cut_strategies=strategy_values,
+                # All In owns the source on disk (ADR-0002 Q12) — pass it
+                # through so visual_signals can extract scene cuts without
+                # a re-download.
+                source_video_path=source_video.path,
+                enable_visual_signals=True,
                 log_fn=log,
             )
         except TranscriptUnavailableError as exc:

@@ -157,21 +157,51 @@ class ClipScore:
 
     @property
     def total(self) -> float:
-        """Weighted overall score, 0-10. Tuned for VTuber clip workflow."""
-        weights = {
-            "retention_hook": 0.25,
-            "emotional_intensity": 0.20,
-            "completeness": 0.15,
-            "replayability": 0.10,
-            "shorts_friendly": 0.10,
-            "duration_fit": 0.10,
-        }
-        # Map deterministic features into 0-10 contributors
-        audio_norm = min(10.0, self.audio_peak_db / 3.0)   # +30dB → 10
-        chat_norm = min(10.0, self.chat_spike_ratio * 2.0)  # ratio of 5 → 10
-        det_total = (audio_norm * 0.05) + (chat_norm * 0.05)
+        """Weighted overall score, 0-10. VTuber profile (legacy default).
 
-        llm_total = sum(getattr(self, name) * w for name, w in weights.items())
+        Backward-compatible alias for ``total_for("vtuber")``. Existing
+        callers and ``to_dict()`` serialisation keep using this property
+        unchanged. New code that wants a different content niche should
+        call ``total_for(profile)`` directly — see ADR-0003.
+        """
+        return self.total_for("vtuber")
+
+    def total_for(self, profile: Any) -> float:
+        """Weighted overall score for a given Scoring Profile (0-10).
+
+        See ``processors.clip_finder.scoring_profiles`` for the weight
+        tables. The math is identical to the legacy property: LLM rubric
+        weights summed + deterministic contributors normalised, capped
+        at 10.0. Only the *weights* change per profile.
+
+        We import lazily to avoid a circular dependency: ``models`` is
+        imported by ``processors.clip_finder`` modules, so the reverse
+        direction has to stay deferred.
+        """
+        from processors.clip_finder.scoring_profiles import weights_for
+
+        w = weights_for(profile)
+
+        llm_total = (
+            self.retention_hook * w.retention_hook
+            + self.emotional_intensity * w.emotional_intensity
+            + self.completeness * w.completeness
+            + self.replayability * w.replayability
+            + self.shorts_friendly * w.shorts_friendly
+        )
+
+        # Deterministic contributors. ``audio_peak_db`` already encodes
+        # dB-above-baseline; ``chat_spike_ratio`` is a multiplier vs.
+        # the base chat rate. Both are normalised into 0-10 and weighted
+        # by per-profile multipliers so e.g. ASMR can suppress audio.
+        audio_norm = min(10.0, self.audio_peak_db / 3.0)
+        chat_norm = min(10.0, self.chat_spike_ratio * 2.0)
+        det_total = (
+            audio_norm * w.audio_norm_w
+            + chat_norm * w.chat_norm_w
+            + self.duration_fit * w.duration_fit_w
+        )
+
         return round(min(10.0, llm_total + det_total), 2)
 
     def to_dict(self) -> dict[str, Any]:

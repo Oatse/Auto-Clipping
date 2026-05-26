@@ -83,6 +83,10 @@ async def detect_moments(
     gemini_model: str = "gemini-3.5-flash",
     cache_dir: Path | None = None,
     ffmpeg_path: str = "ffmpeg",
+    scoring_profile: str = "vtuber",
+    cut_strategies: list[str] | None = None,
+    source_video_path: Path | None = None,
+    enable_visual_signals: bool = True,
     log_fn: LogFn | None = None,
 ) -> MomentsResult:
     """Run transcript + signals + AI scoring in sequence.
@@ -156,6 +160,8 @@ async def detect_moments(
         log_fn=log_fn,
         enable_audio=enable_audio_signals,
         enable_chat=enable_chat_signals,
+        video_path=source_video_path,
+        enable_visual=enable_visual_signals,
     )
     if start_offset > 0 and signals:
         signals = [s for s in signals if s.end > start_offset]
@@ -177,6 +183,8 @@ async def detect_moments(
         signals=signals,
         log_fn=log_fn,
         max_count=max_clips if mode_str == "multi-stage" else None,
+        scoring_profile=scoring_profile,
+        cut_strategies=cut_strategies or [],
     )
 
     if not scored:

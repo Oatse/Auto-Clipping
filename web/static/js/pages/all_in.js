@@ -62,6 +62,26 @@ export function setupAllIn() {
     rerenderClipsFromState();
   });
 
+  // ── ADR-0003: Scoring Profile + Cut Strategies (multi-select) ─────────
+  let aiScoringProfile = 'vtuber';
+  const aiCutStrategySet = new Set();
+  wireSegmented($('aiScoringProfile'), 'profile', (v) => { aiScoringProfile = v; });
+  const cutStrategiesEl = $('aiCutStrategies');
+  if (cutStrategiesEl) {
+    cutStrategiesEl.querySelectorAll('button[data-strategy]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.dataset.strategy;
+        if (aiCutStrategySet.has(v)) {
+          aiCutStrategySet.delete(v);
+          btn.classList.remove('is-active');
+        } else {
+          aiCutStrategySet.add(v);
+          btn.classList.add('is-active');
+        }
+      });
+    });
+  }
+
   // ── Caption preset is disabled when auto-subtitle is off (Q7) ─────────
   aiAutoSubtitle.addEventListener('change', () => {
     const presetSeg = $('aiCaptionPreset');
@@ -120,6 +140,10 @@ export function setupAllIn() {
       enable_chat_signals: aiEnableChat.checked,
       start_offset: startOffset,
       max_clips: Math.max(1, Math.min(50, Number(aiMaxClips.value) || 12)),
+      // ADR-0003: Scoring Profile + Cut Strategies. Empty array means
+      // legacy 1 base Moment → 1 Clip (no fan-out).
+      scoring_profile: aiScoringProfile,
+      cut_strategies: Array.from(aiCutStrategySet),
     };
 
     try {

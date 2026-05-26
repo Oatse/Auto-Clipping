@@ -180,6 +180,28 @@
                     <label class="switch"><input type="checkbox" id="aiEnableChat" checked /><span class="switch__track"></span><span class="switch__thumb"></span></label>
                   </label>
                 </div>
+
+                {# ─── ADR-0003: Scoring Profile + Cut Strategies ─────── #}
+                <div class="field">
+                  <span class="field__label">Scoring profile</span>
+                  <div class="segmented" role="tablist" id="aiScoringProfile">
+                    <button type="button" class="is-active" data-profile="vtuber">VTuber</button>
+                    <button type="button" data-profile="podcast">Podcast</button>
+                    <button type="button" data-profile="news">News</button>
+                    <button type="button" data-profile="gaming">Gaming</button>
+                    <button type="button" data-profile="asmr">ASMR</button>
+                  </div>
+                  <p class="field__hint">Re-weights ranking for the chosen content niche. Detection prompts unchanged.</p>
+                </div>
+                <div class="field">
+                  <span class="field__label">Cut strategies (optional fan-out)</span>
+                  <div class="segmented" role="group" id="aiCutStrategies" data-multi="true">
+                    <button type="button" data-strategy="tight">Tight</button>
+                    <button type="button" data-strategy="hooky">Hooky</button>
+                    <button type="button" data-strategy="context">Context</button>
+                  </div>
+                  <p class="field__hint">Each enabled strategy adds an extra Clip per Moment (tight punchline, hook-first start, or padded setup).</p>
+                </div>
               </div>
             </details>
 

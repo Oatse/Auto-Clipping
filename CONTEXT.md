@@ -29,6 +29,30 @@ _Avoid_: Cut, segment, output.
 The UI surface for a finished **Clip**: thumbnail, title, brief description, rating, download button.
 _Avoid_: Result, item, tile.
 
+**Cut Strategy**:
+Refinement rule that derives a final **Moment** from a base time-range produced by Clip Finder. Three named strategies in v1: `tight` (head/tail trimmed to the punchline), `hooky` (start snapped to the first hook line within ±3 s), `context` (start padded back to the previous topic boundary, capped at +20 s). Multiple Cut Strategies on the same base time-range produce multiple **Moments** — each still a 1-to-1 with its eventual **Clip**.
+_Avoid_: Variant, version, cut type.
+
+**Scoring Profile**:
+Named bundle of `ClipScore` weights tuned for a content style — currently `vtuber` (default), `podcast`, `news`, `gaming`, `asmr`. The profile only changes how candidate **Moments** are ranked; it never affects detection, boundary refinement, or rendering. Stored on the Job so re-runs are reproducible.
+_Avoid_: Niche, genre, mode (mode is the detection mode: single-shot vs multi-stage).
+
+**Hook**:
+The first 1-3 seconds of a **Moment** that determine whether a viewer keeps watching. The Hook Optimizer is the boundary-refinement pass that snaps `Moment.start` to a strong opening line (question, exclamation, name-drop) when one exists in a ±3 s window.
+_Avoid_: Intro, opener, lead.
+
+**Punchline**:
+The single word (or short phrase) inside a **Moment** that carries the payoff — the one the renderer should pop / colour / zoom. Tagged by Gemini during scoring; consumed by the captioning stage as a `punchline_word_idx` hint in `style_config`.
+_Avoid_: Highlight word, key word.
+
+**Scene Cut**:
+A timed visual transition extracted from the source video using ffmpeg's `select=gt(scene,N)`. Stored as a `SignalEvent` of kind `SCENE_CUT`. Reframe re-runs its smart-static crop computation per scene segment so the subject stays in frame after a cut.
+_Avoid_: Visual cut, edit point.
+
+**Clip Sidecar**:
+A `.metadata.json` file written next to each finished **Clip** containing Gemini-generated upload-ready fields: title, description, hashtag list, suggested thumbnail timestamp. Read by the API when the user asks "what should I caption this on TikTok / YT Shorts".
+_Avoid_: Manifest, summary file, info.
+
 **All In**:
 The Workspace that chains Clip Finder's moment detection, Auto-Subtitle's captioning, and Short Maker's reframing into one job. Produces a list of finished, captioned, reframed **Clips** from a single YouTube URL.
 _Avoid_: Auto Clip Maker, Auto Maker Clip, Full Auto, One-Shot.

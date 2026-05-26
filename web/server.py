@@ -1919,6 +1919,12 @@ class AllInRequest(BaseModel):
     enable_chat_signals: bool = True
     start_offset: float = 0.0
     max_clips: int = 12
+    # ADR-0003: Scoring Profile + Cut Strategies (optional, backward
+    # compatible). Default scoring_profile=vtuber matches the legacy
+    # ClipScore.total weights byte-for-byte. Empty cut_strategies =
+    # legacy 1 base Moment → 1 Clip mapping (no fan-out).
+    scoring_profile: str = "vtuber"
+    cut_strategies: list[str] = []
 
 
 @app.get("/api/all-in/presets")
@@ -1943,6 +1949,27 @@ async def create_all_in_job(req: AllInRequest):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid enum value: {exc}")
 
+    # ADR-0003 enums — validated separately so a bad scoring_profile
+    # produces a clearer error than the generic "Invalid enum value".
+    from web.services.all_in.models import (
+        CutStrategyChoice as _CutStrategy,
+        ScoringProfileChoice as _ScoringProfile,
+    )
+    try:
+        scoring_profile = _ScoringProfile(req.scoring_profile)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid scoring_profile: {req.scoring_profile}",
+        )
+    try:
+        cut_strategies = [_CutStrategy(s) for s in (req.cut_strategies or [])]
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid cut_strategies entry: {exc}",
+        )
+
     job_id = uuid.uuid4().hex[:12]
     job = AllInJob(
         id=job_id,
@@ -1961,6 +1988,8 @@ async def create_all_in_job(req: AllInRequest):
         enable_chat_signals=bool(req.enable_chat_signals),
         start_offset=max(0.0, req.start_offset),
         max_clips=max(1, min(50, req.max_clips)),
+        scoring_profile=scoring_profile,
+        cut_strategies=cut_strategies,
     )
     _all_in_jobs[job_id] = job
     _persist_all_in_job(job)
@@ -2058,6 +2087,30 @@ async def download_all_in_clip(job_id: str, clip_idx: int):
     return FileResponse(
         path=str(path), filename=path.name, media_type="video/mp4",
     )
+
+
+@app.get("/api/all-in/jobs/{job_id}/clips/{clip_idx}/sidecar")
+async def get_all_in_clip_sidecar(job_id: str, clip_idx: int):
+    """Return the upload-ready Clip Sidecar metadata for a finished Clip.
+
+    Reads ``{clip}.metadata.json`` written by the runner's Stage 5.
+    Returns 404 if the Clip is not yet rendered or the sidecar is
+    missing (the file is best-effort — Gemini outage during render
+    leaves no sidecar but the Clip is still valid).
+    """
+    from processors.clip_finder.clip_sidecar import read as _read_sidecar
+
+    clip_path = _resolve_all_in_clip(job_id, clip_idx)
+    sidecar = _read_sidecar(clip_path)
+    if sidecar is None:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Sidecar metadata not available for this clip "
+                "(Gemini may have been unreachable during render)"
+            ),
+        )
+    return sidecar.to_dict()
 
 
 @app.post("/api/all-in/jobs/{job_id}/clips/{clip_idx}/retry")

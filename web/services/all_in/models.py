@@ -82,6 +82,35 @@ class DetectionMode(str, Enum):
     MULTI_STAGE = "multi-stage"
 
 
+# ─── Scoring profile (ADR-0003) ───────────────────────────────────────────────
+#
+# Mirrors ``processors.clip_finder.scoring_profiles.ScoringProfile`` so the
+# AllIn package stays importable without pulling the full clip_finder deps
+# in unit tests. The runner converts to the canonical enum at the seam.
+
+class ScoringProfileChoice(str, Enum):
+    VTUBER = "vtuber"
+    PODCAST = "podcast"
+    NEWS = "news"
+    GAMING = "gaming"
+    ASMR = "asmr"
+
+
+# ─── Cut strategy (ADR-0003) ──────────────────────────────────────────────────
+
+class CutStrategyChoice(str, Enum):
+    """Named refinement rule applied to a base Moment to derive a new one.
+
+    The empty list (default) means: legacy behaviour, 1 base Moment → 1
+    Clip. Adding a strategy fans out additional Moments; each is
+    rendered into its own Clip. ``base`` is implicit and never listed.
+    """
+
+    TIGHT = "tight"
+    HOOKY = "hooky"
+    CONTEXT = "context"
+
+
 # ─── Per-Clip state ───────────────────────────────────────────────────────────
 
 class AllInClip(BaseModel):
@@ -145,6 +174,14 @@ class AllInJob(BaseModel):
     enable_chat_signals: bool = True
     start_offset: float = 0.0
     max_clips: int = 12
+
+    # ADR-0003: Scoring profile re-weights ClipScore.total per content niche.
+    # Defaults to vtuber so existing callers see no behaviour change.
+    scoring_profile: ScoringProfileChoice = ScoringProfileChoice.VTUBER
+
+    # ADR-0003: Optional Cut Strategies fan a base Moment into multiple
+    # Moments before render. Empty list = legacy 1:1 mapping.
+    cut_strategies: list[CutStrategyChoice] = Field(default_factory=list)
 
     # Job-level pipeline state
     status: AllInJobStatus = AllInJobStatus.QUEUED

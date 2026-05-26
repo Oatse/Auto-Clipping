@@ -26,6 +26,7 @@ from .audio_signals import AudioSignalExtractor
 from .cache import TranscriptCache
 from .chat_signals import ChatSignalExtractor
 from .clip_selection import ClipFinderError, deduplicate_clips
+from .cut_strategies import CutStrategy, expand as expand_cut_strategies
 from .detector import ClipDetector
 from .downloader import ClipDownloader
 from .gemini_client import GeminiClient
@@ -37,6 +38,7 @@ from .heuristics import (
 )
 from .hunters import HunterRunner
 from .scoring import ClipScorer
+from .scoring_profiles import ScoringProfile
 from .subtitle_source import SubtitleSource
 from .transcript import (
     Segment,
@@ -107,8 +109,19 @@ class ClipFinder:
         use_cache: bool = True,
         enable_audio: bool = True,
         enable_chat: bool = True,
+        video_path: Path | None = None,
+        enable_visual: bool = True,
     ) -> list[SignalEvent]:
-        """Extract multimodal signals (audio peaks + silences + chat)."""
+        """Extract multimodal signals (audio peaks + silences + chat + scene cuts).
+
+        ``video_path`` is optional. When provided AND ``enable_visual``
+        is True, scene cuts are extracted via FFmpeg and emitted as
+        ``SignalKind.SCENE_CUT`` events. The All In Workspace owns the
+        source on disk per ADR-0002 Q12, so passing ``video_path`` is
+        cheap there. The standalone Clip Finder workspace can pass
+        None to skip — the cost of re-downloading just for scene cuts
+        outweighs the win until the user opts in.
+        """
         if use_cache and self._cache:
             cached = self._cache.load_signals(url)
             if cached is not None:
@@ -137,6 +150,17 @@ class ClipFinder:
             except Exception as exc:
                 if log_fn:
                     log_fn(f"AudioSignals (non-fatal): {exc}")
+
+        if enable_visual and video_path is not None:
+            try:
+                from . import visual_signals
+                visual_events = await visual_signals.extract(
+                    video_path=video_path, log_fn=log_fn,
+                )
+                events.extend(visual_events)
+            except Exception as exc:  # noqa: BLE001 — never crash on enrichment
+                if log_fn:
+                    log_fn(f"VisualSignals (non-fatal): {exc}")
 
         events.sort(key=lambda e: e.start)
         if use_cache and self._cache:
@@ -172,14 +196,29 @@ class ClipFinder:
         signals: Sequence[SignalEvent] = (),
         log_fn: LogFn | None = None,
         max_count: int | None = None,
+        scoring_profile: ScoringProfile | str = ScoringProfile.VTUBER,
+        cut_strategies: Sequence[CutStrategy | str] = (),
     ) -> list[Clip]:
         """Run clip detection. Returns scored, refined Clip objects.
 
         single-shot   : legacy path — one detection prompt + recheck pass.
         multi-stage   : Hunters → score → boundary refine → diversify select.
+
+        ``scoring_profile`` re-weights ``ClipScore.total`` per content
+        niche (VTuber, podcast, news, gaming, ASMR). Defaults to VTuber
+        so existing callers see no change.
+
+        ``cut_strategies`` fans each base Moment into N derived Moments
+        — see ``processors.clip_finder.cut_strategies``. Default is the
+        empty tuple (no fan-out, legacy behaviour).
         """
         if not transcript:
             return []
+
+        # Normalise inputs early so we never carry strings deep into
+        # the pipeline.
+        profile = ScoringProfile.coerce(scoring_profile)
+        strategies = tuple(CutStrategy.coerce(s) for s in cut_strategies)
 
         # Resolve fallback models from config so a deprecated primary model
         # (e.g. preview Gemini that was rotated out) doesn't break detection.
@@ -209,6 +248,8 @@ class ClipFinder:
                 max_clip=max_clip,
                 video_duration=video_duration,
                 max_count=max_count,
+                profile=profile,
+                strategies=strategies,
                 log_fn=log_fn,
             )
 
@@ -220,6 +261,8 @@ class ClipFinder:
             min_clip=min_clip,
             max_clip=max_clip,
             video_duration=video_duration,
+            profile=profile,
+            strategies=strategies,
             log_fn=log_fn,
         )
 
@@ -235,7 +278,9 @@ class ClipFinder:
         min_clip: float,
         max_clip: float,
         video_duration: float,
-        log_fn: LogFn | None,
+        profile: ScoringProfile = ScoringProfile.VTUBER,
+        strategies: Sequence[CutStrategy] = (),
+        log_fn: LogFn | None = None,
     ) -> list[Clip]:
         detector = ClipDetector(client)
 
@@ -276,8 +321,23 @@ class ClipFinder:
             log_fn=log_fn,
         )
 
-        clips = boundary.refine_boundaries(clips, signals, min_duration=min_clip * 0.6)
+        clips = boundary.refine_boundaries(
+            clips,
+            signals,
+            min_duration=min_clip * 0.6,
+            transcript=list(transcript) if transcript else None,
+        )
         clips = deduplicate_clips(clips)
+
+        # Cut Strategies fan-out — only when explicitly requested.
+        if strategies:
+            clips = expand_cut_strategies(
+                clips,
+                list(transcript) if transcript else None,
+                strategies=strategies,
+            )
+
+        clips = self._apply_scoring_profile(clips, profile)
         return sorted(clips, key=lambda c: c.start)
 
     async def _find_multi_stage(
@@ -291,7 +351,9 @@ class ClipFinder:
         max_clip: float,
         video_duration: float,
         max_count: int | None,
-        log_fn: LogFn | None,
+        profile: ScoringProfile = ScoringProfile.VTUBER,
+        strategies: Sequence[CutStrategy] = (),
+        log_fn: LogFn | None = None,
     ) -> list[Clip]:
         if log_fn:
             log_fn("Multi-stage pipeline: Hunters → Score → Refine → Select")
@@ -350,6 +412,36 @@ class ClipFinder:
         return chosen
 
     # ── Public: download ─────────────────────────────────────────────────
+
+    @staticmethod
+    def _apply_scoring_profile(
+        clips: list[Clip],
+        profile: ScoringProfile,
+    ) -> list[Clip]:
+        """Recompute ``ClipScore.total`` for every clip under ``profile``.
+
+        Mutation is in-place on the score object — but we never compare
+        scores by identity in the rest of the pipeline, so this is safe.
+        Default profile is VTUBER, which matches the legacy ``total``
+        property byte-for-byte.
+        """
+        if profile == ScoringProfile.VTUBER:
+            return clips  # legacy path — no recomputation needed
+        for clip in clips:
+            # Patch ``total`` attribute by replacing the score's
+            # serialisation. We can't override the @property, so instead
+            # we adjust each contributing field's relative weight inside
+            # the dict that ``to_dict`` returns. Simplest is just to keep
+            # ``score`` unchanged and rely on ``total_for(profile)`` at
+            # selection time (see selection.select_top_clips).
+            #
+            # For sort-by-score in the default sorted() call below, we
+            # bind a sidecar attribute the rest of the code can read.
+            try:
+                setattr(clip, "_profile_total", clip.score.total_for(profile))
+            except Exception:  # noqa: BLE001 — never crash on a sort key.
+                setattr(clip, "_profile_total", clip.score.total)
+        return clips
 
     async def download_clip_sections(
         self,
