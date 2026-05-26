@@ -53,6 +53,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
 
 from web.routes.system import router as system_router
+from web.routes.pages import build_page_router
 from web.services.upload_helpers import (
     UploadTooLargeError as _UploadTooLargeError,
     safe_upload_name as _safe_upload_name,
@@ -87,6 +88,12 @@ STATIC_DIR.mkdir(exist_ok=True)
 TEMPLATES_DIR = Path(__file__).parent / "templates"
 TEMPLATES_DIR.mkdir(exist_ok=True)
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
+
+# Page router lives in web/routes/pages.py — wired here because the
+# Jinja2Templates instance is built right above and the factory takes
+# it as an argument (keeps web/routes/pages.py free of filesystem I/O
+# at import time).
+app.include_router(build_page_router(templates))
 
 UPLOADS_DIR = Path("./output/uploads")
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
@@ -1987,48 +1994,8 @@ async def delete_all_in_job(job_id: str):
 
 
 # ─── Page Routes (Jinja2 templates) ──────────────────────────────────────────
-
-@app.get("/", response_class=HTMLResponse)
-async def page_home(request: Request):
-    return templates.TemplateResponse(request, "pages/home.html", {"active": "home"})
-
-
-@app.get("/auto-subtitle", response_class=HTMLResponse)
-async def page_auto_subtitle(request: Request):
-    return templates.TemplateResponse(
-        request, "pages/auto_subtitle.html", {"active": "subtitle"},
-    )
-
-
-@app.get("/clip-finder", response_class=HTMLResponse)
-async def page_clip_finder(request: Request):
-    return templates.TemplateResponse(
-        request, "pages/clip_finder.html", {"active": "clipfinder"},
-    )
-
-
-@app.get("/short-maker", response_class=HTMLResponse)
-async def page_short_maker(request: Request):
-    return templates.TemplateResponse(
-        request, "pages/short_maker.html", {"active": "shortmaker"},
-    )
-
-
-@app.get("/all-in", response_class=HTMLResponse)
-async def page_all_in(request: Request):
-    return templates.TemplateResponse(
-        request, "pages/all_in.html", {"active": "allin"},
-    )
-
-
-@app.get("/editor", response_class=HTMLResponse)
-@app.get("/editor/{job_id}", response_class=HTMLResponse)
-async def page_editor(request: Request, job_id: str | None = None):
-    return templates.TemplateResponse(
-        request,
-        "pages/editor.html",
-        {"active": "editor", "job_id": job_id},
-    )
+# Implemented in web/routes/pages.py — mounted via build_page_router(templates)
+# right after the Jinja2Templates instance is built (see top of file).
 
 
 # ─── Mount Static Files (must be last) ───────────────────────────────────────
