@@ -27,43 +27,44 @@ export function setupRender() {
 export function openRenderOptionsModal() {
   if (!S.activeJobId) return;
 
-  const overlay  = document.getElementById('renderOptionsOverlay');
-  const closeBtn = document.getElementById('renderOptionsClose');
-  const cancelBtn = document.getElementById('renderOptionsCancel');
+  const overlay    = document.getElementById('renderOptionsOverlay');
+  const closeBtn   = document.getElementById('renderOptionsClose');
+  const cancelBtn  = document.getElementById('renderOptionsCancel');
   const confirmBtn = document.getElementById('renderOptionsConfirm');
   const optRefined  = document.getElementById('renderOptRefined');
   const optOriginal = document.getElementById('renderOptOriginal');
 
-  // Hide "original" option if original transcript is not available
-  if (!S.originalTranscriptData || S.originalTranscriptData.length === 0) {
-    optOriginal.style.display = 'none';
-  } else {
-    optOriginal.style.display = 'flex';
+  // Bail out cleanly if the editor template doesn't ship this modal — the
+  // editor page is the only caller today, but loadJobs/render polling can
+  // race ahead of full DOM hydration on slow first paints.
+  if (!overlay || !optRefined || !optOriginal || !confirmBtn) return;
+
+  // Editor markup puts the IDs directly on the <input type="radio"> nodes
+  // (not on a wrapper card), so optRefined / optOriginal already ARE the
+  // inputs. The previous implementation assumed wrapper-style markup and
+  // crashed with "Cannot set properties of null" on .querySelector('input').
+  const refinedRow  = optRefined.closest('.def-list__row');
+  const originalRow = optOriginal.closest('.def-list__row');
+
+  const hasOriginal = !!(S.originalTranscriptData && S.originalTranscriptData.length > 0);
+  if (originalRow) {
+    originalRow.style.display = hasOriginal ? '' : 'none';
   }
 
-  // Reset selection to refined
-  optRefined.querySelector('input').checked = true;
-  optRefined.classList.add('selected');
-  optOriginal.classList.remove('selected');
-
-  // Radio change → update card styling
-  const radios = overlay.querySelectorAll('input[name="renderTranscriptSource"]');
-  radios.forEach(r => {
-    r.onchange = () => {
-      optRefined.classList.toggle('selected', optRefined.querySelector('input').checked);
-      optOriginal.classList.toggle('selected', optOriginal.querySelector('input').checked);
-    };
-  });
+  // Reset selection to refined whenever the modal opens.
+  optRefined.checked = true;
 
   overlay.classList.remove('hidden');
 
   const close = () => overlay.classList.add('hidden');
-  closeBtn.onclick = close;
-  cancelBtn.onclick = close;
+  if (closeBtn)  closeBtn.onclick  = close;
+  if (cancelBtn) cancelBtn.onclick = close;
   overlay.onclick = (e) => { if (e.target === overlay) close(); };
 
   confirmBtn.onclick = () => {
-    const selected = overlay.querySelector('input[name="renderTranscriptSource"]:checked').value;
+    // Read the choice straight off the inputs — they have no `value`
+    // attribute, so we look at .checked instead of [name="…"]:checked.value.
+    const selected = optOriginal.checked && hasOriginal ? 'original' : 'refined';
     close();
     startRender(selected);
   };
@@ -189,7 +190,13 @@ async function watchRender(jobId) {
           dlBtn.style.cssText = 'margin-top: 20px; display: inline-flex; align-items: center; gap: 8px;';
           dlBtn.textContent = '⬇ Download Output';
           dlBtn.download = true;
-          document.querySelector('#screen-rendering .transcribing-card').appendChild(dlBtn);
+          // The render-complete card uses `.process__card` in the editor
+          // template; the older `.transcribing-card` class no longer
+          // exists, so querySelector returned null and threw.
+          const renderCard =
+            document.querySelector('#screen-rendering .process__card') ||
+            document.querySelector('#screen-rendering .transcribing-card');
+          if (renderCard) renderCard.appendChild(dlBtn);
 
           toast.success('Render complete — your video is ready');
           resolve();
@@ -251,7 +258,7 @@ function setupAEExport() {
     }
 
     exportAEBtn.disabled = true;
-    exportAEBtn.querySelector('.btn-text').textContent = 'Exporting...';
+    setAEBtnLabel('Exporting...');
 
     try {
       const res = await fetch(`/api/jobs/${S.activeJobId}/export-ae`, {
@@ -281,7 +288,24 @@ function setupAEExport() {
       toast.error('AE Export failed: ' + err.message);
     } finally {
       exportAEBtn.disabled = false;
-      exportAEBtn.querySelector('.btn-text').textContent = 'Export .jsx';
+      setAEBtnLabel('AE Export');
     }
   });
+}
+
+// Set the visible label of the AE button.
+//
+// The editor template wraps the label in a plain <span> (no class) plus an
+// SVG icon span (`.btn__icon`). Older callers assumed a `.btn-text` selector,
+// which returns null on this page and crashed render.js with
+// "Cannot set properties of null" the moment the button was clicked.
+//
+// We pick the first child <span> that isn't the icon — works for both
+// markups (legacy `.btn-text` and current plain span).
+function setAEBtnLabel(text) {
+  if (!exportAEBtn) return;
+  const labelEl =
+    exportAEBtn.querySelector('.btn-text') ||
+    exportAEBtn.querySelector('span:not(.btn__icon)');
+  if (labelEl) labelEl.textContent = text;
 }

@@ -899,7 +899,10 @@ class SubtitleRendererProcessor:
             encoder_label = "NVENC/GPU" if use_nvenc else "libx264/CPU"
             cmd = _build_cmd(use_nvenc)
             logger.info("FFmpeg encoding with {} encoder", encoder_label)
-            logger.debug("FFmpeg ASS cmd: {}", " ".join(cmd))
+            # cmd[0] is FFMPEG_BIN (a _LazyBin proxy, not a real str), so we
+            # have to coerce each item with str() before join — Python's
+            # str.join refuses non-str items even when they implement __str__.
+            logger.debug("FFmpeg ASS cmd: {}", " ".join(str(a) for a in cmd))
 
             result = subprocess.run(cmd, capture_output=True)
             if result.returncode == 0:

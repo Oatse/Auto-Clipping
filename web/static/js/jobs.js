@@ -180,6 +180,10 @@ function _renderJobsSkeleton(count = 3) {
 }
 
 function renderJobs(jobs) {
+  // The editor page reuses jobs.js (loadJobs is called from preview.js
+  // and during render polling) but does not ship the #jobsList markup.
+  // Bail out cleanly instead of throwing on null.innerHTML.
+  if (!jobsList) return;
   if (!jobs.length) {
     jobsList.innerHTML = `
       <div class="empty-state">

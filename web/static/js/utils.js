@@ -125,7 +125,16 @@ export function showScreen(name) {
     s.classList.remove('active')
   );
   const target = document.getElementById('screen-' + name);
-  if (target) target.classList.add('active');
+  if (target) {
+    // Editor templates ship non-default screens with class="hidden" as
+    // their initial state. The global `.hidden { display:none !important }`
+    // rule (reset.css) overrides `.app-screen.active { display: block }`,
+    // so adding `.active` alone leaves the screen invisible — which is
+    // why "Start render" appeared to blank the page even though the job
+    // kept running. Strip `hidden` on activation so `.active` wins.
+    target.classList.remove('hidden');
+    target.classList.add('active');
+  }
 
   // Hide hero on every screen except the upload landing page.
   const hero = document.querySelector('.hero');

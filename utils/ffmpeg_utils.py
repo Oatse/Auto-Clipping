@@ -179,7 +179,11 @@ async def get_audio_duration(audio_path: Path | str) -> float:
         "-show_format",
         str(audio_path),
     ]
-    logger.debug("FFprobe cmd: {}", " ".join(cmd))
+    # cmd[0] is FFPROBE_BIN (a _LazyBin proxy, not a real str). str.join is
+    # strict about element types — it does NOT call __str__ on items — so we
+    # coerce each part with str() to mirror what run_ffmpeg() already does
+    # for FFMPEG_BIN.
+    logger.debug("FFprobe cmd: {}", " ".join(str(a) for a in cmd))
 
     proc = await asyncio.create_subprocess_exec(
         *cmd,
