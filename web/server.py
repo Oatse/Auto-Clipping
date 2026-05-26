@@ -53,6 +53,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import config
 
 from web.routes.system import router as system_router
+from web.services.upload_helpers import (
+    UploadTooLargeError as _UploadTooLargeError,
+    safe_upload_name as _safe_upload_name,
+    save_upload_streaming as _save_upload_streaming,
+)
 
 # ─── App Setup ────────────────────────────────────────────────────────────────
 
@@ -96,70 +101,9 @@ def _is_job_id(name: str) -> bool:
 
 
 # ─── Upload streaming helpers ────────────────────────────────────────────────
-#
-# UploadFile.read() materialises the entire upload in RAM, which OOMs on
-# multi-GB videos and lets a single client exhaust the server's memory.
-# These helpers stream the body to disk in fixed-size chunks and enforce a
-# configurable size cap so abuse is bounded.
-
-class _UploadTooLargeError(Exception):
-    """Raised when the streaming upload exceeds config.MAX_UPLOAD_BYTES."""
-
-
-def _safe_upload_name(filename: str | None) -> str:
-    """Sanitise an uploaded filename for safe filesystem use.
-
-    Strips path separators, collapses whitespace, removes anything outside
-    a conservative whitelist, and caps total length so we never overflow
-    Windows' MAX_PATH when prepending the job_id prefix.
-    """
-    name = (filename or "video.mp4").strip()
-    # Drop any directory components a malicious client may have included.
-    name = name.replace("\\", "/").rsplit("/", 1)[-1]
-    # Whitelist: alnum, dot, dash, underscore. Replace everything else.
-    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
-    # Avoid double-extensions and absurd lengths.
-    if len(name) > 120:
-        stem, _, ext = name.rpartition(".")
-        name = (stem[: 120 - (len(ext) + 1)] + "." + ext) if ext else name[:120]
-    return name or "video.mp4"
-
-
-async def _save_upload_streaming(
-    upload: UploadFile,
-    dest: Path,
-    *,
-    chunk_bytes: int | None = None,
-    max_bytes: int | None = None,
-) -> int:
-    """Stream ``upload`` to ``dest`` and return the number of bytes written.
-
-    Raises :class:`_UploadTooLargeError` once the running total would
-    exceed ``max_bytes`` (defaults to ``config.MAX_UPLOAD_BYTES``).  The
-    partially-written file is left in place; the caller is responsible
-    for unlinking it after handling the error.
-    """
-    chunk_size: int = chunk_bytes or getattr(config, "UPLOAD_CHUNK_BYTES", 1024 * 1024)
-    max_size: int = max_bytes or getattr(config, "MAX_UPLOAD_BYTES", 4 * 1024 * 1024 * 1024)
-
-    written = 0
-    try:
-        with dest.open("wb") as out:
-            while True:
-                chunk = await upload.read(chunk_size)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > max_size:
-                    raise _UploadTooLargeError(
-                        f"Upload exceeds limit of {max_size} bytes "
-                        f"(received at least {written}). "
-                        "Increase MAX_UPLOAD_BYTES in .env or upload a smaller file."
-                    )
-                out.write(chunk)
-    finally:
-        await upload.close()
-    return written
+# Implementation lives in web/services/upload_helpers.py — imported above
+# as _UploadTooLargeError / _safe_upload_name / _save_upload_streaming so
+# every existing call site keeps working without renaming.
 
 
 @app.on_event("startup")
