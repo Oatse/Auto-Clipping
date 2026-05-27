@@ -311,6 +311,17 @@ class ElevenLabsSttEngine(SttEngine):
 
         return segments
 
+    # Floor duration applied to words that arrive with end <= start from
+    # ElevenLabs Scribe.  Scribe v1 occasionally collapses short CJK runs
+    # (single-mora kanji, expressive interjections) onto a single anchor
+    # timestamp.  Without normalization the sanitizer's same-speaker word
+    # overlap pass collapses surrounding words to that same anchor too,
+    # which makes whole segments render as zero-width slivers in the
+    # editor timeline.  50 ms is small enough that it never crowds out a
+    # real next word, but big enough to keep the cluster-redistribution
+    # pass in ``processors.timing.sanitizer`` from rounding back to zero.
+    _MIN_WORD_DURATION = 0.05
+
     def _flush_speaker_turn(
         self,
         segments: list[TranscriptSegment],
@@ -323,6 +334,11 @@ class ElevenLabsSttEngine(SttEngine):
         for cw in current_words:
             w_start = cw.get("start", 0.0)
             w_end = cw.get("end", w_start + 0.1)
+            # Defensive normalization for broken ElevenLabs timestamps
+            # (start == end, or in extreme cases start > end).  See the
+            # comment on ``_MIN_WORD_DURATION`` above for the rationale.
+            if w_end <= w_start:
+                w_end = w_start + self._MIN_WORD_DURATION
             wt_list.append(
                 WordTimestamp(
                     word=cw["text"].strip(),
