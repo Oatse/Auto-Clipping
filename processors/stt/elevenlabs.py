@@ -27,6 +27,21 @@ from .base import SttEngine
 
 API_URL = "https://api.elevenlabs.io/v1/speech-to-text"
 
+# Sentence-level segmentation tuning
+#
+# ElevenLabs Scribe returns a flat word list with no segment grouping.
+# We segment on sentence boundaries (terminator characters) and a
+# safety word-cap to keep the editor preview manageable when the audio
+# is a long monologue without long pauses.
+#
+# The terminator set covers ASCII (".", "?", "!") and CJK (".", "?", "!").
+# Note: ASCII terminators arrive as ``type=punctuation`` and are merged
+# onto the previous word's text in step 1.  CJK terminators arrive as
+# ``type=word`` standalone entries — step 1 also merges them so the
+# segment-flush check only has to look at the prior word's text.
+SENTENCE_TERMINATORS: tuple[str, ...] = (".", "?", "!", "\u3002", "\uFF1F", "\uFF01")
+MAX_WORDS_PER_SEGMENT = 20
+
 
 class ElevenLabsSttEngine(SttEngine):
     """Transcribe audio via ElevenLabs Speech-to-Text API."""
@@ -249,11 +264,26 @@ class ElevenLabsSttEngine(SttEngine):
             return []
 
         # ── Step 1: Attach punctuation to the preceding word's text ──
+        # ASCII punctuation arrives as ``type=punctuation``.  CJK sentence
+        # terminators (。？！) arrive as ``type=word`` standalone entries —
+        # detect them by content and merge so the segment flush logic
+        # below only has to check the prior word's text.
         cleaned: list[dict] = []
         for w in word_entries:
-            if w.get("type") == "punctuation":
+            w_type = w.get("type")
+            w_text = w.get("text", "")
+            is_cjk_terminator = (
+                w_type == "word"
+                and w_text.strip() in SENTENCE_TERMINATORS
+            )
+            if w_type == "punctuation" or is_cjk_terminator:
                 if cleaned:
-                    cleaned[-1]["text"] = cleaned[-1]["text"] + w.get("text", "")
+                    cleaned[-1]["text"] = cleaned[-1]["text"] + w_text
+                    # Extend the previous word's end to cover the
+                    # punctuation glyph so segment timing reflects the
+                    # full sentence span.
+                    if "end" in w:
+                        cleaned[-1]["end"] = w["end"]
             else:
                 cleaned.append(dict(w))  # shallow copy to avoid mutating raw
 
@@ -287,13 +317,25 @@ class ElevenLabsSttEngine(SttEngine):
                 )
                 current_words = []
 
-            # Or long pause / sentence boundary → flush current segment
+            # Or sentence boundary / max-word cap / pause → flush current segment
             elif current_words:
                 prev_w = current_words[-1]
                 prev_text = prev_w.get("text", "").strip()
                 gap = w.get("start", w.get("end", 0.0)) - prev_w.get("end", prev_w.get("start", 0.0))
-                # Split if pause > 1 second, or previous word ends with punctuation and pause > 0.3s
-                if gap > 1.0 or (gap > 0.3 and prev_text.endswith((".", "?", "!"))):
+                # 1. Sentence terminator on previous word — split unconditionally.
+                #    Mirrors elevenlabs.io behaviour and keeps the editor preview
+                #    granular even for monologues without long pauses.
+                # 2. Long pause (>1 s) — preserved from the original heuristic.
+                # 3. Word-count safety cap — protects against run-on speech that
+                #    has no terminators (e.g. live commentary, ASMR).
+                ends_sentence = (
+                    prev_text and prev_text[-1] in SENTENCE_TERMINATORS
+                )
+                if (
+                    ends_sentence
+                    or gap > 1.0
+                    or len(current_words) >= MAX_WORDS_PER_SEGMENT
+                ):
                     self._flush_speaker_turn(
                         segments, current_words, current_speaker, speaker_detection
                     )
