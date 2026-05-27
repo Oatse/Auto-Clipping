@@ -4,7 +4,11 @@
 ffmpeg-python>=0.2.0
 
 # ─── Clip Finder (Gemini AI) ────────────────────────────────────────────────
-yt-dlp>=2025.1.15
+# Floor pinned to a build whose nsig solver still works against
+# current YouTube players. Older releases (e.g. 2026.2.21) silently
+# collapse the format pool to format 18 (640x360) because nsig
+# deciphering returns "found 0 n function possibilities".
+yt-dlp>=2026.3.17
 httpx>=0.27.0
 
 # ─── Async & HTTP ─────────────────────────────────────────────────────────────

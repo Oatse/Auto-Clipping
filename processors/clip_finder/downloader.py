@@ -121,15 +121,15 @@ class ClipDownloader:
             "-preset", self._nvenc_preset,
             "-cq", self._nvenc_cq,
         ]
-        # Explicit height preference so we never silently settle for 360p
-        # when a degraded player_client (e.g. TV clients in the cookie
-        # fallback path) only advertises low-resolution formats.
+        # Target 1080p — cap at 1080 so we don't pull 4K masters that
+        # waste bandwidth on short-form output, but always grab 1080p
+        # when it's offered. Falls back to the next-best resolution if
+        # the video doesn't ship a 1080p rendition.
         format_chain = (
-            "bestvideo[height>=1080][ext=mp4]+bestaudio[ext=m4a]/"
-            "bestvideo[height>=720][ext=mp4]+bestaudio[ext=m4a]/"
-            "bestvideo[height>=480][ext=mp4]+bestaudio[ext=m4a]/"
-            "bestvideo[ext=mp4]+bestaudio[ext=m4a]/"
-            "bestvideo+bestaudio/best"
+            "bestvideo[height=1080]+bestaudio/"
+            "bestvideo[height<=1080]+bestaudio/"
+            "best[height<=1080]/"
+            "best"
         )
         return {
             "concurrent_fragment_downloads": 4,
@@ -150,12 +150,30 @@ class ClipDownloader:
         }
 
     def _base_opts(self, log_fn: LogFn | None) -> dict:
+        # Player-client selection drives which formats YouTube advertises.
+        # The plain ``default`` web client only exposes a 360p muxed
+        # single-stream when nsig deciphering can't run, which is what
+        # caused 640×360 downloads here. Listing multiple clients lets
+        # yt-dlp pick whichever one returns 1080p adaptive formats; the
+        # ``js_runtimes`` hint enables nsig deciphering via node/deno
+        # so the web client can return HD URLs without needing cookies.
         opts: dict = {
             "quiet": True,
             "no_warnings": False,
             "extractor_args": {
-                "youtube": {"player_client": ["default", "android_vr"]},
+                "youtube": {
+                    "player_client": [
+                        "default",
+                        "android_vr",
+                        "mweb",
+                        "ios",
+                        "tv",
+                        "tv_downgraded",
+                        "web_creator",
+                    ],
+                },
             },
+            "js_runtimes": {"node": {}, "deno": {}},
         }
         if log_fn:
             from .subtitle_source import _YtdlpLogger  # share logger adapter

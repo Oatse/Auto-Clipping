@@ -308,9 +308,12 @@ class ClipFinder:
         if rescued:
             candidates = candidates + rescued
 
-        # Score (deterministic features only — single-shot mode keeps the
-        # old behaviour: no LLM rubric call to save tokens)
-        scorer = ClipScorer(client=None)
+        # Score with full LLM rubric. Without it every clip collapses to
+        # the neutral 5/10 fallback and the UI ends up showing identical
+        # 5.5/10 totals across all clips, which makes ranking and the
+        # Scoring Profile re-weight meaningless. The extra Gemini call
+        # is worth the token cost for differentiated scores.
+        scorer = ClipScorer(client=client)
         clips = await scorer.score(
             candidates=candidates,
             transcript=transcript,
