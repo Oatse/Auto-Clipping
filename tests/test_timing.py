@@ -206,3 +206,132 @@ class TestCustomPolicy:
         ).sanitize_segment_only(segs)
         # First segment is forced to at least 0.1s long
         assert segs[0].end >= segs[0].start + 0.05
+
+
+# ─── Identical-start cluster redistribution ──────────────────────────────
+#
+# Regression coverage for the ElevenLabs Scribe v1 zero-duration cluster
+# bug.  When Scribe collapses several CJK words onto one anchor timestamp
+# (start == end across many consecutive words), the STT layer normalizes
+# each word to a small positive duration (commit 1).  But that alone is
+# not enough — every word still SHARES the same start, so the existing
+# same-speaker overlap fix would later drag every neighbour's end back
+# to the cluster anchor.  This pass redistributes such clusters linearly
+# so each word has a distinct, monotonic start time before the overlap
+# fix runs.
+
+class TestClusterRedistribution:
+    """Linearly redistribute words sharing an identical start time."""
+
+    def test_cluster_with_distant_anchor_distributes_within_window(self):
+        # 3 words at t=1.0, next real word at t=2.0
+        # → cluster spread linearly across [1.0, 2.0]
+        segs = [_seg(1.0, 2.0, "SPEAKER_00", [
+            ("a", 1.0, 1.0),
+            ("b", 1.0, 1.0),
+            ("c", 1.0, 1.0),
+            ("next", 2.0, 2.5),
+        ])]
+        Sanitizer().sanitize(segs)
+        words = segs[0].words
+        # Each cluster word must have distinct, monotonically increasing start
+        assert words[0].start < words[1].start < words[2].start, (
+            f"cluster not redistributed: starts="
+            f"{[w.start for w in words[:3]]}"
+        )
+        # All cluster words end before the next real word starts
+        for w in words[:3]:
+            assert w.end <= words[3].start + 0.01
+
+    def test_cluster_at_end_uses_floor_duration_per_word(self):
+        # 3 words at t=5.0 with NO subsequent anchor
+        # → fall back to anchor + i * floor
+        segs = [_seg(5.0, 5.0, "SPEAKER_00", [
+            ("a", 5.0, 5.0),
+            ("b", 5.0, 5.0),
+            ("c", 5.0, 5.0),
+        ])]
+        Sanitizer().sanitize(segs)
+        words = segs[0].words
+        assert words[0].start == 5.0
+        assert words[1].start > words[0].start
+        assert words[2].start > words[1].start
+
+    def test_cluster_with_close_anchor_falls_back_to_floor(self):
+        # 5 words at t=1.0, next word at t=1.01 (1ms gap, too tight)
+        # → must fall back to floor-based spreading even though it
+        # creates an overlap with the next word; segment-level overlap
+        # fix will sort the rest out.
+        segs = [_seg(1.0, 1.01, "SPEAKER_00", [
+            ("a", 1.0, 1.0),
+            ("b", 1.0, 1.0),
+            ("c", 1.0, 1.0),
+            ("d", 1.0, 1.0),
+            ("e", 1.0, 1.0),
+            ("close", 1.01, 1.5),
+        ])]
+        Sanitizer().sanitize(segs)
+        cluster = segs[0].words[:5]
+        starts = [w.start for w in cluster]
+        # All cluster words must have distinct starts
+        assert len(set(starts)) == 5, (
+            f"close-anchor cluster not properly distributed: {starts}"
+        )
+
+    def test_solo_zero_duration_word_not_affected(self):
+        # A single word with end already > start (after commit 1's floor)
+        # should pass through untouched.
+        segs = [_seg(3.0, 3.05, "SPEAKER_00", [("solo", 3.0, 3.05)])]
+        Sanitizer().sanitize(segs)
+        assert segs[0].words[0].start == 3.0
+        assert segs[0].words[0].end == 3.05
+
+    def test_distinct_start_words_unchanged(self):
+        # Already well-formed words: pass-through.
+        segs = [_seg(0.0, 2.0, "SPEAKER_00", [
+            ("hello", 0.0, 0.5),
+            ("world", 0.5, 1.0),
+            ("today", 1.0, 1.5),
+        ])]
+        Sanitizer().sanitize(segs)
+        for w_actual, w_expected in zip(
+            segs[0].words,
+            [(0.0, 0.5), (0.5, 1.0), (1.0, 1.5)],
+        ):
+            assert w_actual.start == pytest.approx(w_expected[0], abs=0.01)
+            assert w_actual.end == pytest.approx(w_expected[1], abs=0.01)
+
+    def test_cross_speaker_identical_start_not_clustered(self):
+        # Two speakers happening to start at the exact same timestamp must
+        # NOT be merged into a cluster — the overlap is a real interruption.
+        segs = [
+            _seg(1.0, 1.5, "SPEAKER_00", [("hi", 1.0, 1.5)]),
+            _seg(1.0, 1.5, "SPEAKER_01", [("oh", 1.0, 1.5)]),
+        ]
+        Sanitizer().sanitize(segs)
+        assert segs[0].words[0].start == 1.0
+        assert segs[1].words[0].start == 1.0
+
+    def test_mikovsgundam_cluster_no_collapse_to_zero(self):
+        """End-to-end regression: 13 kanji on one anchor, mirroring
+        the MIKOvsGUNDAM sample at t=6.41.
+
+        The combined effect of cluster redistribution + same-speaker
+        overlap fix must NOT shrink the segment back to zero duration.
+        """
+        kanji = list("使えるのかな？使えるのかな")  # 13 chars
+        # All words share start=end=6.41 (post-STT-floor: end=6.46).
+        # After cluster redistribution, every word should end up with a
+        # distinct start, and the segment as a whole should have a
+        # non-zero duration on the editor timeline.
+        words = [(c, 6.41, 6.46) for c in kanji]
+        segs = [_seg(6.41, 6.46, "SPEAKER_00", words)]
+        Sanitizer().sanitize(segs)
+        assert segs[0].end > segs[0].start, (
+            f"segment collapsed to zero duration: "
+            f"start={segs[0].start}, end={segs[0].end}"
+        )
+        starts = [w.start for w in segs[0].words]
+        assert len(set(starts)) == len(starts), (
+            f"cluster words still share starts: {starts}"
+        )

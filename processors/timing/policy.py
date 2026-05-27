@@ -58,6 +58,14 @@ class TimingPolicy:
         When a same-speaker overlap leaves no room, the earlier segment
         is forced to at least this duration starting at its original
         ``start``.
+    cluster_word_floor:
+        Per-word stagger applied when redistributing a run of consecutive
+        same-speaker words that share an identical ``start`` (the
+        ElevenLabs Scribe v1 zero-duration cluster bug — typically a
+        short CJK kanji run collapsed onto one anchor timestamp).
+        20 ms keeps each word visually distinct on the editor timeline
+        without manufacturing a fake duration that crowds the next real
+        word.
     """
 
     # Word-duration cap
@@ -79,3 +87,6 @@ class TimingPolicy:
     # Segment-level
     same_speaker_segment_gap: float = 0.01
     minimum_segment_duration: float = 0.05
+
+    # Identical-start cluster redistribution (ElevenLabs Scribe CJK bug)
+    cluster_word_floor: float = 0.02

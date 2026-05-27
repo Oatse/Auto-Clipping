@@ -171,6 +171,12 @@ class Sanitizer:
         fixes_duration = self._cap_word_durations(
             all_words_with_sp, speech_rate_factor
         )
+        # Redistribute identical-start clusters BEFORE the overlap fix,
+        # otherwise the overlap fix would drag every cluster member's end
+        # back to the shared anchor and collapse the enclosing segment
+        # to zero duration on the editor timeline.  See
+        # ``_redistribute_identical_start_clusters`` for the rationale.
+        self._redistribute_identical_start_clusters(all_words_with_sp)
         fixes_overlap = self._fix_same_speaker_word_overlaps(all_words_with_sp)
         self._snap_segment_to_words(segments)
 
@@ -238,6 +244,123 @@ class Sanitizer:
                 w.end = round(w.start + est, 3)
                 fixes += 1
         return fixes
+
+    def _redistribute_identical_start_clusters(
+        self,
+        all_words_with_sp: list[tuple["WordTimestamp", str]],
+    ) -> int:
+        """Spread runs of same-speaker words sharing one ``start`` apart.
+
+        ElevenLabs Scribe v1 occasionally collapses several short CJK
+        kanji onto a single anchor timestamp (every word in the run
+        reports ``start == anchor``).  After commit 1's STT-layer floor
+        each word also has ``end == anchor + 0.05``, but they all still
+        share the same ``start`` — so the same-speaker overlap fix that
+        runs immediately after this pass would drag every neighbour's
+        ``end`` back to the anchor, collapsing the enclosing segment to
+        zero duration on the editor timeline.
+
+        Strategy: walk the same-speaker word list once, detect runs of
+        ≥2 consecutive words with identical ``start``, and redistribute
+        them linearly inside the available window.
+
+        - Window upper bound = the first word AFTER the cluster whose
+          ``start`` is strictly greater than the cluster anchor.
+        - When that next-word anchor leaves enough room
+          (≥ ``cluster_word_floor`` per cluster word), space the cluster
+          evenly across the window.
+        - When there is no such anchor, or the room is too tight, fall
+          back to ``anchor + i * cluster_word_floor`` so each word still
+          gets a distinct, monotonically increasing start.  The
+          downstream same-speaker overlap fix will tidy any residual
+          micro-overlap with whatever real word follows.
+
+        Returns the number of cluster runs redistributed.
+        """
+        if len(all_words_with_sp) < 2:
+            return 0
+
+        floor = self.policy.cluster_word_floor
+        if floor <= 0:
+            return 0
+
+        # Bucket indices by speaker so we only cluster words from the
+        # same diarization track — two speakers happening to share a
+        # start is a real interruption, not a Scribe artifact.
+        speaker_indices: dict[str, list[int]] = {}
+        for idx, (_w, sp) in enumerate(all_words_with_sp):
+            speaker_indices.setdefault(sp, []).append(idx)
+
+        fixes = 0
+        for indices in speaker_indices.values():
+            n = len(indices)
+            i = 0
+            while i < n - 1:
+                anchor_start = all_words_with_sp[indices[i]][0].start
+
+                # Extend the cluster as long as the next same-speaker word
+                # also reports the identical start.
+                j = i + 1
+                while (
+                    j < n
+                    and all_words_with_sp[indices[j]][0].start == anchor_start
+                ):
+                    j += 1
+
+                cluster_size = j - i
+                if cluster_size < 2:
+                    i = j
+                    continue
+
+                # Find the first same-speaker word AFTER the cluster whose
+                # start beats the anchor — that's the upper bound.
+                next_anchor: float | None = None
+                if j < n:
+                    next_word_start = all_words_with_sp[indices[j]][0].start
+                    if next_word_start > anchor_start:
+                        next_anchor = next_word_start
+
+                self._distribute_cluster(
+                    all_words_with_sp,
+                    indices[i:j],
+                    anchor_start,
+                    next_anchor,
+                    floor,
+                )
+                fixes += 1
+                i = j
+
+        return fixes
+
+    def _distribute_cluster(
+        self,
+        all_words_with_sp: list[tuple["WordTimestamp", str]],
+        cluster_indices: list[int],
+        anchor: float,
+        next_anchor: float | None,
+        floor: float,
+    ) -> None:
+        """Spread one identical-start cluster across the available window."""
+        cluster_size = len(cluster_indices)
+
+        # Default per-word stride is the policy floor.
+        stride = floor
+        if next_anchor is not None:
+            window = next_anchor - anchor
+            even_stride = window / cluster_size
+            if even_stride >= floor:
+                stride = even_stride
+
+        for offset, idx in enumerate(cluster_indices):
+            w, _ = all_words_with_sp[idx]
+            new_start = round(anchor + offset * stride, 3)
+            new_end = round(new_start + stride, 3)
+            # Preserve the longer of the original end vs. new end so the
+            # STT-layer floor (commit 1) isn't accidentally tightened.
+            if w.end > new_end:
+                new_end = w.end
+            w.start = new_start
+            w.end = new_end
 
     @staticmethod
     def _fix_same_speaker_word_overlaps(
