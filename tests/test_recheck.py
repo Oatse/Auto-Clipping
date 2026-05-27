@@ -126,3 +126,76 @@ class TestRecheckRestoreExactTimestamps:
         word_starts = sorted(w.start for w in out[0].words)
         assert 1.0 in word_starts
         assert 1.5 in word_starts
+
+
+# ─── Recheck guard against invalid source words ──────────────────────────
+#
+# Regression coverage for the third defense-in-depth layer of the
+# ElevenLabs zero-duration cluster bug.  Once commit 1 (STT-floor) and
+# commit 2 (cluster redistribution) have repaired the timestamps, the
+# recheck pass MUST NOT undo that work by snapping the word back to the
+# original ElevenLabs source — which still has start == end.
+#
+# The guard: if a candidate "source word" has a non-positive duration,
+# treat it as invalid and refuse to snap to it.
+
+class TestRecheckInvalidSourceGuard:
+    """``_restore_exact_timestamps`` must reject zero-duration source words."""
+
+    def test_zero_duration_source_does_not_overwrite_repaired_word(self):
+        # Source word from ElevenLabs is broken (start == end).
+        # The translated segment carries the post-sanitize, repaired word.
+        # The recheck pass must NOT pull the word back to the broken source.
+        broken_source = _w("使", 6.41, 6.41)
+        repaired = _w("使", 6.41, 6.46)  # post-STT-floor + cluster redistribute
+        segs = [_seg(6.41, 6.46, "SPEAKER_00", "使", [repaired])]
+        out = recheck_word_level_alignment(
+            segs, [broken_source], ["SPEAKER_00"],
+        )
+        # The repaired word must keep its positive duration.
+        assert out[0].words[0].end > out[0].words[0].start, (
+            f"recheck snapped repaired word back to broken source: "
+            f"start={out[0].words[0].start}, end={out[0].words[0].end}"
+        )
+
+    def test_valid_source_still_restored(self):
+        # Sanity check: the guard must NOT block legitimate snap-back
+        # when the source word has a real, positive duration.
+        original = _w("hello", 1.0, 1.5)
+        drifted = _w("hello", 1.03, 1.53)  # 30 ms drift
+        segs = [_seg(1.03, 1.53, "SPEAKER_00", "hello", [drifted])]
+        out = recheck_word_level_alignment(segs, [original], ["SPEAKER_00"])
+        assert out[0].words[0].start == 1.0
+        assert out[0].words[0].end == 1.5
+
+    def test_negative_duration_source_rejected(self):
+        # Defensive: a source word with end < start is also invalid.
+        broken_source = _w("oops", 2.0, 1.5)
+        repaired = _w("oops", 2.02, 2.07)
+        segs = [_seg(2.02, 2.07, "SPEAKER_00", "oops", [repaired])]
+        out = recheck_word_level_alignment(
+            segs, [broken_source], ["SPEAKER_00"],
+        )
+        assert out[0].words[0].end > out[0].words[0].start
+
+    def test_mikovsgundam_cluster_recheck_preserves_distribution(self):
+        # End-to-end: simulate the post-sanitizer state for the kanji cluster
+        # at t=6.41 — every word has a distinct start, valid duration.
+        # Source words from ElevenLabs all share start == end == 6.41.
+        # After recheck, the cluster MUST keep its distinct starts.
+        kanji = list("使えるのかな？使えるのかな")
+        broken_source = [_w(c, 6.41, 6.41) for c in kanji]
+        # Repaired cluster: each word gets a 20ms stride
+        repaired = [
+            _w(c, round(6.41 + i * 0.02, 3), round(6.43 + i * 0.02, 3))
+            for i, c in enumerate(kanji)
+        ]
+        segs = [_seg(repaired[0].start, repaired[-1].end,
+                     "SPEAKER_00", "".join(kanji), repaired)]
+        out = recheck_word_level_alignment(
+            segs, broken_source, ["SPEAKER_00"] * len(kanji),
+        )
+        starts = [w.start for w in out[0].words]
+        assert len(set(starts)) == len(kanji), (
+            f"cluster collapsed by recheck: {starts}"
+        )

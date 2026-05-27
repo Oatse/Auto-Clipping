@@ -59,6 +59,44 @@ def recheck_word_level_alignment(
     if not translated_segments or not original_words:
         return translated_segments
 
+    # Defensive guard: drop ElevenLabs source words with non-positive
+    # duration before any pass runs.  Such words come from the Scribe v1
+    # zero-duration cluster bug (see ``processors.timing.sanitizer``'s
+    # ``_redistribute_identical_start_clusters`` for context).  Once the
+    # sanitizer has redistributed them into a healthy cluster, the recheck
+    # passes must NOT use the original broken anchors as a reference —
+    # otherwise ``_recover_missing_words`` would re-insert words at the
+    # collapsed anchor and ``_restore_exact_timestamps`` would snap repaired
+    # words back to ``start == end``.  Filter them out so downstream passes
+    # only see source words that carry meaningful timing information.
+    if len(original_words) != len(original_speakers):
+        # Keep the contract that callers pass aligned lists; bail out of
+        # the filter rather than silently truncating.
+        valid_words = original_words
+        valid_speakers = original_speakers
+    else:
+        valid_pairs = [
+            (w, sp)
+            for w, sp in zip(original_words, original_speakers)
+            if w.end > w.start
+        ]
+        dropped = len(original_words) - len(valid_pairs)
+        if dropped:
+            logger.debug(
+                "recheck: ignoring {} invalid source word(s) "
+                "(end <= start) — sanitizer-repaired words will be kept",
+                dropped,
+            )
+        if valid_pairs:
+            valid_words = [pair[0] for pair in valid_pairs]
+            valid_speakers = [pair[1] for pair in valid_pairs]
+        else:
+            # All sources were invalid — nothing meaningful to recheck against.
+            return translated_segments
+
+    original_words = valid_words
+    original_speakers = valid_speakers
+
     # Build a lookup from (start, end) → original word/speaker
     # for fast matching.  Using rounded keys to tolerate float precision.
     orig_lookup: dict[tuple[float, float], tuple[int, WordTimestamp, str]] = {}
