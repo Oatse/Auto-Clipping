@@ -124,6 +124,28 @@ async def _restore_jobs_from_disk() -> None:
         if not transcript_file.exists():
             continue
 
+        # Detect transcripts that contain zero segments. Older jobs (and
+        # any job created before the STT empty-response guard landed)
+        # could end up with status="completed" on disk while the
+        # transcript file is just {"segments": []} — which is what made
+        # the editor open against a blank pane / show "No project
+        # loaded" from the recent-jobs list. Surface those as FAILED so
+        # the user sees something actionable instead of a silent
+        # success.
+        transcript_is_empty = False
+        try:
+            with transcript_file.open("r", encoding="utf-8") as f:
+                _t_raw = json.load(f)
+            if isinstance(_t_raw, dict):
+                _t_segs = _t_raw.get("segments", [])
+            elif isinstance(_t_raw, list):
+                _t_segs = _t_raw
+            else:
+                _t_segs = []
+            transcript_is_empty = len(_t_segs) == 0
+        except Exception:  # noqa: BLE001 — corrupt JSON treated as empty
+            transcript_is_empty = True
+
         meta_file = job_dir / "job_meta.json"
         try:
             if meta_file.exists():
@@ -157,6 +179,19 @@ async def _restore_jobs_from_disk() -> None:
                     transcript_path=str(transcript_file),
                     transcribe_only=True,
                 )
+
+            # Override status for legacy jobs that were marked completed
+            # despite producing no segments. This prevents the editor
+            # from opening an empty transcript pane (or showing "No
+            # project loaded") for jobs that pre-date the STT guard.
+            if transcript_is_empty and job.status == JobStatus.COMPLETED:
+                job.status = JobStatus.FAILED
+                job.phase_label = "Failed — empty transcript"
+                if not job.error:
+                    job.error = (
+                        "Transcription produced 0 segments. The audio "
+                        "may be silent or in an unsupported language."
+                    )
 
             job_state.jobs[job_id] = job
             restored += 1

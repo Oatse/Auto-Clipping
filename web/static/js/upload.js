@@ -83,6 +83,11 @@ function setFile(file) {
   S.setSelectedFile(file);
   fileName.textContent = file.name;
   fileSize.textContent = formatBytes(file.size);
+  // The CSS keys empty/filled visibility off `.dropzone.has-file` on the
+  // parent (forms.css). Toggling only `.hidden` on the inner panes used
+  // to leave the filled pill stuck at `display:none` from its base rule,
+  // which is why the upload card went blank after picking a file.
+  dropZone.classList.add('has-file');
   dropZoneInner.classList.add('hidden');
   fileSelected.classList.remove('hidden');
   transcribeBtn.disabled = false;
@@ -91,9 +96,10 @@ function setFile(file) {
 export function clearFile() {
   S.setSelectedFile(null);
   fileInput.value = '';
+  dropZone.classList.remove('has-file');
   dropZoneInner.classList.remove('hidden');
   fileSelected.classList.add('hidden');
-  transcribeBtn.disabled = true;
+  if (transcribeBtn) transcribeBtn.disabled = true;
 }
 
 // ── Advanced Options ────────────────────────────────────────────────────────
@@ -189,19 +195,18 @@ function setupForm() {
       const job = await apiFetch('/api/jobs', { method: 'POST', body: formData });
       S.setActiveJobId(job.id);
 
-      const modelLabel = whisperModel.options[whisperModel.selectedIndex].text;
-      transcribingFile.textContent = S.selectedFile.name;
-      transcribingStatus.textContent = `Running transcription with ${modelLabel}...`;
-      transcribingLog.textContent = '';
-      showScreen('transcribing');
-
-      await watchTranscription(job.id);
+      // Hand off to /editor/{id} — the editor template owns the
+      // transcribing → preview UX (its scoped DOM and CSS). Doing the
+      // SSE/polling in-place on /auto-subtitle would call
+      // openPreviewScreen() against editor-only IDs (#previewVideo,
+      // #subtitleOverlay, #transcriptBody) and silently TypeError out
+      // as a misleading "Failed to start transcription" toast even
+      // after the job actually completed.
+      window.location.href = `/editor/${job.id}`;
     } catch (err) {
       toast.error('Failed to start transcription: ' + err.message);
-      showScreen('upload');
-    } finally {
       transcribeBtn.classList.remove('loading');
-      transcribeBtn.querySelector('.btn-text').textContent = 'Transcribe & Preview';
+      transcribeBtn.querySelector('.btn-text').textContent = 'Transcribe & preview';
       transcribeBtn.disabled = !S.selectedFile;
     }
   });
@@ -244,12 +249,19 @@ export async function watchTranscription(jobId) {
           sse.close();
 
           const transcript = await fetchTranscript(jobId);
-          if (transcript) {
+          // Treat empty transcript the same as a missing one. Without
+          // this guard the editor would open the preview against an
+          // empty list and present a video with no transcript pane —
+          // the exact symptom screenshot the user reported.
+          if (transcript && transcript.length) {
             S.setTranscriptData(transcript);
             openPreviewScreen(jobId);
             resolve();
           } else {
-            reject(new Error('Could not load transcript'));
+            reject(new Error(
+              'Transcription completed but produced no segments. '
+              + 'The audio may be silent or in an unsupported language.'
+            ));
           }
         } else if (job.status === 'failed') {
           clearInterval(poll);
@@ -392,17 +404,12 @@ export async function startJobFromClip(clipPath, clipFilename) {
     const job = await apiFetch('/api/jobs/from-clip', { method: 'POST', body: formData });
     S.setActiveJobId(job.id);
 
-    const modelLabel = whisperModel.options[whisperModel.selectedIndex].text;
-    transcribingFile.textContent = clipFilename;
-    transcribingStatus.textContent = `Running transcription with ${modelLabel}...`;
-    transcribingLog.textContent = '';
-    showScreen('transcribing');
-
-    await watchTranscription(job.id);
+    // Hand off to the editor — same reasoning as the upload form.
+    // /auto-subtitle does not own the preview DOM, so watching the
+    // transcription in-place ends in a misleading "Failed" toast.
+    window.location.href = `/editor/${job.id}`;
   } catch (err) {
     toast.error('Failed to start transcription: ' + err.message);
-    showScreen('upload');
-  } finally {
     transcribeBtnEl.classList.remove('loading');
     transcribeBtnEl.querySelector('.btn-text').textContent = 'Transcribe & Preview';
     transcribeBtnEl.disabled = !S.selectedFile;

@@ -81,6 +81,27 @@ class ElevenLabsSttEngine(SttEngine):
         segments = self._parse_response(raw_result, speaker_detection)
         logger.info("Parsed {} segments from ElevenLabs response", len(segments))
 
+        # Hard fail when ElevenLabs returns nothing usable. The previous
+        # behaviour silently wrote an empty source_transcript.json and the
+        # editor opened against a blank transcript pane (or the recent-jobs
+        # path showed "No project loaded"), with no signal as to why. Raise
+        # so the route layer marks the job FAILED with a real error message.
+        if not segments:
+            raw_words_count = len(raw_result.get("words", []))
+            raw_text_len = len(raw_result.get("text", "") or "")
+            lang_prob = raw_result.get("language_probability")
+            lang_code = raw_result.get("language_code")
+            duration = raw_result.get("audio_duration_secs")
+            raise RuntimeError(
+                "ElevenLabs returned no usable transcript "
+                f"(language_code={lang_code!r}, "
+                f"language_probability={lang_prob}, "
+                f"audio_duration_secs={duration}, "
+                f"raw_words={raw_words_count}, raw_text_len={raw_text_len}). "
+                "Check that the audio actually contains speech and that the "
+                "language is supported by Scribe."
+            )
+
         # Log actual vs requested speaker count for transparency
         actual_speakers = set(seg.speaker for seg in segments)
         logger.info(

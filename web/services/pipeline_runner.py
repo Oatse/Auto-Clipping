@@ -123,6 +123,17 @@ async def run_transcription_only(
         )
         log(f"✓ ElevenLabs transkripsi selesai: {len(segments)} segmen (bahasa asal)")
 
+        # Defensive guard: ElevenLabsSttEngine.transcribe() raises when it
+        # gets nothing back, but we re-check here so an upstream regression
+        # can never produce a "completed" job with an empty transcript that
+        # the editor would then open against a blank transcript pane.
+        if not segments:
+            raise RuntimeError(
+                "Transcription produced 0 segments. The audio may be "
+                "silent, in a language Scribe doesn't support, or the "
+                "API call returned no words."
+            )
+
         # Save the post-sanitize / pre-translate snapshot used by the
         # legacy "ElevenLabs Original" toggle.  The fully-raw snapshot is
         # written by the engine itself (elevenlabs_words_raw.json).
@@ -216,6 +227,10 @@ async def run_transcription_only(
         job.status = JobStatus.CANCELLED
         job.phase_label = "Cancelled"
         log("Job dibatalkan")
+        # Persist so the restore handler can tell the job didn't succeed
+        # instead of treating any source_transcript.json on disk as proof
+        # of completion.
+        _persist_job_meta(job, output_dir)
 
     except Exception as exc:  # noqa: BLE001
         job.status = JobStatus.FAILED
@@ -223,6 +238,8 @@ async def run_transcription_only(
         job.error = str(exc)
         log(f"✗ Error: {exc}")
         logger.exception("[Job {}] Transcription failed", job.id[:8])
+        # Persist on failure for the same reason as above.
+        _persist_job_meta(job, output_dir)
 
 
 # ─── Phase 2-4 ────────────────────────────────────────────────────────────

@@ -214,7 +214,12 @@ function renderJobs(jobs) {
       ? ` · ${Math.round(job.completed_at - job.started_at)}s`
       : '';
     const hasTranscript = job.has_transcript === true;
-    const actionsBtnHtml = hasTranscript ? `
+    // Hide the resume CTA on failed jobs even if a transcript file
+    // exists on disk — those files can be empty stubs (e.g. legacy
+    // jobs where Scribe returned 0 words). Opening the editor against
+    // them lands on a blank transcript pane / "No project loaded".
+    const canResume = hasTranscript && job.status !== 'failed';
+    const actionsBtnHtml = canResume ? `
       <div class="job-actions">
         <button class="btn-resume-job" data-job-id="${job.id}">
           ▶ Continue Editing
