@@ -1,0 +1,23 @@
+{# job_modal.html — Shared job detail modal.
+   Used by both /auto-subtitle (recent-jobs Details button) and /editor.
+   Without this partial, jobs.js openModal() throws on null DOM refs and
+   the Details button silently does nothing. #}
+<div id="modalOverlay" class="modal-overlay hidden">
+  <div class="modal-card">
+    <div class="modal-head">
+      <span class="modal-title" id="modalTitle">Job</span>
+      <span class="modal-id" id="modalId"></span>
+      <button class="icon-btn" id="modalClose" aria-label="Close modal">
+        <svg width="14" height="14" viewBox="0 0 14 14"><path d="M4 4l6 6M10 4l-6 6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="modal-progress"><div class="modal-progress-bar" id="modalProgressBar"></div></div>
+      <div class="modal-meta"><span class="modal-phase" id="modalPhase">Queued</span><span class="modal-pct" id="modalPct">0%</span></div>
+      <div class="phase-dots" id="phaseDots"></div>
+      <div class="log-body" id="logBody"></div>
+      <div class="modal-actions" id="modalActions"></div>
+      <span class="log-badge" id="logBadge" hidden></span>
+    </div>
+  </div>
+</div>

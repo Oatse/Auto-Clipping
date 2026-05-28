@@ -4,7 +4,7 @@ processors/clip_finder/selection.py — Top-N selection with diversification.
 After scoring, we usually have more candidates than the user actually
 wants. This module picks the best subset using two constraints:
 
-  1. Total score (descending)
+  1. Total score (descending) — profile-aware per ADR-0005
   2. Diversity:
        - Different hunter tags (avoid five "scream" clips in a row)
        - Spread across the timeline (avoid all clips from minute 30-35)
@@ -17,6 +17,22 @@ from typing import Sequence
 
 from models.clip import Clip, HunterTag
 
+from .scoring_profiles import ScoringProfile
+
+
+def _profile_total(clip: Clip, profile: ScoringProfile | str | None) -> float:
+    """Resolve the score total for a clip under the requested profile.
+
+    ADR-0005: when ``profile`` is None, fall back to the Clip's own
+    ``score_profile`` field (set at scoring time by the orchestrator).
+    Falls all the way back to ``ClipScore.total`` (VTuber legacy) when
+    neither is available so unit tests that build bare ``Clip``
+    objects keep working.
+    """
+    if profile is None:
+        profile = getattr(clip, "score_profile", None) or ScoringProfile.VTUBER
+    return clip.score.total_for(profile)
+
 
 def select_top_clips(
     clips: Sequence[Clip],
@@ -25,6 +41,7 @@ def select_top_clips(
     duration_budget: float | None = None,
     diversify_tags: bool = True,
     timeline_buckets: int = 6,
+    profile: ScoringProfile | str | None = None,
 ) -> list[Clip]:
     """Select up to `max_count` clips balancing score and diversity.
 
@@ -36,11 +53,13 @@ def select_top_clips(
     diversify_tags : enforce hunter-tag diversity using a soft penalty
     timeline_buckets : split the source video into N buckets and try to
         cover each bucket before returning to a popular one
+    profile : Scoring Profile to rank by — when omitted, each clip's
+        own ``score_profile`` field is used (ADR-0005)
     """
     if not clips:
         return []
 
-    sorted_clips = sorted(clips, key=lambda c: -c.score.total)
+    sorted_clips = sorted(clips, key=lambda c: -_profile_total(c, profile))
     if not sorted_clips:
         return []
 

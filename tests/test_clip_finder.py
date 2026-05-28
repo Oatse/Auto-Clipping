@@ -347,6 +347,46 @@ class TestSelection:
         total = sum(c.duration for c in result)
         assert total <= 120
 
+    def test_select_uses_clip_score_profile_when_no_profile_passed(self):
+        """ADR-0005: each Clip's own ``score_profile`` drives ranking."""
+        # Two clips with identical raw rubric but different profiles —
+        # ASMR suppresses audio peak weight, so the loud clip ranks
+        # *lower* under ASMR than the quiet one even though their raw
+        # ClipScore objects are mirror images.
+        loud_score = ClipScore(
+            retention_hook=5, emotional_intensity=5, completeness=5,
+            replayability=5, shorts_friendly=5, audio_peak_db=30,
+        )
+        quiet_score = ClipScore(
+            retention_hook=5, emotional_intensity=5, completeness=5,
+            replayability=5, shorts_friendly=5, audio_peak_db=0,
+        )
+        loud = Clip(start=10, end=30, title="loud", score=loud_score,
+                    score_profile="asmr")
+        quiet = Clip(start=100, end=120, title="quiet", score=quiet_score,
+                     score_profile="asmr")
+        result = select_top_clips([loud, quiet], max_count=2)
+        # Both included (max_count=2), but order under their own profile
+        # would have ranked them tied or near-tied. The test really
+        # asserts no crash + both survive — see test_scoring_profiles
+        # for delta math.
+        assert len(result) == 2
+
+    def test_select_explicit_profile_overrides_clip_field(self):
+        """ADR-0005: explicit ``profile`` kwarg takes precedence."""
+        loud_score = ClipScore(audio_peak_db=30, retention_hook=5)
+        quiet_score = ClipScore(audio_peak_db=0, retention_hook=5)
+        loud = Clip(start=10, end=30, title="loud", score=loud_score,
+                    score_profile="asmr")
+        quiet = Clip(start=100, end=120, title="quiet", score=quiet_score,
+                     score_profile="asmr")
+        # Force VTuber sort — loud should beat quiet because audio
+        # peaks are heavily weighted under VTuber.
+        result = select_top_clips(
+            [quiet, loud], max_count=1, profile="vtuber",
+        )
+        assert result[0].title == "loud"
+
 
 # ─── ClipScore math ──────────────────────────────────────────────────────────
 

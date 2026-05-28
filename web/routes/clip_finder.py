@@ -72,6 +72,11 @@ class ClipFinderJob(BaseModel):
     mode: str = "single-shot"           # "single-shot" | "multi-stage"
     enable_audio_signals: bool = True
     enable_chat_signals: bool = True
+    # ADR-0003 Scoring Profile — re-weights ClipScore.total to match the
+    # content niche (vtuber, podcast, news, gaming, asmr). Defaults to
+    # ``vtuber`` which preserves the legacy weight table byte-for-byte
+    # so jobs without an explicit profile produce identical rankings.
+    scoring_profile: str = "vtuber"
     status: str = "queued"
     progress_pct: float = 0.0
     phase_label: str = "Queued"
@@ -96,6 +101,9 @@ class ClipFinderRequest(BaseModel):
     mode: str | None = None             # override config default
     enable_audio_signals: bool | None = None
     enable_chat_signals: bool | None = None
+    # ADR-0003 Scoring Profile (optional, defaults to ``vtuber`` which
+    # is the legacy weighting). Mirrors the All In workspace contract.
+    scoring_profile: str = "vtuber"
 
 
 # ─── Internal helpers ────────────────────────────────────────────────────────
@@ -284,6 +292,19 @@ async def create_clip_finder_job(req: ClipFinderRequest) -> dict:
     if mode not in ("single-shot", "multi-stage"):
         raise HTTPException(status_code=400, detail=f"Invalid mode '{mode}'")
 
+    # ADR-0003: validate scoring profile against the canonical enum so
+    # we fail fast with a clear 400 instead of silently coercing to
+    # VTUBER inside the orchestrator.
+    from processors.clip_finder.scoring_profiles import ScoringProfile
+    try:
+        scoring_profile = ScoringProfile(req.scoring_profile.lower())
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid scoring_profile: {req.scoring_profile!r}. "
+                   "Must be one of: vtuber, podcast, news, gaming, asmr.",
+        )
+
     enable_audio = (
         req.enable_audio_signals
         if req.enable_audio_signals is not None
@@ -305,6 +326,7 @@ async def create_clip_finder_job(req: ClipFinderRequest) -> dict:
         mode=mode,
         enable_audio_signals=bool(enable_audio),
         enable_chat_signals=bool(enable_chat),
+        scoring_profile=scoring_profile.value,
         created_at=time.time(),
     )
     job_state.cf_jobs[job_id] = job
@@ -544,6 +566,7 @@ async def _run_clip_finder_phase1(job_id: str, gemini_keys: list[str]) -> None:
             signals=signals,
             log_fn=log,
             max_count=max_count if job.mode == "multi-stage" else None,
+            scoring_profile=job.scoring_profile,
         )
 
         if not scored_clips:
@@ -567,7 +590,7 @@ async def _run_clip_finder_phase1(job_id: str, gemini_keys: list[str]) -> None:
         log(
             f"Analysis complete! Found {len(scored_clips)} clip(s). "
             f"Top score: "
-            f"{max((c.score.total for c in scored_clips), default=0):.2f}/10"
+            f"{max((c.score.total_for(c.score_profile) for c in scored_clips), default=0):.2f}/10"
         )
         log("Click 'Download Clips' to fetch the video sections.")
         _persist_cf_job(job)

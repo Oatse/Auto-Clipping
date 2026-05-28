@@ -8,6 +8,7 @@ import { escHtml, toast } from './utils.js';
 let cfJobId = null;
 let cfSSE   = null;
 let cfMode  = 'single-shot';
+let cfScoringProfile = 'vtuber';   // ADR-0003 Scoring Profile
 
 // ── VTuber Highlights Preset Instructions ─────────────────────────────────
 const VTUBER_HIGHLIGHTS_PRESET = `Find high-engagement VTuber highlights using these criteria:
@@ -101,6 +102,26 @@ export function setupClipFinder() {
   if (cfModeSingle) cfModeSingle.addEventListener('click', () => setMode('single-shot'));
   if (cfModeMulti)  cfModeMulti.addEventListener('click',  () => setMode('multi-stage'));
 
+  // ADR-0003 Scoring Profile — segmented control. Mirrors the All In
+  // workspace pattern. Stays in module-level cfScoringProfile so the
+  // Find Clips POST body can read it without re-querying the DOM.
+  const cfProfileGroup = document.getElementById('cfScoringProfile');
+  if (cfProfileGroup) {
+    const profileButtons = cfProfileGroup.querySelectorAll('button[data-profile]');
+    profileButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const profile = btn.dataset.profile;
+        if (!profile) return;
+        cfScoringProfile = profile;
+        profileButtons.forEach(b => {
+          const active = b === btn;
+          b.classList.toggle('is-active', active);
+          b.setAttribute('aria-checked', active ? 'true' : 'false');
+        });
+      });
+    });
+  }
+
   // Find Clips button
   cfFindBtn.addEventListener('click', async () => {
     const url = cfUrl.value.trim();
@@ -134,6 +155,7 @@ export function setupClipFinder() {
           mode: cfMode,
           enable_audio_signals: cfEnableAudio ? cfEnableAudio.checked : true,
           enable_chat_signals:  cfEnableChat  ? cfEnableChat.checked  : true,
+          scoring_profile: cfScoringProfile,
         }),
       });
 

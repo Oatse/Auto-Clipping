@@ -151,9 +151,24 @@ def _apply_strategy(
 
 
 def _tight(base: Clip, policy: StrategyPolicy) -> Clip | None:
-    """Trim ``tight_trim_head`` from start and ``tight_trim_tail`` from end."""
+    """Trim ``tight_trim_head`` from start and ``tight_trim_tail`` from end.
+
+    When ``base.punchline_offset`` is set, the tail snaps to
+    ``punchline + tight_trim_tail`` so the Moment ends just past the
+    payoff beat instead of using a fixed-distance trim. The head trim
+    rule is unchanged — punchline only tells us where the payoff is,
+    not whether the head needs more or less context.
+    See May-28 audit "#7" and CONTEXT.md "Punchline".
+    """
     new_start = base.start + policy.tight_trim_head
-    new_end = base.end - policy.tight_trim_tail
+    if base.punchline_offset is not None:
+        # punchline_offset is relative to base.start; absolute end is
+        # base.start + punchline_offset + tail buffer.
+        punchline_end = base.start + base.punchline_offset + policy.tight_trim_tail
+        # Never extend past the original end — tight always shrinks.
+        new_end = min(base.end, punchline_end)
+    else:
+        new_end = base.end - policy.tight_trim_tail
     if new_end - new_start < policy.min_duration:
         return None
     return _clone(base, start=new_start, end=new_end)

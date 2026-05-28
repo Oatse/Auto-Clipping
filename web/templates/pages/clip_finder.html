@@ -105,6 +105,19 @@
               </label>
             </div>
 
+            {# ─── ADR-0003: Scoring Profile ─── #}
+            <div class="field">
+              <span class="field__label">Scoring profile</span>
+              <div class="segmented" role="tablist" id="cfScoringProfile">
+                <button type="button" class="is-active" data-profile="vtuber">VTuber</button>
+                <button type="button" data-profile="podcast">Podcast</button>
+                <button type="button" data-profile="news">News</button>
+                <button type="button" data-profile="gaming">Gaming</button>
+                <button type="button" data-profile="asmr">ASMR</button>
+              </div>
+              <p class="field__hint">Re-weights ranking for the chosen content niche. Detection prompts are unchanged — same Moments, different ranking.</p>
+            </div>
+
             <button type="button" class="btn btn--lg" id="cfFindBtn" style="justify-self:start;">
               <span class="btn-text">Analyse video</span>
               <span class="btn__icon"><svg width="14" height="14" viewBox="0 0 14 14"><circle cx="6" cy="6" r="4" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M9.5 9.5L12 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
