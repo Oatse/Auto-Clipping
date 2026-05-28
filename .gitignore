@@ -27,6 +27,9 @@ cookies.txt
 thumbs.db
 desktop.ini
 nul
+*.lnk
 
 #Folder
 .kiro
+.agents/
+.opencode/
