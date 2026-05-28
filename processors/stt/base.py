@@ -36,6 +36,7 @@ class SttEngine(Protocol):
         *,
         speaker_detection: bool = True,
         num_speakers: int | None = None,
+        language_code: str | None = None,
     ) -> tuple[list[TranscriptSegment], Path]:
         """Run the full STT pipeline.
 
@@ -52,6 +53,11 @@ class SttEngine(Protocol):
         num_speakers:
             Optional hint for the maximum speaker count.  Engines may
             ignore it if they don't support it.
+        language_code:
+            Optional ISO-639-1 / ISO-639-3 hint for the source-language.
+            When supplied, accuracy improves on noisy audio because the
+            engine doesn't have to detect language first.  Engines that
+            don't accept the hint may ignore it.
 
         Returns
         -------

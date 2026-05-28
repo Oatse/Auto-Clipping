@@ -53,6 +53,34 @@ ELEVENLABS_API_KEY: str = ELEVENLABS_API_KEYS[0] if ELEVENLABS_API_KEYS else ""
 DEEPL_API_KEY: str = os.getenv("DEEPL_API_KEY", "")
 
 
+# ─── ElevenLabs Scribe Tuning ────────────────────────────────────────────────
+# Model selection. ``scribe_v2`` is the current state-of-the-art model and
+# is required for ``no_verbatim``. Override to ``scribe_v1`` only when
+# pinning to legacy behaviour during a regression investigation.
+ELEVENLABS_STT_MODEL: str = os.getenv("ELEVENLABS_STT_MODEL", "scribe_v2")
+
+# When True, the STT response will have filler words, false starts, and
+# disfluencies removed by the model itself. NOTE (2026-05-28 audit): in
+# our Japanese sample the effective text length actually grew slightly,
+# suggesting the feature is English-first today. Default OFF; turn on
+# per-deployment if your content is English-heavy.
+ELEVENLABS_NO_VERBATIM: bool = (
+    os.getenv("ELEVENLABS_NO_VERBATIM", "false").lower() == "true"
+)
+
+# Sampling temperature passed to Scribe. 0.0 makes the response as
+# deterministic as the model allows, which makes re-runs reproducible
+# (handy for regression testing the rest of the pipeline).
+ELEVENLABS_STT_TEMPERATURE: float = float(
+    os.getenv("ELEVENLABS_STT_TEMPERATURE", "0")
+)
+
+# Seed paired with ``temperature=0`` to make repeat transcriptions of
+# the same audio return identical results.  Empty string → omit the
+# field from the payload (let Scribe pick its own seed).
+ELEVENLABS_STT_SEED: str = os.getenv("ELEVENLABS_STT_SEED", "42")
+
+
 # ─── yt-dlp ──────────────────────────────────────────────────────────────────
 YTDLP_COOKIES_BROWSER: str = os.getenv("YTDLP_COOKIES_BROWSER", "")  # e.g. "edge", "chrome", "firefox"
 _default_cookies_file = os.path.join(os.path.dirname(__file__), "cookies.txt")

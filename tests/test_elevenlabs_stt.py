@@ -287,3 +287,147 @@ class TestParseResponseSentenceSplit:
         assert len(segments) == 4, (
             f"expected 4 sentence-level segments, got {len(segments)}"
         )
+
+
+# ─── Sprint 1: per-word confidence wiring ───────────────────────────────
+
+
+class TestConfidenceFromLogprob:
+    """Wire ElevenLabs ``logprob`` field through to ``WordTimestamp.score``.
+
+    Scribe v2 returns ``logprob`` in ``[-inf, 0]`` per word.  Mapping
+    ``score = exp(logprob)`` produces a 0..1 probability that the
+    Preview UI can use to flag low-confidence words for review.  This
+    replaces the pre-Sprint-1 hardcoded ``score=1.0``.
+    """
+
+    def test_zero_logprob_maps_to_full_confidence(self):
+        # logprob == 0 means probability == 1 (model perfectly certain).
+        assert ElevenLabsSttEngine._confidence_from_logprob(0.0) == 1.0
+
+    def test_negative_logprob_maps_to_partial_confidence(self):
+        # logprob == -1.16 (sample value from MIKOvsGUNDAM) → ~0.31.
+        score = ElevenLabsSttEngine._confidence_from_logprob(-1.1585392951965332)
+        assert 0.30 < score < 0.32, f"unexpected score {score}"
+
+    def test_missing_logprob_defaults_to_one(self):
+        # Legacy responses + audio_event entries don't carry logprob.
+        # We must not flag those as low confidence.
+        assert ElevenLabsSttEngine._confidence_from_logprob(None) == 1.0
+
+    def test_garbage_logprob_falls_back_to_one(self):
+        # Defensive: malformed payloads must not crash the pipeline.
+        assert ElevenLabsSttEngine._confidence_from_logprob("nonsense") == 1.0
+
+    def test_score_propagates_through_flush(self):
+        # Integration: a word with logprob in the API payload should
+        # land on the ``WordTimestamp.score`` field.
+        engine = _engine()
+        segments: list = []
+        word_payload = _word("hello", 1.0, 1.5)
+        word_payload["logprob"] = -0.6931471805599453  # ln(0.5)
+        engine._flush_speaker_turn(
+            segments=segments,
+            current_words=[word_payload],
+            current_speaker="speaker_0",
+            speaker_detection=True,
+        )
+        assert 0.49 < segments[0].words[0].score < 0.51
+
+
+# ─── Sprint 1: config-driven Scribe payload ─────────────────────────────
+
+
+class TestPayloadHonoursConfig:
+    """The HTTP payload must reflect ``config.ELEVENLABS_*`` knobs.
+
+    Patch ``config`` directly rather than spawn a real httpx call.  We
+    only need to verify that the data-dict assembly inside ``_call_api``
+    picks up the right values; the network round-trip is covered by
+    integration tests outside the pytest suite.
+    """
+
+    def _capture_payload(self, monkeypatch) -> dict:
+        """Patch httpx so the post is intercepted and the form-data captured."""
+        captured: dict = {}
+
+        class _FakeResponse:
+            status_code = 200
+
+            def json(self):  # noqa: D401 — match httpx API
+                return {"words": [], "text": ""}
+
+        class _FakeClient:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *exc):
+                return False
+
+            async def post(self, url, headers=None, files=None, data=None):
+                captured["url"] = url
+                captured["headers"] = headers
+                captured["data"] = dict(data or {})
+                return _FakeResponse()
+
+        import processors.stt.elevenlabs as stt_mod
+        monkeypatch.setattr(stt_mod.httpx, "AsyncClient", _FakeClient)
+        return captured
+
+    async def test_payload_uses_config_model(self, monkeypatch, tmp_path):
+        # Verify model_id, temperature, and seed all come from config.
+        from processors.stt import elevenlabs as stt_mod
+        monkeypatch.setattr(stt_mod.config, "ELEVENLABS_STT_MODEL", "scribe_v2")
+        monkeypatch.setattr(stt_mod.config, "ELEVENLABS_STT_TEMPERATURE", 0.0)
+        monkeypatch.setattr(stt_mod.config, "ELEVENLABS_STT_SEED", "42")
+        monkeypatch.setattr(stt_mod.config, "ELEVENLABS_NO_VERBATIM", False)
+        captured = self._capture_payload(monkeypatch)
+
+        audio = tmp_path / "fake.wav"
+        audio.write_bytes(b"RIFF\x00\x00\x00\x00WAVE")
+        await _engine()._call_api(audio, diarize=True)
+
+        data = captured["data"]
+        assert data["model_id"] == "scribe_v2"
+        assert data["temperature"] == "0.0"
+        assert data["seed"] == "42"
+        assert "no_verbatim" not in data, "no_verbatim must stay opt-in"
+
+    async def test_no_verbatim_only_when_v2_and_enabled(
+        self, monkeypatch, tmp_path,
+    ):
+        # Sending no_verbatim=true to scribe_v1 returns 400.  The engine
+        # must suppress the flag when the active model is v1 even if the
+        # env knob is set — defense in depth against accidental config.
+        from processors.stt import elevenlabs as stt_mod
+        monkeypatch.setattr(stt_mod.config, "ELEVENLABS_STT_MODEL", "scribe_v1")
+        monkeypatch.setattr(stt_mod.config, "ELEVENLABS_NO_VERBATIM", True)
+        monkeypatch.setattr(stt_mod.config, "ELEVENLABS_STT_TEMPERATURE", 0.0)
+        monkeypatch.setattr(stt_mod.config, "ELEVENLABS_STT_SEED", "")
+        captured = self._capture_payload(monkeypatch)
+
+        audio = tmp_path / "fake.wav"
+        audio.write_bytes(b"RIFF\x00\x00\x00\x00WAVE")
+        await _engine()._call_api(audio, diarize=True)
+
+        assert "no_verbatim" not in captured["data"], (
+            "no_verbatim leaked into a scribe_v1 request"
+        )
+
+    async def test_language_code_pass_through(self, monkeypatch, tmp_path):
+        # When the caller hints a language, it lands on the wire.
+        from processors.stt import elevenlabs as stt_mod
+        monkeypatch.setattr(stt_mod.config, "ELEVENLABS_STT_MODEL", "scribe_v2")
+        monkeypatch.setattr(stt_mod.config, "ELEVENLABS_STT_TEMPERATURE", 0.0)
+        monkeypatch.setattr(stt_mod.config, "ELEVENLABS_STT_SEED", "")
+        monkeypatch.setattr(stt_mod.config, "ELEVENLABS_NO_VERBATIM", False)
+        captured = self._capture_payload(monkeypatch)
+
+        audio = tmp_path / "fake.wav"
+        audio.write_bytes(b"RIFF\x00\x00\x00\x00WAVE")
+        await _engine()._call_api(audio, diarize=True, language_code="jpn")
+
+        assert captured["data"].get("language_code") == "jpn"

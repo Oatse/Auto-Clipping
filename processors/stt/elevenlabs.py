@@ -10,6 +10,7 @@ Gemini during the translation phase.
 from __future__ import annotations
 
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -60,6 +61,7 @@ class ElevenLabsSttEngine(SttEngine):
         *,
         speaker_detection: bool = True,
         num_speakers: int | None = None,
+        language_code: str | None = None,
     ) -> tuple[list[TranscriptSegment], Path]:
         """
         Full ElevenLabs STT pipeline: extract audio -> API call -> parse segments.
@@ -80,9 +82,16 @@ class ElevenLabsSttEngine(SttEngine):
         logger.info("Audio extracted: {}", audio_path)
 
         # Step 2: Call ElevenLabs API
-        logger.info("ElevenLabs STT Step 2: Sending audio to ElevenLabs API...")
+        logger.info(
+            "ElevenLabs STT Step 2: Sending audio to ElevenLabs API "
+            "(model={})...",
+            config.ELEVENLABS_STT_MODEL,
+        )
         raw_result = await self._call_api(
-            audio_path, diarize=speaker_detection, num_speakers=num_speakers
+            audio_path,
+            diarize=speaker_detection,
+            num_speakers=num_speakers,
+            language_code=language_code,
         )
         logger.info("ElevenLabs API response received")
 
@@ -155,6 +164,7 @@ class ElevenLabsSttEngine(SttEngine):
         audio_path: Path,
         diarize: bool = True,
         num_speakers: int | None = None,
+        language_code: str | None = None,
     ) -> dict:
         """Call the ElevenLabs Speech-to-Text API, rotating keys on error."""
         last_error: str = "no keys configured"
@@ -167,12 +177,25 @@ class ElevenLabsSttEngine(SttEngine):
                 async with httpx.AsyncClient(timeout=600.0) as client:
                     with audio_path.open("rb") as f:
                         files = {"file": (audio_path.name, f, "audio/wav")}
-                        data = {
-                            "model_id": "scribe_v1",
+                        data: dict[str, str] = {
+                            "model_id": config.ELEVENLABS_STT_MODEL,
                             "timestamps_granularity": "word",
                             "diarize": str(diarize).lower(),
                             "tag_audio_events": "false",
+                            "temperature": str(config.ELEVENLABS_STT_TEMPERATURE),
                         }
+                        if config.ELEVENLABS_STT_SEED:
+                            data["seed"] = str(config.ELEVENLABS_STT_SEED)
+                        # ``no_verbatim`` is a scribe_v2-only flag.  Sending
+                        # it to scribe_v1 returns 400, so suppress unless
+                        # the active model actually supports it.
+                        if (
+                            config.ELEVENLABS_NO_VERBATIM
+                            and config.ELEVENLABS_STT_MODEL.startswith("scribe_v2")
+                        ):
+                            data["no_verbatim"] = "true"
+                        if language_code:
+                            data["language_code"] = language_code
                         if num_speakers is not None and diarize:
                             data["num_speakers"] = str(num_speakers)
                             logger.info(
@@ -364,6 +387,27 @@ class ElevenLabsSttEngine(SttEngine):
     # pass in ``processors.timing.sanitizer`` from rounding back to zero.
     _MIN_WORD_DURATION = 0.05
 
+    @staticmethod
+    def _confidence_from_logprob(logprob: float | None) -> float:
+        """Map Scribe's per-word ``logprob`` to a 0..1 confidence score.
+
+        Scribe returns ``logprob`` in ``[-inf, 0]`` (higher = more
+        confident, see OpenAPI ``SpeechToTextWordResponseModel``).  We
+        expose it via ``WordTimestamp.score`` so downstream UI can
+        flag low-confidence words for human review.
+
+        ``None`` (legacy responses or audio_event entries that don't
+        carry a logprob) falls back to ``1.0`` to preserve the
+        pre-refactor default — callers should not treat the absence of
+        a logprob as low confidence.
+        """
+        if logprob is None:
+            return 1.0
+        try:
+            return round(math.exp(float(logprob)), 4)
+        except (TypeError, ValueError, OverflowError):
+            return 1.0
+
     def _flush_speaker_turn(
         self,
         segments: list[TranscriptSegment],
@@ -386,7 +430,7 @@ class ElevenLabsSttEngine(SttEngine):
                     word=cw["text"].strip(),
                     start=w_start,
                     end=w_end,
-                    score=1.0,
+                    score=self._confidence_from_logprob(cw.get("logprob")),
                     source="elevenlabs",
                 )
             )
