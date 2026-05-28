@@ -59,7 +59,7 @@ class ClipScorer:
             for c in candidates
         ]
         llm_scores = await self._llm_rubric(
-            candidates, transcript, instructions, log_fn
+            candidates, transcript, instructions, signals, log_fn
         )
 
         clips: list[Clip] = []
@@ -73,10 +73,22 @@ class ClipScorer:
                 audio_peak_db=det["audio_peak_db"],
                 chat_spike_ratio=det["chat_spike_ratio"],
                 duration_fit=det["duration_fit"],
+                coincidence_bonus=det.get("coincidence_bonus", 0.0),
             )
             overlapping_signals = self._signals_in_range(cand, signals)
             clip = Clip.from_candidate(cand, score=score)
             clip.signals = overlapping_signals
+            # Punchline (#7): clamp into [0, duration] so a hallucinated
+            # offset can never push downstream consumers off the end of
+            # the Moment. None means "no opinion" — kept as-is.
+            raw_punchline = llm.get("punchline_seconds_from_start")
+            if raw_punchline is not None:
+                try:
+                    p = float(raw_punchline)
+                    p = max(0.0, min(cand.duration, p))
+                    clip.punchline_offset = round(p, 3)
+                except (TypeError, ValueError):
+                    pass
             clips.append(clip)
 
         return clips
@@ -150,10 +162,29 @@ class ClipScorer:
             spread = (max_clip - min_clip) / 2.0 + 1.0
             duration_fit = max(0.0, 10.0 - abs(dur - target) / spread * 5.0)
 
+        # Co-occurrence bonus — audio peak AND chat spike inside the
+        # same range is the highest-precision predictor per chat_signals.
+        # We compute the temporal overlap (in seconds) between the
+        # strongest peak and any chat-class spike; bigger overlap = more
+        # confident the moment is clip-worthy. Capped at 10.0 so it
+        # never dominates the LLM rubric. See May-28 audit "#6".
+        coincidence_bonus = 0.0
+        if peaks and chat_spikes:
+            best_overlap = 0.0
+            for p in peaks:
+                for s in chat_spikes:
+                    ov_start = max(p.start, s.start)
+                    ov_end = min(p.end, s.end)
+                    if ov_end > ov_start:
+                        best_overlap = max(best_overlap, ov_end - ov_start)
+            # 0s overlap → 0 bonus, 5s overlap → 10 bonus.
+            coincidence_bonus = min(10.0, best_overlap * 2.0)
+
         return {
             "audio_peak_db": round(max_peak_db, 2),
             "chat_spike_ratio": round(max_chat_ratio, 2),
             "duration_fit": round(duration_fit, 2),
+            "coincidence_bonus": round(coincidence_bonus, 2),
         }
 
     # ── Stage 2: LLM rubric ──────────────────────────────────────────────
@@ -163,6 +194,7 @@ class ClipScorer:
         candidates: Sequence[ClipCandidate],
         transcript: Sequence[Segment],
         instructions: str,
+        signals: Sequence[SignalEvent],
         log_fn: LogFn | None,
     ) -> list[dict[str, float]]:
         if not self._client:
@@ -191,6 +223,7 @@ class ClipScorer:
             candidates=candidates,
             transcript=condensed,
             instructions=instructions,
+            signals=signals,
         )
 
         try:
@@ -238,12 +271,25 @@ class ClipScorer:
                 continue
             if not (0 <= idx_int < expected):
                 continue
+            # ``punchline_seconds_from_start`` is optional — null when
+            # the candidate has no single payoff beat. We pass it
+            # through as-is (None or float) so the caller can tell the
+            # difference between "no opinion" and "0 s".
+            punchline = obj.get("punchline_seconds_from_start")
+            try:
+                punchline_val: float | None = (
+                    float(punchline) if punchline is not None else None
+                )
+            except (TypeError, ValueError):
+                punchline_val = None
+
             out[idx_int] = {
                 "retention_hook": _coerce(obj.get("retention_hook"), 5.0),
                 "emotional_intensity": _coerce(obj.get("emotional_intensity"), 5.0),
                 "completeness": _coerce(obj.get("completeness"), 5.0),
                 "replayability": _coerce(obj.get("replayability"), 5.0),
                 "shorts_friendly": _coerce(obj.get("shorts_friendly"), 5.0),
+                "punchline_seconds_from_start": punchline_val,
             }
         return out
 

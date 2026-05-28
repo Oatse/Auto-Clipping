@@ -111,7 +111,8 @@ class HunterRunner:
         video_duration: float,
         signals: Sequence[SignalEvent] | None = None,
         hunters: Sequence[HunterSpec] = DEFAULT_HUNTERS,
-        parallel: bool = False,
+        parallel: bool = True,
+        max_concurrency: int = 4,
         log_fn: LogFn | None = None,
     ) -> list[ClipCandidate]:
         working = transcript
@@ -158,7 +159,18 @@ class HunterRunner:
             return cands
 
         if parallel:
-            results = await asyncio.gather(*(_run_one(h) for h in hunters))
+            # Bounded concurrency — Gemini key rotation handles single-key
+            # 429s, but firing 8 hunters at once still risks per-project
+            # quota throttling. Cap parallel calls so the practical
+            # speed-up (8 sequential ≈ 60 s → bounded ≈ 15-20 s) stays
+            # without saturating the rate-limit budget.
+            sem = asyncio.Semaphore(max(1, max_concurrency))
+
+            async def _run_bounded(h: HunterSpec) -> list[ClipCandidate]:
+                async with sem:
+                    return await _run_one(h)
+
+            results = await asyncio.gather(*(_run_bounded(h) for h in hunters))
         else:
             results = []
             for h in hunters:

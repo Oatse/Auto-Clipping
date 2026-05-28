@@ -1057,67 +1057,10 @@ input[type="color"].speaker-stroke-input::-webkit-color-swatch { border: 0; bord
 .split-preview-text { font-size: var(--fs-13); color: var(--c-noir-text); }
 .split-preview-divider { color: var(--c-noir-mute); font-size: var(--fs-20); }
 
-/* Modal overlay (legacy IDs) */
-.modal-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: var(--z-modal);
-  display: grid; place-items: center;
-  background: rgba(0,0,0,0.55);
-  -webkit-backdrop-filter: blur(16px);
-          backdrop-filter: blur(16px);
-}
-.modal-card {
-  width: min(640px, 92vw);
-  background: var(--c-noir-surf);
-  border-radius: var(--r-7);
-  padding: var(--s-5) var(--s-6) var(--s-6);
-  box-shadow: var(--sh-4), inset 0 0 0 1px var(--c-noir-line);
-}
-.modal-head {
-  display: flex; align-items: center; justify-content: space-between;
-  gap: var(--s-3);
-  margin-bottom: var(--s-4);
-}
-.modal-title {
-  font-family: var(--f-display); font-weight: 700; font-size: var(--fs-20);
-  letter-spacing: var(--tr-snug);
-}
-.modal-id { font-family: var(--f-mono); font-size: var(--fs-12); color: var(--c-noir-mute); }
-.modal-progress { height: 4px; background: var(--c-noir-line); border-radius: 999px; overflow: hidden; }
-.modal-progress-bar { height: 100%; background: var(--c-lime); width: 0%; transition: width var(--d-3) var(--ease-out); }
-.modal-meta {
-  display: flex; justify-content: space-between;
-  font-size: var(--fs-13); margin-block: var(--s-3);
-}
-.modal-meta .modal-pct { font-family: var(--f-mono); }
-.phase-dots { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: var(--s-3); }
-.phase-dots span,
-.phase-dots .phase-dot {
-  height: 6px; flex: 1; border-radius: 999px;
-  background: var(--c-noir-line);
-  min-width: 24px;
-  transition: background-color var(--d-2) var(--ease-out);
-}
-.phase-dots span.is-done,
-.phase-dots .phase-dot.done { background: var(--c-lime); }
-.phase-dots span.is-active,
-.phase-dots .phase-dot.active { background: var(--c-paper); }
-.log-body {
-  font-family: var(--f-mono);
-  font-size: var(--fs-12);
-  color: var(--c-noir-mute);
-  background: var(--c-noir-bg);
-  border-radius: var(--r-4);
-  padding: var(--s-3);
-  max-height: 200px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-}
-.modal-actions {
-  display: flex; gap: var(--s-3); justify-content: flex-end;
-  margin-top: var(--s-4);
-}
+/* Modal overlay (legacy IDs) — moved to pages.css so /auto-subtitle
+ * can render the shared job_modal partial too. Kept here as a comment
+ * so future readers don't reintroduce the duplicate.
+ */
 
 /* Toast / undo */
 .toast-container {

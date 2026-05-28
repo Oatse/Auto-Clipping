@@ -36,29 +36,63 @@ from models.clip import Clip
 
 # ─── Hook lexicon ────────────────────────────────────────────────────────────
 #
-# Bilingual (English + Indonesian) — covers the two languages this project
-# already supports through ElevenLabs Scribe and the existing UI strings.
-# Lower-cased exact-match against the first transcript word.
+# English-only with JP→EN translation patterns. The project's primary
+# clipping target is JP VTuber content with auto-translated EN
+# subtitles, so the lexicon is biased toward:
+#
+#   - Reaction interjections that translators commonly preserve from
+#     JP (え→eh, はぁ→huh, ちょっと→wait, マジ→for real).
+#   - Romanised JP that bleeds into translated subs because translators
+#     leave them as-is (yabai, sugoi, nani, oi).
+#   - Translator-stage tags that almost always sit on top of clip-worthy
+#     reactions ([laughs], [gasps], [screams]).
+#
+# Lower-cased exact-match against the first transcript word, with one
+# extra pass for square-bracketed reaction tags.
 
 _HOOK_QUESTION_WORDS = frozenset({
-    # English
     "what", "why", "how", "who", "when", "where", "which", "wait",
     "did", "do", "does", "is", "are", "was", "were", "can", "could",
-    "would", "should", "have", "has", "ever",
-    # Indonesian
-    "apa", "kenapa", "bagaimana", "siapa", "kapan", "dimana", "mana",
-    "bukankah", "kok", "sudah", "udah", "pernah", "kira",
+    "would", "should", "have", "has", "ever", "really", "seriously",
 })
 
 _HOOK_INTERJECTIONS = frozenset({
-    # English
+    # Native English reaction openers
     "oh", "ohh", "ooh", "wow", "whoa", "yo", "hey", "look", "listen",
     "bro", "dude", "guys", "stop", "no", "hold", "behold", "okay",
-    "alright", "lol", "lmao", "omg", "damn",
-    # Indonesian
-    "wah", "wih", "astaga", "ya", "loh", "lho", "weh", "eh", "kawan",
-    "bro", "guys", "anjir", "anjay", "gila", "duh", "yaampun",
+    "alright", "lol", "lmao", "omg", "damn", "nah", "huh", "hah",
+    "noo", "nooo", "noooo", "whaaat",
+    # Translator-preserved JP reactions (transliterated to romaji)
+    "eh", "ehh", "eee", "eeh", "eeeh", "ehhh",
+    # Romanised JP that commonly bleeds into translated EN subs
+    "yabai", "yaba", "sugoi", "sugee", "maji", "nani", "oi", "oii",
+    "kawaii", "kawai", "ehhh", "naruhodo",
 })
+
+# Compound openers — phrases of 2-3 tokens that act as a single hook.
+# Matched against the first N tokens of the look-ahead window.
+_HOOK_COMPOUNDS = (
+    ("hold", "on"),
+    ("wait", "wait"),
+    ("wait", "what"),
+    ("no", "way"),
+    ("for", "real"),
+    ("are", "you", "kidding"),
+    ("you're", "kidding"),
+    ("oh", "my"),
+    ("oh", "no"),
+    ("are", "you", "serious"),
+)
+
+# Translator-stage reaction tags — content in square or round brackets
+# at the start of a segment, e.g. ``[laughs]``, ``(gasps)``,
+# ``[in Japanese]``. These are an extremely strong hook signal because
+# the translator only emits them when the reaction is too noteworthy
+# to leave un-annotated.
+_HOOK_TAG_RE = re.compile(r"^[\[\(](?:laughs?|laughing|gasps?|screams?|"
+                          r"shouting|shouts|chuckles?|sighs?|in japanese|"
+                          r"in jp|whispers?|inhales?|exhales?)[\]\)]",
+                          re.IGNORECASE)
 
 # Strong sentence-final punctuation that signals a closed beat — useful
 # to avoid grabbing a hook that lives in the middle of a sentence we
@@ -149,21 +183,75 @@ def _find_hook_start(
     if not window_words:
         return None
 
-    # Skip hook detection on the very first word — that's already the start.
-    # We're looking for a *better* anchor than what silence-snap gave us.
+    # Translator-stage reaction tag at the very start (``[laughs]``,
+    # ``[gasps]``, etc.) is a strong signal — JP→EN translators only
+    # emit these when the moment is noteworthy. We accept it as the
+    # opening hook even though it's the *first* word of the segment.
+    first_word_text = window_words[0][0]
+    if _HOOK_TAG_RE.match(first_word_text.strip()):
+        return window_words[0][1]
+
+    # Skip plain hook detection on the very first word — that's already
+    # the start. We're looking for a *better* anchor than what
+    # silence-snap gave us.
     candidate_words = window_words[1:] if len(window_words) > 1 else []
     if not candidate_words:
         return None
 
-    # Pick the *latest* hook in the window. Shifting later trims more dead
-    # air at the head; the earliest hook would just put us back near the
-    # original start. Bounded by window_seconds anyway.
+    # Pass 1: compound openers (e.g. ``hold on``, ``no way``). These
+    # take precedence over single-word hits because translated EN often
+    # builds reactions out of multi-token phrases that single-word
+    # match would miss the *start* of.
+    compound_t = _find_compound_match(window_words, _HOOK_COMPOUNDS)
+    if compound_t is not None:
+        return compound_t
+
+    # Pass 2: single-word hooks. Pick the *latest* hook in the window —
+    # shifting later trims more dead air at the head; the earliest hook
+    # would just put us back near the original start. Bounded by
+    # window_seconds anyway.
     best_t: float | None = None
     for word_text, word_start in candidate_words:
         if _is_hook_word(word_text):
             if best_t is None or word_start > best_t:
                 best_t = word_start
 
+    return best_t
+
+
+def _find_compound_match(
+    window_words: Sequence[tuple[str, float]],
+    compounds: Sequence[tuple[str, ...]],
+) -> float | None:
+    """Return start time of the *latest* compound-opener match in window.
+
+    Compounds are matched left-to-right against consecutive words.
+    Returns the timestamp of the matching head token so the Moment
+    starts on the full phrase, not partway through it.
+
+    Two rules borrowed from the single-word path so behaviour stays
+    consistent:
+
+    * Matches at index 0 are skipped — that's the existing start; we
+      need a *better* anchor to justify a shift.
+    * Among multiple matches, prefer the latest one (trims more dead
+      air at the head, bounded by the window).
+    """
+    cleaned = [
+        (
+            w.strip().strip(".,!?…:;\"'()[]").lower(),
+            t,
+        )
+        for w, t in window_words
+    ]
+    best_t: float | None = None
+    for compound in compounds:
+        for i in range(1, len(cleaned) - len(compound) + 1):
+            slice_ = [w for w, _ in cleaned[i:i + len(compound)]]
+            if tuple(slice_) == compound:
+                head_t = cleaned[i][1]
+                if best_t is None or head_t > best_t:
+                    best_t = head_t
     return best_t
 
 

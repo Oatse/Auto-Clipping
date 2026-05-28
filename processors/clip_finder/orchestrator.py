@@ -263,6 +263,7 @@ class ClipFinder:
             video_duration=video_duration,
             profile=profile,
             strategies=strategies,
+            max_count=max_count,
             log_fn=log_fn,
         )
 
@@ -280,6 +281,7 @@ class ClipFinder:
         video_duration: float,
         profile: ScoringProfile = ScoringProfile.VTUBER,
         strategies: Sequence[CutStrategy] = (),
+        max_count: int | None = None,
         log_fn: LogFn | None = None,
     ) -> list[Clip]:
         detector = ClipDetector(client)
@@ -340,7 +342,25 @@ class ClipFinder:
                 strategies=strategies,
             )
 
+        # ADR-0005: stamp score_profile BEFORE any selection / sort.
         clips = self._apply_scoring_profile(clips, profile)
+
+        # Optional diversified selection. Single-shot historically
+        # returned every detected clip; we preserve that default by
+        # only running selection when ``max_count`` is explicitly set.
+        # See ADR-0005 — bug #2 in the May-28 audit.
+        if max_count is not None:
+            clips = selection.select_top_clips(
+                clips,
+                max_count=max_count,
+                profile=profile,
+            )
+            if log_fn:
+                log_fn(
+                    f"Single-shot diversified to {len(clips)} clip(s) "
+                    f"(max_count={max_count})"
+                )
+
         return sorted(clips, key=lambda c: c.start)
 
     async def _find_multi_stage(
@@ -382,8 +402,34 @@ class ClipFinder:
                 min_clip=min_clip,
                 max_clip=max_clip,
                 video_duration=video_duration,
+                profile=profile,
+                strategies=strategies,
                 log_fn=log_fn,
             )
+
+        # Rescue pass — Hunters only fire on aspects they recognise, so
+        # genuinely clip-worthy moments that don't match any aspect
+        # (long monologue, touching exchange, slow burn) get dropped.
+        # Re-use the same recheck logic single-shot already has so the
+        # two modes converge on the same coverage guarantee.
+        # See May-28 audit "Bug #5".
+        detector = ClipDetector(client)
+        rescued = await detector.recheck(
+            transcript=transcript,
+            selected=candidates,
+            instructions=instructions or "",
+            min_clip=min_clip,
+            max_clip=max_clip,
+            video_duration=video_duration,
+            log_fn=log_fn,
+        )
+        if rescued:
+            candidates = list(candidates) + rescued
+            if log_fn:
+                log_fn(
+                    f"Multi-stage: hunters {len(candidates) - len(rescued)} + "
+                    f"rescued {len(rescued)} = {len(candidates)} candidate(s)"
+                )
 
         # Score with full LLM rubric
         scorer = ClipScorer(client=client)
@@ -398,14 +444,34 @@ class ClipFinder:
         )
 
         clips = boundary.refine_boundaries(
-            clips, signals, min_duration=min_clip * 0.6
+            clips,
+            signals,
+            min_duration=min_clip * 0.6,
+            transcript=list(transcript) if transcript else None,
         )
         clips = deduplicate_clips(clips)
+
+        # Cut Strategies fan-out — only when explicitly requested.
+        # ADR-0003: strategies run after boundary refinement and before
+        # final selection so each derived Moment is ranked on its own
+        # merits (current pipeline scores once before fan-out; per-derived
+        # scoring is a future v1.1 — see ADR-0003 "Out of scope").
+        if strategies:
+            clips = expand_cut_strategies(
+                clips,
+                list(transcript) if transcript else None,
+                strategies=strategies,
+            )
+
+        # ADR-0005: stamp score_profile on every Clip BEFORE selection
+        # so select_top_clips ranks under the Job's chosen profile.
+        clips = self._apply_scoring_profile(clips, profile)
 
         # Diversified selection
         chosen = selection.select_top_clips(
             clips,
             max_count=max_count or 12,
+            profile=profile,
         )
         if log_fn:
             log_fn(
@@ -421,29 +487,18 @@ class ClipFinder:
         clips: list[Clip],
         profile: ScoringProfile,
     ) -> list[Clip]:
-        """Recompute ``ClipScore.total`` for every clip under ``profile``.
+        """Stamp ``score_profile`` on every Clip per ADR-0005.
 
-        Mutation is in-place on the score object — but we never compare
-        scores by identity in the rest of the pipeline, so this is safe.
-        Default profile is VTUBER, which matches the legacy ``total``
-        property byte-for-byte.
+        ``ClipScore`` itself stays profile-agnostic — the per-Clip
+        ``score_profile`` field is what drives ``Clip.to_dict()``,
+        ``select_top_clips``, and any downstream sort. The legacy
+        ``ClipScore.total`` property remains a VTuber-default alias per
+        ADR-0003, so callers that bypass ``Clip`` and read the score
+        directly still see byte-for-byte legacy behaviour.
         """
-        if profile == ScoringProfile.VTUBER:
-            return clips  # legacy path — no recomputation needed
+        profile_value = profile.value if isinstance(profile, ScoringProfile) else str(profile)
         for clip in clips:
-            # Patch ``total`` attribute by replacing the score's
-            # serialisation. We can't override the @property, so instead
-            # we adjust each contributing field's relative weight inside
-            # the dict that ``to_dict`` returns. Simplest is just to keep
-            # ``score`` unchanged and rely on ``total_for(profile)`` at
-            # selection time (see selection.select_top_clips).
-            #
-            # For sort-by-score in the default sorted() call below, we
-            # bind a sidecar attribute the rest of the code can read.
-            try:
-                setattr(clip, "_profile_total", clip.score.total_for(profile))
-            except Exception:  # noqa: BLE001 — never crash on a sort key.
-                setattr(clip, "_profile_total", clip.score.total)
+            clip.score_profile = profile_value
         return clips
 
     async def download_clip_sections(

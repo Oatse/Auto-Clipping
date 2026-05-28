@@ -72,6 +72,12 @@ class ProfileWeights:
     audio_norm_w: float
     chat_norm_w: float
     duration_fit_w: float
+    # Bonus weight for audio-peak AND chat-spike co-occurrence inside the
+    # same Moment range. The audit found this is the highest-precision
+    # predictor of clip-worthiness; per-profile so ASMR / news can keep
+    # the multiplier near zero. Defaulted so existing ProfileWeights
+    # callers still construct cleanly. See May-28 audit "#6".
+    coincidence_bonus_w: float = 0.0
 
 
 # ─── Profile tables ──────────────────────────────────────────────────────────
@@ -106,6 +112,7 @@ PROFILES: dict[ScoringProfile, ProfileWeights] = {
         audio_norm_w=0.05,
         chat_norm_w=0.05,
         duration_fit_w=0.10,
+        coincidence_bonus_w=0.10,    # audio peak + chat spike = jackpot
     ),
     ScoringProfile.PODCAST: ProfileWeights(
         retention_hook=0.20,
@@ -116,6 +123,7 @@ PROFILES: dict[ScoringProfile, ProfileWeights] = {
         audio_norm_w=0.02,
         chat_norm_w=0.0,
         duration_fit_w=0.18,
+        coincidence_bonus_w=0.0,     # podcasts rarely have live chat
     ),
     ScoringProfile.NEWS: ProfileWeights(
         retention_hook=0.30,
@@ -126,6 +134,7 @@ PROFILES: dict[ScoringProfile, ProfileWeights] = {
         audio_norm_w=0.02,
         chat_norm_w=0.0,
         duration_fit_w=0.18,
+        coincidence_bonus_w=0.0,
     ),
     ScoringProfile.GAMING: ProfileWeights(
         retention_hook=0.20,
@@ -136,6 +145,7 @@ PROFILES: dict[ScoringProfile, ProfileWeights] = {
         audio_norm_w=0.07,
         chat_norm_w=0.05,
         duration_fit_w=0.13,
+        coincidence_bonus_w=0.08,    # crowd reaction matters in gaming clips
     ),
     ScoringProfile.ASMR: ProfileWeights(
         retention_hook=0.15,
@@ -146,6 +156,7 @@ PROFILES: dict[ScoringProfile, ProfileWeights] = {
         audio_norm_w=0.0,            # peaks are anti-signal in ASMR
         chat_norm_w=0.0,
         duration_fit_w=0.20,
+        coincidence_bonus_w=0.0,     # ASMR clips are about consistency, not spikes
     ),
 }
 

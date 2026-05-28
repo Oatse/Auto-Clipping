@@ -42,8 +42,12 @@ The first 1-3 seconds of a **Moment** that determine whether a viewer keeps watc
 _Avoid_: Intro, opener, lead.
 
 **Punchline**:
-The single word (or short phrase) inside a **Moment** that carries the payoff — the one the renderer should pop / colour / zoom. Tagged by Gemini during scoring; consumed by the captioning stage as a `punchline_word_idx` hint in `style_config`.
+The single word (or short phrase) inside a **Moment** that carries the payoff — the one the renderer should pop / colour / zoom. Tagged by Gemini during scoring as `punchline_offset` (seconds from `Moment.start`). Consumed by `cut_strategies.tight` to anchor the trim tail and by the captioning stage as a hint for emphasis.
 _Avoid_: Highlight word, key word.
+
+**Crowd Sync**:
+A bonus dimension in `ClipScore` that fires when an audio peak and a chat spike fall inside the same time window — the moments where the creator and the audience reacted in unison, not just one of them. Stored as `score.coincidence_bonus` (0-10) on the **Clip**, and surfaced on the **Clip Card** as a flame marker once it crosses a salience threshold.
+_Avoid_: Coincidence, hot moment, combo, resonance, spike sync.
 
 **Scene Cut**:
 A timed visual transition extracted from the source video using ffmpeg's `select=gt(scene,N)`. Stored as a `SignalEvent` of kind `SCENE_CUT`. Reframe re-runs its smart-static crop computation per scene segment so the subject stays in frame after a cut.

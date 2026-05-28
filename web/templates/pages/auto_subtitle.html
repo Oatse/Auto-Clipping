@@ -202,8 +202,9 @@
 
 {% include "_partials/process_screen.html" %}
 
-<!-- Modals (preserved IDs from legacy) -->
-<div id="modalOverlay" class="hidden"></div>
+<!-- Job detail modal (shared with /editor — required for the
+     "Details" button on Recent Jobs cards to render) -->
+{% include "_partials/job_modal.html" %}
 {% endblock %}
 
 {% block scripts %}

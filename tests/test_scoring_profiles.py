@@ -223,3 +223,63 @@ class TestScoreClamping:
         s = ClipScore()
         for profile in ScoringProfile:
             assert s.total_for(profile) == 0.0
+
+
+# ─── ADR-0005: score_profile travels with Clip ───────────────────────────────
+
+
+class TestClipScoreProfileField:
+    """ADR-0005: ``Clip.score_profile`` drives serialised ``score.total``."""
+
+    def _spike_score(self) -> ClipScore:
+        return ClipScore(
+            retention_hook=8.0,
+            emotional_intensity=9.0,
+            completeness=3.0,
+            replayability=4.0,
+            shorts_friendly=8.0,
+            audio_peak_db=25.0,
+            chat_spike_ratio=4.0,
+            duration_fit=8.0,
+        )
+
+    def test_to_dict_total_reflects_profile(self):
+        from models.clip import Clip
+
+        score = self._spike_score()
+        clip_vt = Clip(start=0, end=20, title="x", score=score,
+                       score_profile="vtuber")
+        clip_pc = Clip(start=0, end=20, title="x", score=score,
+                       score_profile="podcast")
+        # Same raw ClipScore → different total in serialised form.
+        assert clip_vt.to_dict()["score"]["total"] != clip_pc.to_dict()["score"]["total"]
+        # And each total matches ``total_for(profile)`` exactly.
+        assert clip_vt.to_dict()["score"]["total"] == score.total_for("vtuber")
+        assert clip_pc.to_dict()["score"]["total"] == score.total_for("podcast")
+
+    def test_default_score_profile_is_vtuber(self):
+        from models.clip import Clip
+
+        clip = Clip(start=0, end=20, title="x")
+        assert clip.score_profile == "vtuber"
+        # Default round-trip preserves legacy behaviour byte-for-byte.
+        assert clip.to_dict()["score"]["total"] == clip.score.total
+
+    def test_round_trip_preserves_profile(self):
+        from models.clip import Clip
+
+        clip = Clip(start=0, end=20, title="x", score=self._spike_score(),
+                    score_profile="news")
+        d = clip.to_dict()
+        restored = Clip.from_dict(d)
+        assert restored.score_profile == "news"
+        assert restored.to_dict()["score"]["total"] == d["score"]["total"]
+
+    def test_unknown_profile_falls_back_silently(self):
+        from models.clip import Clip
+
+        clip = Clip(start=0, end=20, title="x", score=self._spike_score(),
+                    score_profile="this-profile-does-not-exist")
+        # Should not raise — ``weights_for`` falls back to VTuber.
+        total = clip.to_dict()["score"]["total"]
+        assert total == self._spike_score().total_for("vtuber")

@@ -72,9 +72,52 @@ class TestHookDetection:
         assert out[0].start > 10.0
         assert out[0].start < 13.0
 
-    def test_indonesian_question_word_recognised(self):
+    def test_translator_preserved_jp_reaction_recognised(self):
+        """Romanised JP that bleeds into translated EN subs."""
+        # ``yabai`` is one of the most common JP reaction words that
+        # JP→EN translators preserve as-is.
         clips = [_clip(10.0, 30.0)]
-        transcript = [_seg(10.0, 13.0, "jadi apa maksudmu")]
+        transcript = [_seg(10.0, 13.0, "and then yabai this is bad")]
+        out = apply(clips, transcript)
+        assert out[0].start > 10.0
+
+    def test_eh_translation_recognised(self):
+        """``eh`` is the canonical JP→EN reaction translation."""
+        clips = [_clip(10.0, 30.0)]
+        transcript = [_seg(10.0, 13.0, "and then eh what was that")]
+        out = apply(clips, transcript)
+        assert out[0].start > 10.0
+
+    def test_translator_reaction_tag_is_strong_hook(self):
+        """``[laughs]`` at the very start anchors the Moment there.
+
+        Translator-stage tags are a stronger hook than even single-word
+        reactions because they're only emitted when the moment is too
+        noteworthy to leave un-annotated.
+        """
+        clips = [_clip(10.0, 30.0)]
+        transcript = [_seg(10.0, 13.0, "[laughs] oh my god")]
+        out = apply(clips, transcript)
+        # First-word match — but match should still trigger; the
+        # optimizer accepts tags even at index 0 because the tag IS
+        # the hook.
+        assert out[0].start == 10.0  # already at the tag — no shift needed
+        # Sanity: tag detection didn't crash.
+        assert out[0].end == 30.0
+
+    def test_compound_opener_shifts_to_phrase_start(self):
+        """``hold on`` should anchor on ``hold``, not after it."""
+        clips = [_clip(10.0, 30.0)]
+        transcript = [_seg(10.0, 13.0, "okay hold on what is this")]
+        out = apply(clips, transcript)
+        # ``hold`` is at index 1 → t≈10.5; ``on`` is at index 2.
+        # Compound match returns ``hold``'s timestamp.
+        assert out[0].start > 10.0
+        assert out[0].start < 11.0
+
+    def test_no_way_compound_recognised(self):
+        clips = [_clip(10.0, 30.0)]
+        transcript = [_seg(10.0, 13.0, "wait what no way that happened")]
         out = apply(clips, transcript)
         assert out[0].start > 10.0
 

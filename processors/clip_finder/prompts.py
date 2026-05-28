@@ -248,16 +248,35 @@ def build_scoring_prompt(
     candidates: Sequence[ClipCandidate],
     transcript: Sequence[Segment],
     instructions: str,
+    signals: Sequence[SignalEvent] = (),
 ) -> str:
-    """Ask the LLM to rate each candidate on 5 axes (0-10)."""
+    """Ask the LLM to rate each candidate on 5 axes (0-10).
+
+    Per-candidate signal summaries are injected so the LLM can
+    cross-reference what the ear / chat already vouches for. The
+    summary is short (1 line per candidate) so token cost stays
+    proportional to N candidates — see May-28 audit "#11".
+    """
     cand_lines = []
     for i, c in enumerate(candidates):
+        sig_summary = _signals_summary_for(c, signals)
+        suffix = f" — signals: {sig_summary}" if sig_summary else ""
         cand_lines.append(
             f"  {i+1}. [{c.start:.1f}s-{c.end:.1f}s] hunter={c.hunter.value} "
-            f"\"{c.title}\" — {c.reason}"
+            f"\"{c.title}\" — {c.reason}{suffix}"
         )
     cand_text = "\n".join(cand_lines)
     transcript_text = render_transcript(transcript)
+
+    signals_note = (
+        "\nSIGNALS LEGEND: each candidate may carry a short summary of "
+        "audio peaks (loud bursts), chat spikes (live-chat msgs/sec "
+        "above baseline), emote storms, superchats, and scene cuts that "
+        "fall inside its range. Treat these as hints — a clip with both "
+        "an audio peak AND a chat spike is almost always more "
+        "clip-worthy than one with neither.\n"
+        if signals else ""
+    )
 
     return (
         "You are a video clip rater. For EACH candidate clip below, score five "
@@ -268,8 +287,9 @@ def build_scoring_prompt(
         "- emotional_intensity (0-10): Peak emotional payoff (joy/shock/anger/etc).\n"
         "- completeness (0-10): Does it have setup → climax → aftermath?\n"
         "- replayability (0-10): Would someone re-watch this?\n"
-        "- shorts_friendly (0-10): Self-contained, no external context needed.\n\n"
-        f"USER INTENT: {instructions or '(none)'}\n\n"
+        "- shorts_friendly (0-10): Self-contained, no external context needed.\n"
+        f"{signals_note}"
+        f"\nUSER INTENT: {instructions or '(none)'}\n\n"
         f"TRANSCRIPT (for context):\n{transcript_text}\n\n"
         f"CANDIDATES:\n{cand_text}\n\n"
         "Return ONLY a JSON array. Each object has:\n"
@@ -279,9 +299,73 @@ def build_scoring_prompt(
         '- "completeness": number 0-10\n'
         '- "replayability": number 0-10\n'
         '- "shorts_friendly": number 0-10\n'
+        '- "punchline_seconds_from_start": number — seconds from the '
+        "candidate start to the payoff beat (the word/phrase the viewer "
+        "is here for). Use null when the candidate has no clear single "
+        "punchline (e.g. a slow exchange that builds throughout).\n"
         '- "comment": one-sentence rationale (max 120 chars)\n'
         "Order by index ascending. Score honestly — give low marks to weak clips."
     )
+
+
+def _signals_summary_for(
+    candidate: ClipCandidate,
+    signals: Sequence[SignalEvent],
+) -> str:
+    """One-line summary of signals overlapping the candidate's range.
+
+    Uses ``SignalKind`` lazily so the prompts module stays import-light
+    when the model layer isn't loaded.
+    """
+    if not signals:
+        return ""
+    from models.clip import SignalKind
+
+    counts: dict[str, int] = {}
+    max_peak_db: float = 0.0
+    max_chat_ratio: float = 0.0
+    for s in signals:
+        if s.end < candidate.start or s.start > candidate.end:
+            continue
+        kind = s.kind.value
+        counts[kind] = counts.get(kind, 0) + 1
+        if s.kind == SignalKind.AUDIO_PEAK:
+            try:
+                # label e.g. "+18.5 dB above baseline"
+                num = (s.label or "").split()[0].lstrip("+")
+                max_peak_db = max(max_peak_db, float(num))
+            except (ValueError, IndexError):
+                pass
+        elif s.kind == SignalKind.CHAT_SPIKE:
+            try:
+                if "x baseline" in (s.label or ""):
+                    num = (s.label or "").replace("chat", "").split("x")[0].strip()
+                    max_chat_ratio = max(max_chat_ratio, float(num))
+            except (ValueError, IndexError):
+                pass
+
+    if not counts:
+        return ""
+    parts: list[str] = []
+    if SignalKind.AUDIO_PEAK.value in counts:
+        peak = counts[SignalKind.AUDIO_PEAK.value]
+        parts.append(
+            f"{peak} audio peak(s) (max +{max_peak_db:.1f} dB)"
+            if max_peak_db else f"{peak} audio peak(s)"
+        )
+    if SignalKind.CHAT_SPIKE.value in counts:
+        spike = counts[SignalKind.CHAT_SPIKE.value]
+        parts.append(
+            f"chat {max_chat_ratio:.1f}x baseline"
+            if max_chat_ratio else f"{spike} chat spike(s)"
+        )
+    if SignalKind.CHAT_EMOTE_STORM.value in counts:
+        parts.append(f"{counts[SignalKind.CHAT_EMOTE_STORM.value]} emote storm(s)")
+    if SignalKind.CHAT_SUPERCHAT.value in counts:
+        parts.append(f"{counts[SignalKind.CHAT_SUPERCHAT.value]} superchat(s)")
+    if SignalKind.SCENE_CUT.value in counts:
+        parts.append(f"{counts[SignalKind.SCENE_CUT.value]} scene cut(s)")
+    return ", ".join(parts)
 
 
 __all__ = [

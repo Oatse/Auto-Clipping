@@ -150,10 +150,14 @@ class ClipScore:
     emotional_intensity: float = 0.0 # Peak emotion magnitude (LLM)
     completeness: float = 0.0        # Setup → climax → aftermath structure (LLM)
     replayability: float = 0.0       # Re-watch worthiness (LLM)
-    shorts_friendly: float = 0.0     # Vertical / no-context-needed (LLM)
+    shorts_friendly: float = 0.0     # Self-contained, no external context needed (LLM)
     audio_peak_db: float = 0.0       # Deterministic: max audio peak in dB above baseline
     chat_spike_ratio: float = 0.0    # Deterministic: chat msgs/sec vs baseline
     duration_fit: float = 0.0        # Deterministic: how well duration fits target
+    # Deterministic: 0-10 bonus for audio peak AND chat spike co-occurring
+    # within the same clip range. The single highest-precision predictor
+    # of a clip-worthy moment per chat_signals.py — see May-28 audit "#6".
+    coincidence_bonus: float = 0.0
 
     @property
     def total(self) -> float:
@@ -194,12 +198,17 @@ class ClipScore:
         # dB-above-baseline; ``chat_spike_ratio`` is a multiplier vs.
         # the base chat rate. Both are normalised into 0-10 and weighted
         # by per-profile multipliers so e.g. ASMR can suppress audio.
+        # ``coincidence_bonus`` captures audio-peak AND chat-spike
+        # overlap — see May-28 audit "#6". It already sits in the 0-10
+        # range so we feed it straight into the weighted sum.
         audio_norm = min(10.0, self.audio_peak_db / 3.0)
         chat_norm = min(10.0, self.chat_spike_ratio * 2.0)
+        coincidence_w = getattr(w, "coincidence_bonus_w", 0.0)
         det_total = (
             audio_norm * w.audio_norm_w
             + chat_norm * w.chat_norm_w
             + self.duration_fit * w.duration_fit_w
+            + self.coincidence_bonus * coincidence_w
         )
 
         return round(min(10.0, llm_total + det_total), 2)
@@ -222,6 +231,7 @@ class ClipScore:
             audio_peak_db=float(data.get("audio_peak_db", 0.0)),
             chat_spike_ratio=float(data.get("chat_spike_ratio", 0.0)),
             duration_fit=float(data.get("duration_fit", 0.0)),
+            coincidence_bonus=float(data.get("coincidence_bonus", 0.0)),
         )
 
 
@@ -287,6 +297,18 @@ class Clip:
     file_idx: int | None = None        # index into job.clip_files when downloaded
     filename: str | None = None         # downloaded mp4 filename
     signals: list[SignalEvent] = field(default_factory=list)  # signals overlapping range
+    # ADR-0005: score_profile travels with the Clip so ``to_dict()["score"]
+    # ["total"]`` reflects the Job's chosen Scoring Profile, not the legacy
+    # VTuber default. Sourced from the Job at scoring time. Defaults to
+    # ``"vtuber"`` so callers that ignore the profile see no behaviour
+    # change vs. the pre-ADR-0005 ``ClipScore.total`` property.
+    score_profile: str = "vtuber"
+    # Offset in seconds from ``start`` to the punchline beat — the word
+    # or phrase that carries the payoff. Populated by the LLM scoring
+    # rubric (see May-28 audit "#7"). Optional: when None, downstream
+    # consumers (``cut_strategies._tight``, captioning) fall back to
+    # their existing default behaviour. CONTEXT.md: "Punchline".
+    punchline_offset: float | None = None
 
     @property
     def duration(self) -> float:
@@ -306,6 +328,12 @@ class Clip:
         return (ov_end - ov_start) / self.duration > min_ratio
 
     def to_dict(self) -> dict[str, Any]:
+        # ADR-0005: serialise ``score.total`` against the Clip's
+        # ``score_profile`` so the UI receives a profile-aware ranking
+        # value. ``ClipScore.to_dict()`` still emits a VTuber-default
+        # ``total`` field; we overwrite it here once we know the profile.
+        score_dict = self.score.to_dict()
+        score_dict["total"] = self.score.total_for(self.score_profile)
         d: dict[str, Any] = {
             "start": round(self.start, 3),
             "end": round(self.end, 3),
@@ -314,7 +342,8 @@ class Clip:
             "highlight_type": self.highlight_type.value,
             "hunter": self.hunter.value,
             "dead_air_timestamps": [round(t, 3) for t in self.dead_air_timestamps],
-            "score": self.score.to_dict(),
+            "score": score_dict,
+            "score_profile": self.score_profile,
             "rescued": self.rescued,
         }
         if self.file_idx is not None:
@@ -323,6 +352,8 @@ class Clip:
             d["filename"] = self.filename
         if self.signals:
             d["signals"] = [s.to_dict() for s in self.signals]
+        if self.punchline_offset is not None:
+            d["punchline_offset"] = round(self.punchline_offset, 3)
         return d
 
     @classmethod
@@ -344,6 +375,12 @@ class Clip:
             file_idx=data.get("file_idx"),
             filename=data.get("filename"),
             signals=[SignalEvent.from_dict(s) for s in signals_raw if isinstance(s, dict)],
+            score_profile=str(data.get("score_profile", "vtuber") or "vtuber"),
+            punchline_offset=(
+                float(data["punchline_offset"])
+                if data.get("punchline_offset") is not None
+                else None
+            ),
         )
 
     @classmethod

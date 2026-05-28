@@ -156,17 +156,30 @@ def _enforce_duration(
     min_duration: float,
     max_duration: float,
 ) -> list[ClipCandidate]:
-    """Extend short clips symmetrically; cap long clips from the start side."""
+    """Extend short clips tail-first; cap long clips from the end side.
+
+    For VTuber / JP-translated clips the hook lives in the first 0-3 s of
+    the candidate range. The pre-May-28 behaviour expanded a too-short
+    clip symmetrically around the centre, which pushed the hook into the
+    middle of the Moment and weakened retention. We now bias expansion
+    toward the tail (preserves hook) and only borrow from the head when
+    the tail can't supply enough length. See May-28 audit "#12".
+    """
     out: list[ClipCandidate] = []
     for c in candidates:
         dur = c.duration
         start, end = c.start, c.end
         if dur < min_duration:
-            center = (start + end) / 2
-            half = min_duration / 2
-            start = max(0.0, center - half)
-            end = center + half
+            needed = min_duration - dur
+            # Tail first — keeps the hook anchored at the original start.
+            end = end + needed
+            # Tail expansion is unbounded here because we don't know
+            # the source-video duration in this module. Downstream
+            # download stage clamps to actual video length.
         elif dur > max_duration:
+            # Cap from the end side — the punchline / payoff is usually
+            # earlier in a long Gemini-overshoot range, so trimming the
+            # tail loses less than trimming the head would.
             end = start + max_duration
         out.append(
             ClipCandidate(
