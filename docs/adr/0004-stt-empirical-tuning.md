@@ -127,7 +127,7 @@ suite (timing + recheck + translator + transcript_sync + STT) at
 The A/B test script and three sample runs are intentionally kept:
 
 ```
-audit_segmented_json.py
+scripts/audit_segmented_json.py
 output/audit_ad4b2c61423d/      # MIKO single-speaker
 output/audit_okayu/             # Okayu 2-speaker (verbatim)
 output/audit_okayu_noverbatim/  # Okayu 2-speaker (no_verbatim=true)

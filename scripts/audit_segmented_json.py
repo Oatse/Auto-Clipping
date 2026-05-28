@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """
-audit_segmented_json.py — A/B test: ElevenLabs Scribe v2 ``segmented_json``
+scripts/audit_segmented_json.py — A/B test: ElevenLabs Scribe v2 ``segmented_json``
 vs our :meth:`processors.stt.elevenlabs.ElevenLabsSttEngine._parse_response`
 heuristic on the same audio file.
 
 Run from repo root (so ``import config`` resolves)::
 
-    python audit_segmented_json.py path\\to\\video.mp4
-    python audit_segmented_json.py path\\to\\video.mp4 --out tmp\\audit
-    python audit_segmented_json.py path\\to\\video.mp4 --model scribe_v2 --no-verbatim
-    python audit_segmented_json.py path\\to\\video.mp4 --keyterms VTuber Hololive
+    python scripts/audit_segmented_json.py path\\to\\video.mp4
+    python scripts/audit_segmented_json.py path\\to\\video.mp4 --out tmp\\audit
+    python scripts/audit_segmented_json.py path\\to\\video.mp4 --model scribe_v2 --no-verbatim
+    python scripts/audit_segmented_json.py path\\to\\video.mp4 --keyterms VTuber Hololive
 
 Produces in ``<out>``::
 
@@ -377,7 +377,7 @@ def main() -> int:
     parser.add_argument(
         "--out",
         default="output/audit_segmented_json",
-        help="output directory (default: output/audit_segmented_json)",
+        help="output directory (default: output/audit_segmented_json, relative to repo root)",
     )
     parser.add_argument(
         "--model",
