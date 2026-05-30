@@ -311,6 +311,8 @@ async def create_job(
     transcribe_only: bool = Form(False),
     num_speakers: int | None = Form(None),
     speaker_detection: bool = Form(True),
+    translator_backend: str | None = Form(None),
+    spicy_filter: bool = Form(True),
 ):
     """Create a Job from an uploaded video and start the pipeline."""
     if not (video.filename or "").lower().endswith(
@@ -324,6 +326,13 @@ async def create_job(
     if num_speakers is not None and not (1 <= num_speakers <= 6):
         raise HTTPException(
             status_code=400, detail="num_speakers must be between 1 and 6",
+        )
+
+    backend = (translator_backend or "").strip().lower() or None
+    if backend is not None and backend not in {"gemini", "claude"}:
+        raise HTTPException(
+            status_code=400,
+            detail="translator_backend must be 'gemini' or 'claude'",
         )
 
     job_id = uuid.uuid4().hex[:12]
@@ -348,6 +357,8 @@ async def create_job(
         transcribe_only=transcribe_only,
         num_speakers=num_speakers,
         speaker_detection=speaker_detection,
+        translator_backend=backend,
+        spicy_filter=spicy_filter,
     )
     job_state.jobs[job_id] = job
 
@@ -719,6 +730,8 @@ async def create_job_from_clip(
     target_language: str = Form("en"),
     num_speakers: int | None = Form(None),
     speaker_detection: bool = Form(True),
+    translator_backend: str | None = Form(None),
+    spicy_filter: bool = Form(True),
 ):
     """Create an auto-subtitle Job from an existing Clip Finder video file."""
     clip_file = Path(clip_path)
@@ -735,6 +748,13 @@ async def create_job_from_clip(
             status_code=400, detail="num_speakers must be between 1 and 6",
         )
 
+    backend = (translator_backend or "").strip().lower() or None
+    if backend is not None and backend not in {"gemini", "claude"}:
+        raise HTTPException(
+            status_code=400,
+            detail="translator_backend must be 'gemini' or 'claude'",
+        )
+
     job_id = uuid.uuid4().hex[:12]
 
     job = Job(
@@ -747,6 +767,8 @@ async def create_job_from_clip(
         transcribe_only=True,
         num_speakers=num_speakers,
         speaker_detection=speaker_detection,
+        translator_backend=backend,
+        spicy_filter=spicy_filter,
     )
     job_state.jobs[job_id] = job
 

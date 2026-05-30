@@ -58,6 +58,20 @@ GEMINI_API_URL = gemini_url(config.TRANSLATOR_GEMINI_MODEL)
 # 8K output token budget for short subtitle lines.
 BATCH_SIZE = 30
 
+# Translator prompt revision tag. Bump whenever the prompt builder or the
+# system instruction changes in a way that affects output. Stamped into
+# phase2_translation/translation_meta.json so re-runs are auditable.
+#   v1 — original text-only + regroup prompts (pre-iter-1 baseline)
+#   v2 — anti-AI baseline rules + systemInstruction + seed (iter-1)
+#   v3 — calibrated for VTuber/fan-sub dial: register matching, length
+#        proportionality, community-term preference, honorifics + raw
+#        onomatopoeia preserved (iter-1.5)
+PROMPT_VERSION = "v3"
+
+# Deterministic seed sent to Gemini so re-rendering the same Job with the
+# same source transcript produces the same translation.
+GEMINI_SEED = 42
+
 # Regex matching strings consisting only of punctuation/quote characters.
 # Includes straight quotes, smart curly quotes (U+2018-U+201D), guillemets
 # («»), em/en dashes, and the horizontal ellipsis. Stored as a string so

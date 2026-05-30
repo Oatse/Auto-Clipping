@@ -29,7 +29,8 @@ from models.transcript import (
 )
 from utils.file_utils import ensure_dir
 
-from .constants import BATCH_SIZE, LANGUAGE_NAMES, PUNCTUATION_ONLY_PATTERN
+from .claude_client import call_claude_regroup, call_claude_translate
+from .constants import BATCH_SIZE, LANGUAGE_NAMES, PROMPT_VERSION, PUNCTUATION_ONLY_PATTERN
 from .deepl import translate_segments_in_place, translate_texts
 from .gemini_client import call_gemini_regroup, call_gemini_translate
 from .local_grouper import local_group_from_segments, local_group_words
@@ -45,8 +46,34 @@ class TranslatorProcessor:
     keys from source_transcript.json — only the text field changes.
     """
 
-    def __init__(self, target_language: str = "id") -> None:
+    def __init__(
+        self,
+        target_language: str = "id",
+        style_preset: str = "natural",
+        style_note: str | None = None,
+        backend: str | None = None,
+        spicy_filter: bool = False,
+    ) -> None:
         self.target_language = target_language
+        self.style_preset = style_preset if style_preset in {"natural", "formal"} else "natural"
+        self.style_note = (style_note or "").strip() or None
+        # Spicy filter: when True, the prompt asks the model to soften
+        # explicit R18 vocabulary into playful equivalents AND a regex
+        # post-pass catches any literal vulgar terms that slipped through.
+        # See processors/translator/postprocess.py for the second layer.
+        self.spicy_filter = bool(spicy_filter)
+        # Backend selector. Defaults to whatever is in config.TRANSLATOR_BACKEND
+        # so existing call sites (main.py, web/server.py) pick up the env var
+        # without code changes. Pass an explicit value to force a backend
+        # (used by the standalone test scripts).
+        backend_resolved = (backend or config.TRANSLATOR_BACKEND or "gemini").strip().lower()
+        if backend_resolved not in {"gemini", "claude"}:
+            logger.warning(
+                "Unknown translator backend '{}', falling back to 'gemini'",
+                backend_resolved,
+            )
+            backend_resolved = "gemini"
+        self.backend = backend_resolved
 
     # ── Public entrypoint ───────────────────────────────────────────────────
 
@@ -76,15 +103,29 @@ class TranslatorProcessor:
                 original_speakers.append(seg.speaker)
 
         api_keys = config.GEMINI_API_KEYS
-        if api_keys:
+        # When the Claude backend is selected we don't need Gemini keys at
+        # all, but we still gate on a usable backend. The Claude client
+        # checks NINEROUTER_API_KEY internally and returns None when missing.
+        backend_ready = (
+            (self.backend == "gemini" and bool(api_keys))
+            or (self.backend == "claude" and bool(config.NINEROUTER_API_KEY))
+        )
+        if backend_ready:
+            logger.info("Translator backend: {}", self.backend)
             if regroup and any(seg.words for seg in segments):
-                translated = await self._translate_and_regroup_gemini(
+                translated = await self._translate_and_regroup(
                     segments, api_keys
                 )
             else:
-                translated = await self._translate_batch_gemini(segments, api_keys)
+                translated = await self._translate_batch(segments, api_keys)
         else:
-            logger.warning("No GEMINI_API_KEYS configured — returning original text")
+            if self.backend == "gemini":
+                logger.warning("No GEMINI_API_KEYS configured — returning original text")
+            else:
+                logger.warning(
+                    "Claude backend selected but NINEROUTER_API_KEY is missing — "
+                    "returning original text",
+                )
             if regroup and any(seg.words for seg in segments):
                 translated = local_group_from_segments(segments)
             else:
@@ -119,6 +160,9 @@ class TranslatorProcessor:
         json_path = output_dir / "translated_transcript.json"
         self._save_json(translated, json_path)
 
+        # Stamp translation metadata so re-runs are auditable.
+        self._save_meta(output_dir / "translation_meta.json", len(translated))
+
         logger.info(
             "Translation complete: {} segments → {}",
             len(translated),
@@ -137,12 +181,12 @@ class TranslatorProcessor:
 
     # ── Plain-text batch translation ───────────────────────────────────────
 
-    async def _translate_batch_gemini(
+    async def _translate_batch(
         self,
         segments: list[TranscriptSegment],
         api_keys: list[str],
     ) -> list[TranscriptSegment]:
-        """Translate segments in batches using Gemini API."""
+        """Translate segments in batches via the active backend."""
         lang_name = LANGUAGE_NAMES.get(self.target_language, self.target_language)
         translated_segments: list[TranscriptSegment] = []
 
@@ -151,21 +195,41 @@ class TranslatorProcessor:
             texts = [seg.text for seg in batch]
 
             logger.info(
-                "Translating batch {}-{} of {} segments...",
+                "Translating batch {}-{} of {} segments via {}...",
                 batch_start + 1,
                 min(batch_start + BATCH_SIZE, len(segments)),
                 len(segments),
+                self.backend,
             )
 
-            translated_texts = await call_gemini_translate(
-                texts, lang_name, api_keys
-            )
+            if self.backend == "claude":
+                translated_texts = await call_claude_translate(
+                    texts, lang_name, api_keys,
+                    style_preset=self.style_preset,
+                    style_note=self.style_note,
+                    spicy_filter=self.spicy_filter,
+                )
+            else:
+                translated_texts = await call_gemini_translate(
+                    texts, lang_name, api_keys,
+                    style_preset=self.style_preset,
+                    style_note=self.style_note,
+                    spicy_filter=self.spicy_filter,
+                )
             if translated_texts is None:
-                # Gemini exhausted → fall back to DeepL for the texts
+                # Active backend exhausted → fall back to DeepL for the texts
                 logger.error(
-                    "All Gemini API keys failed for translation — using DeepL fallback."
+                    "{} translate failed for this batch — using DeepL fallback.",
+                    self.backend.capitalize(),
                 )
                 translated_texts = await translate_texts(texts, self.target_language)
+
+            # Spicy-filter post-pass: catch literal vulgar terms the model
+            # ignored the prompt instruction for, and any DeepL fallback
+            # output (DeepL has no R18 awareness at all).
+            if self.spicy_filter and translated_texts:
+                from .postprocess import apply_soft_censor_many
+                translated_texts = apply_soft_censor_many(translated_texts)
 
             for seg, translated_text in zip(batch, translated_texts):
                 translated_segments.append(
@@ -185,12 +249,12 @@ class TranslatorProcessor:
 
     # ── Word-level regrouping + translation ─────────────────────────────────
 
-    async def _translate_and_regroup_gemini(
+    async def _translate_and_regroup(
         self,
         segments: list[TranscriptSegment],
         api_keys: list[str],
     ) -> list[TranscriptSegment]:
-        """Extract word-level data, send to Gemini for grouping + translation."""
+        """Extract word-level data, send to active backend for grouping + translation."""
         lang_name = LANGUAGE_NAMES.get(self.target_language, self.target_language)
 
         # Flatten words with speaker info.
@@ -205,18 +269,19 @@ class TranslatorProcessor:
             logger.warning(
                 "No word-level data found — falling back to text-only translation"
             )
-            return await self._translate_batch_gemini(segments, api_keys)
+            return await self._translate_batch(segments, api_keys)
 
         batches = build_word_batches(all_words, word_speakers)
 
         all_new_segments: list[TranscriptSegment] = []
         for batch_idx, (batch_words, batch_speakers) in enumerate(batches):
             logger.info(
-                "Regrouping + translating batch {}/{} ({} words) to '{}'...",
+                "Regrouping + translating batch {}/{} ({} words) to '{}' via {}...",
                 batch_idx + 1,
                 len(batches),
                 len(batch_words),
                 lang_name,
+                self.backend,
             )
             new_segs = await self._regroup_one_batch(
                 batch_words, batch_speakers, lang_name, api_keys
@@ -224,7 +289,10 @@ class TranslatorProcessor:
             all_new_segments.extend(new_segs)
 
         if not all_new_segments:
-            logger.warning("Gemini regrouping produced no segments — using fallback")
+            logger.warning(
+                "{} regrouping produced no segments — using fallback",
+                self.backend.capitalize(),
+            )
             return local_group_from_segments(segments)
 
         logger.info(
@@ -241,10 +309,21 @@ class TranslatorProcessor:
         target_lang_name: str,
         api_keys: list[str],
     ) -> list[TranscriptSegment]:
-        """Process a single regroup batch through Gemini + fallbacks."""
-        groups, best_partial_groups = await call_gemini_regroup(
-            words, speakers, target_lang_name, api_keys,
-        )
+        """Process a single regroup batch through the active backend + fallbacks."""
+        if self.backend == "claude":
+            groups, best_partial_groups = await call_claude_regroup(
+                words, speakers, target_lang_name, api_keys,
+                style_preset=self.style_preset,
+                style_note=self.style_note,
+                spicy_filter=self.spicy_filter,
+            )
+        else:
+            groups, best_partial_groups = await call_gemini_regroup(
+                words, speakers, target_lang_name, api_keys,
+                style_preset=self.style_preset,
+                style_note=self.style_note,
+                spicy_filter=self.spicy_filter,
+            )
 
         if groups is not None:
             segments = reconstruct_segments(groups, words, speakers)
@@ -293,6 +372,36 @@ class TranslatorProcessor:
         return await translate_segments_in_place(local_segs, self.target_language)
 
     # ── Helpers ─────────────────────────────────────────────────────────────
+
+    def _save_meta(self, path: Path, segment_count: int) -> None:
+        """Write phase2_translation/translation_meta.json for reproducibility.
+
+        Captures the inputs that determine the translation output: target
+        language, style preset, style note, and the prompt revision tag.
+        Re-running a Job with the same inputs should produce the same file.
+        """
+        import time
+
+        meta = {
+            "prompt_version": PROMPT_VERSION,
+            "target_language": self.target_language,
+            "style_preset": self.style_preset,
+            "style_note": self.style_note,
+            "translator_backend": self.backend,
+            "translator_model_chain": list(getattr(config, "TRANSLATOR_GEMINI_FALLBACK_MODELS", []) or []),
+            "translator_model_primary": (
+                getattr(config, "TRANSLATOR_CLAUDE_MODEL", None)
+                if self.backend == "claude"
+                else getattr(config, "TRANSLATOR_GEMINI_MODEL", None)
+            ),
+            "segment_count": segment_count,
+            "written_at": time.time(),
+        }
+        try:
+            with path.open("w", encoding="utf-8") as f:
+                json.dump(meta, f, indent=2, ensure_ascii=False)
+        except OSError as exc:
+            logger.warning("Failed to write translation_meta.json: {}", exc)
 
     @staticmethod
     def _save_json(segments: list[TranscriptSegment], path: Path) -> None:

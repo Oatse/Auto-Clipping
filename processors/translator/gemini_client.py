@@ -23,28 +23,189 @@ from loguru import logger
 
 from models.transcript import WordTimestamp
 
-from .constants import gemini_url, translator_models
+from .constants import GEMINI_SEED, gemini_url, translator_models
+
+
+# ── Anti-AI-translate baseline ─────────────────────────────────────────────
+#
+# Single source of truth for the "don't sound like a translator bot" rules.
+# Sent as ``systemInstruction`` on every Gemini call so the per-batch user
+# message can stay focused on the data + task. Update PROMPT_VERSION in
+# constants.py whenever this changes.
+_SYSTEM_INSTRUCTION_BASELINE = (
+    "You are a professional subtitle translator for short-form video clips. "
+    "Your output is read by viewers in real time, on a small screen, with "
+    "limited attention. Your job is to make the translation feel like a "
+    "fluent human wrote it — never literal, never robotic, never generic.\n"
+    "\n"
+    "Hard rules — apply on every line:\n"
+    "1. Translate idioms FUNCTIONALLY, never literally. If the source says "
+    "something like 'I cannot accept that', the target must convey the "
+    "speaker's actual feeling (disagreement, doubt) using a phrase a native "
+    "speaker would actually say in the target language.\n"
+    "2. Word choice must be CONTEXT-AWARE. Pay attention to register, "
+    "speaker relationship, content domain (gaming, podcast, lecture, vlog) "
+    "and pick the term a native speaker would use in that exact context, "
+    "not the dictionary-first equivalent.\n"
+    "3. Light, natural fillers and hedges in the target language are "
+    "ALLOWED when they make the line feel spoken (e.g. 'kind of', "
+    "'actually', 'you know', 'ya', 'gitu', 'sih'). Heavy internet slang "
+    "is NOT allowed (e.g. 'fr', 'ngl', 'lol', 'anjir', 'wkwk') unless the "
+    "user's style note explicitly opts in.\n"
+    "4. RESTRUCTURE across short fragmented lines when a literal "
+    "line-by-line rendering would feel choppy in the target language. "
+    "Merge or split phrasing so the result reads naturally — but keep "
+    "the segment-to-segment ordering and total count unchanged.\n"
+    "5. Do NOT use trailing ellipses ('...') as a default placeholder for "
+    "speech pauses. Only keep them when the speaker is genuinely "
+    "trailing off or being dramatic.\n"
+    "6. Preserve emotional elongation (e.g. 'noooooo', 'BAKAAAAAA', "
+    "'stoppppp') by using the equivalent stretched form in the target "
+    "language.\n"
+    "7. Lines that consist entirely of expressive vocalizations, "
+    "onomatopoeia, or romanized non-source-language sounds with no "
+    "lexical meaning must be kept EXACTLY as-is. Examples: 'kyaaaa', "
+    "'uwaaaa', 'ahahaha', 'ufufufu', 'zuuun', 'dodododo', 'buwakkushun'. "
+    "Do NOT localize these to the target language's onomatopoeia "
+    "(e.g. 'buwakkushun' must NOT become 'Achoo'; 'kyaaaa' must NOT "
+    "become 'eeeeek').\n"
+    "8. Never invent content the speaker did not say. Tone and phrasing "
+    "may be adapted; meaning and intent must not change.\n"
+    "9. REGISTER MATCHING. Match the formality of the source line. "
+    "If the source uses everyday words, your translation must too. "
+    "Avoid elevated, literary, or rare vocabulary unless the source "
+    "is genuinely formal. Prefer 'amazing' over 'magnificent', "
+    "'great' over 'splendid', 'really' over 'truly', 'a lot' over "
+    "'a great deal', 'sleep position' over 'sleeping posture'.\n"
+    "10. LENGTH PROPORTIONALITY. If the source line is short and "
+    "elliptical, the translation must be short too. Do NOT pad short "
+    "fragments with explanatory clauses, framing phrases, or hedging. "
+    "If the source has 3 words, do not output 12. Mirror the brevity.\n"
+    "11. COMMUNITY / GENRE CONVENTIONS. When translating fan-content "
+    "(VTuber clips, gaming streams, anime/manga discussion), prefer "
+    "the term the fan community actually uses in the target language "
+    "over the dictionary-first equivalent. In particular:\n"
+    "   - Keep Japanese honorifics RAW: -senpai, -chan, -san, -kun, "
+    "-sama, -dono. Do NOT translate to 'elder', 'senior', 'mister'. "
+    "Same policy applies to 'shishou' (master/teacher in fan context "
+    "— keep raw).\n"
+    "   - Use established fan-translations for common terms: "
+    "egosa/エゴサ → 'ego-search' (NOT 'vanity search'); "
+    "haishin/配信 → 'stream' (NOT 'broadcast'); "
+    "oshi/推し → 'oshi' (kept raw); "
+    "live/ライブ → 'live show' or 'concert' depending on scale.\n"
+    "   - For gaming context, use the gameplay term, not the "
+    "dictionary term: shougai/障害 in a game context → 'handicap' "
+    "(NOT 'obstacle' or 'sabotage').\n"
+    "12. CONTEXT-DRIVEN WORD SENSE. When a source word has multiple "
+    "target-language equivalents, pick the one that best fits the "
+    "immediate emotional/relational context, not the most common "
+    "dictionary entry. Example: 親しみ in a friendship context → "
+    "'closeness' (NOT 'relatability').\n"
+)
+
+_PRESET_NATURAL = (
+    "Style preset: NATURAL.\n"
+    "Tone of a casual but competent narrator. Contractions OK. "
+    "Conversational connectors and light hedges OK. The line should "
+    "sound like a real person talking to a friend, not a press release "
+    "and not a tweet."
+)
+
+_PRESET_FORMAL = (
+    "Style preset: FORMAL.\n"
+    "Full sentences, no contractions, neutral register. Suitable for "
+    "lectures, news, corporate, and educational content. Still natural — "
+    "not stiff — but precise and professional."
+)
+
+_PRESET_BLOCKS: dict[str, str] = {
+    "natural": _PRESET_NATURAL,
+    "formal": _PRESET_FORMAL,
+}
+
+
+# ── Spicy filter (soft R18 censor) ─────────────────────────────────────────
+#
+# Opt-in instruction block that softens explicit sexual / vulgar source
+# language into playful equivalents instead of literal vulgar English.
+# Mirrors the behaviour fan-sub groups apply in their own subtitles —
+# preserve the joke / tone, drop the harshness one notch.
+#
+# Pairs with the post-processing pass in
+# :mod:`processors.translator.postprocess` which catches cases where the
+# model ignored these instructions and translated literally anyway.
+_SPICY_FILTER_BLOCK = (
+    "Spicy filter: ON.\n"
+    "When the source contains explicit sexual / vulgar vocabulary, "
+    "translate it using PLAYFUL, softer equivalents instead of literal "
+    "vulgar English. Keep the joke and the speaker's tone — just round "
+    "the harshness down one notch. Examples:\n"
+    "  - 'ochinchin' / 'chinpo' / 'chinchin' → 'wiener' (NOT 'dick' / 'cock')\n"
+    "  - 'manko' / 'omanko' → 'lady-bits' (NOT 'pussy')\n"
+    "  - 'iku' / 'iku!' (sexual climax) → 'I'm finishing' "
+    "(NOT 'I'm cumming')\n"
+    "  - 'ecchi' / 'eroi' / 'sukebe' → 'naughty' or 'spicy' "
+    "(NOT 'horny' / 'lewd' / 'perv')\n"
+    "  - 'oppai' (when explicit) → 'boobies' (NOT 'tits')\n"
+    "  - 'shimoneta' / dirty-joke vocabulary → keep the joke shape but "
+    "swap the explicit noun for the playful one.\n"
+    "Hard rule: NEVER output 'dick', 'cock', 'pussy', 'tits', 'cum', "
+    "'cumming', 'horny', 'slut'. Use the playful map above instead. "
+    "Mild profanity ('damn', 'crap', 'hell') stays as-is.\n"
+    "If the source has no explicit content, this block has zero effect."
+)
+
+
+def _build_system_instruction(
+    target_lang_name: str,
+    style_preset: str = "natural",
+    style_note: str | None = None,
+    spicy_filter: bool = False,
+) -> str:
+    """Compose the Gemini systemInstruction for a translation call.
+
+    The preset block is appended to the immutable baseline. ``style_note``
+    is an optional, free-form user instruction that is appended ADDITIVELY
+    after a clear delimiter — it never replaces the preset.
+
+    When ``spicy_filter`` is True, an extra block instructs the model to
+    soften explicit R18 vocabulary into playful equivalents instead of
+    literal vulgar English (defense layer 1). The post-processing pass
+    in :mod:`processors.translator.postprocess` is layer 2.
+    """
+    preset_block = _PRESET_BLOCKS.get(
+        style_preset.lower(), _PRESET_NATURAL,
+    )
+    parts = [
+        _SYSTEM_INSTRUCTION_BASELINE,
+        f"Target language: {target_lang_name}.",
+        preset_block,
+    ]
+    if spicy_filter:
+        parts.append(_SPICY_FILTER_BLOCK)
+    if style_note and style_note.strip():
+        parts.append(
+            "--- Additional user style note ---\n"
+            f"{style_note.strip()}\n"
+            "--- End user style note ---"
+        )
+    return "\n\n".join(parts)
 
 
 def _build_translate_prompt(texts: list[str], target_lang_name: str) -> str:
-    """Build the Gemini prompt for plain-text batch translation."""
+    """Build the per-batch user message for plain-text translation.
+
+    The anti-AI baseline + style preset live in ``systemInstruction``; this
+    string only carries the data + the minimal task framing.
+    """
     numbered = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
     return (
-        f"Translate the following numbered lines into {target_lang_name}. "
-        "Return ONLY a JSON array of translated strings in the same order. "
-        "Preserve the meaning and natural speech style. "
-        "If a word or phrase contains stretched/elongated characters that represent "
-        "emotional emphasis (e.g. 'noooooo', 'BAKAAAAAAA', 'stoppppp'), "
-        "translate it AND preserve that elongation style using the equivalent "
-        "stretched form in the target language. "
-        "IMPORTANT — do NOT translate lines that consist entirely of expressive "
-        "vocalizations, exclamations, onomatopoeia, or romanized non-source-language "
-        "sounds that carry no direct lexical meaning. Keep those lines EXACTLY as-is. "
-        "Examples of lines to keep unchanged: purely expressive Japanese/Asian romaji "
-        "sounds ('soryaaaa', 'kyaaaa', 'uwaaaa', 'yataaa', 'ikuzoooo', 'iyaaaaa'), "
-        "universal vocal sounds ('ahhhh', 'ohhhh', 'ehhhh', 'ahahaha', 'ufufufu'), "
-        "and sound effects ('zuuun', 'dodododo', 'baaaaam'). "
-        "Do NOT add numbering in the output, just the translated text in a JSON array.\n\n"
+        f"Translate the following {len(texts)} numbered subtitle lines into "
+        f"{target_lang_name}. Apply the style and anti-AI rules from your "
+        "system instruction.\n\n"
+        "Return ONLY a JSON array of translated strings in the same order, "
+        "with no numbering and no extra prose.\n\n"
         f"{numbered}"
     )
 
@@ -74,43 +235,35 @@ def _build_regroup_prompt(
     word_list_text = "\n".join(lines)
 
     prompt = (
-        "You are a subtitle segmentation and translation assistant.\n\n"
+        "You will GROUP a list of transcribed words into subtitle segments "
+        "AND translate each group. Apply the style and anti-AI rules from "
+        "your system instruction.\n\n"
         "Below is a numbered list of transcribed words from a video.\n"
         "[PAUSE Xs] markers indicate silence gaps between words.\n"
     )
     if multi_speaker:
         prompt += "[SPEAKER_XX] tags indicate speaker changes.\n"
     prompt += (
-        "\nYour tasks:\n"
-        "1. GROUP these words into natural subtitle segments:\n"
-        "   - Maximum 12 words per subtitle\n"
-        "   - Break at sentence boundaries (., !, ?) when possible\n"
-        "   - ALWAYS start a new subtitle at [PAUSE] markers\n"
+        "\nGrouping rules:\n"
+        "- Maximum 12 words per subtitle\n"
+        "- Break at sentence boundaries (., !, ?, 。, ！, ？) when possible\n"
+        "- ALWAYS start a new subtitle at [PAUSE] markers\n"
     )
     if multi_speaker:
-        prompt += "   - ALWAYS start a new subtitle on speaker changes\n"
+        prompt += "- ALWAYS start a new subtitle on speaker changes\n"
     prompt += (
-        "   - Keep each subtitle as a complete phrase or sentence\n"
-        "   - NEVER create a group whose translation is only punctuation "
-        "(e.g. '.', '!', '?'). Always include at least one meaningful word\n"
-        f"2. TRANSLATE each subtitle group into {target_lang_name}:\n"
-        "   - Preserve emotional elongation "
-        "(e.g. 'noooooo' → equivalent stretched form in target language)\n"
-        "   - Keep expressive vocalizations EXACTLY as-is: onomatopoeia, "
-        "exclamations, romaji sounds ('kyaaaa', 'uwaaaa'), "
-        "universal vocal sounds ('ahhhh', 'ohhhh', 'ahahaha')\n"
-        "   - The translated text must be a proper subtitle line, never just "
-        "punctuation or a single symbol\n"
-        "3. FIX any broken/fragmented words:\n"
-        "   - If consecutive words look like fragments of one word "
-        "(e.g. 'beau' + 'tiful' = 'beautiful', "
-        "'un' + 'fortunately' = 'unfortunately'), "
-        "treat them as a single word in your translation.\n\n"
+        "- Keep each subtitle as a complete phrase or sentence\n"
+        "- NEVER create a group whose translation is only punctuation. "
+        "Always include at least one meaningful word\n"
+        "- If consecutive words look like fragments of one word "
+        "(e.g. 'beau' + 'tiful' = 'beautiful'), treat them as a single "
+        "word in your translation.\n\n"
+        f"Translate each group into {target_lang_name}.\n\n"
         f"Words:\n{word_list_text}\n\n"
         "Return ONLY a strictly valid JSON array where each element is:\n"
         '{"indices": [0, 1, 2], "translated": "translated subtitle text"}\n\n'
         "CRITICAL RULES:\n"
-        "- Keep your response concise — use short, natural subtitle translations\n"
+        "- Keep your response concise — short, natural subtitle translations\n"
         "- ALWAYS escape double quotes inside the translation text using a "
         "backslash (e.g. \\\"Hello\\\")\n"
         "- Do NOT leave trailing commas in JSON arrays or objects\n"
@@ -169,6 +322,9 @@ async def call_gemini_translate(
     texts: list[str],
     target_lang_name: str,
     api_keys: list[str],
+    style_preset: str = "natural",
+    style_note: str | None = None,
+    spicy_filter: bool = False,
 ) -> list[str] | None:
     """Translate a batch of plain texts via Gemini.
 
@@ -176,12 +332,18 @@ async def call_gemini_translate(
     ``None`` when every key failed (caller should invoke the DeepL fallback).
     """
     prompt = _build_translate_prompt(texts, target_lang_name)
+    system_instruction = _build_system_instruction(
+        target_lang_name, style_preset, style_note,
+        spicy_filter=spicy_filter,
+    )
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
         "generationConfig": {
             "temperature": 0.2,
             "maxOutputTokens": 8192,
             "responseMimeType": "application/json",
+            "seed": GEMINI_SEED,
         },
     }
 
@@ -284,6 +446,9 @@ async def call_gemini_regroup(
     speakers: list[str],
     target_lang_name: str,
     api_keys: list[str],
+    style_preset: str = "natural",
+    style_note: str | None = None,
+    spicy_filter: bool = False,
 ) -> tuple[list[dict] | None, list[dict] | None]:
     """Call Gemini to group words into subtitle segments and translate.
 
@@ -296,12 +461,18 @@ async def call_gemini_regroup(
       use this to combine with a local fallback for the missing words.
     """
     prompt = _build_regroup_prompt(words, speakers, target_lang_name)
+    system_instruction = _build_system_instruction(
+        target_lang_name, style_preset, style_note,
+        spicy_filter=spicy_filter,
+    )
     payload = {
         "contents": [{"parts": [{"text": prompt}]}],
+        "systemInstruction": {"parts": [{"text": system_instruction}]},
         "generationConfig": {
             "temperature": 0.2,
             "maxOutputTokens": 32768,
             "responseMimeType": "application/json",
+            "seed": GEMINI_SEED,
         },
     }
 

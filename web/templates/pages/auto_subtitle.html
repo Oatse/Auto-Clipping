@@ -28,7 +28,7 @@
         </div>
         <dl class="hero__aside-meta">
           <div><dt>Engine</dt><dd>ElevenLabs</dd></div>
-          <div><dt>Translate</dt><dd>Gemini</dd></div>
+          <div><dt>Translate</dt><dd id="heroTranslateLabel">Gemini</dd></div>
         </dl>
       </aside>
     </div>
@@ -75,14 +75,15 @@
           </div>
 
           <div class="row">
-            <div class="field" hidden aria-hidden="true">
-              <label class="field__label" for="whisperModel">Transcription engine</label>
-              <select class="select" id="whisperModel" name="whisper_model">
-                <option value="elevenlabs" selected>ElevenLabs Scribe — cloud STT + Gemini translate</option>
+            <div class="field">
+              <label class="field__label" for="translatorBackend">Translation engine</label>
+              <select class="select" id="translatorBackend" name="translator_backend">
+                <option value="gemini" selected>Gemini 3.5 Flash &mdash; default, fastest</option>
+                <option value="claude">Claude Opus 4.7 (9router) &mdash; fallback when Gemini is rate-limited</option>
               </select>
-              {# ElevenLabs quota was previously surfaced here, but it duplicated
-                 the floating system-status pill (which already shows per-key
-                 usage on click). Removed to keep the upload card uncluttered. #}
+              <div class="field__hint" id="translatorBackendHint" style="margin-top: 6px; color: var(--c-muted); font-size: var(--fs-12);">
+                Speech-to-text always runs on ElevenLabs Scribe. This switch only changes which model translates the transcript.
+              </div>
             </div>
             <div class="field">
               <label class="field__label" for="targetLang">Target language</label>
@@ -134,6 +135,13 @@
                   <button type="button" class="tag" data-count="5">5</button>
                   <button type="button" class="tag" data-count="6">6</button>
                 </div>
+              </div>
+              <div class="def-list__row" style="border-top: 1px solid var(--c-hairline);">
+                <div>
+                  <div class="field__label" style="text-transform:none; letter-spacing:0; font-size: var(--fs-14); color: var(--c-ink);">Soft censor (playful R18)</div>
+                  <div class="field__hint">Softens explicit vocabulary into playful equivalents — ochinchin → wiener, cumming → finishing, horny → naughty. Recommended for VTuber / fan-sub clips.</div>
+                </div>
+                <label class="switch"><input type="checkbox" id="spicyFilterEnabled" checked /><span class="switch__track"></span><span class="switch__thumb"></span></label>
               </div>
             </div>
           </div>

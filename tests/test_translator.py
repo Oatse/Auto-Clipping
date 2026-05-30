@@ -196,3 +196,96 @@ class TestLocalGroupFromSegments:
         out = local_group_from_segments([seg])
         assert len(out) >= 1
         assert any("hello" in s.text for s in out)
+
+
+# ─── System instruction (anti-AI baseline + style preset + style note) ───
+
+class TestBuildSystemInstruction:
+    def test_baseline_rules_present_for_natural_default(self):
+        from processors.translator.gemini_client import _build_system_instruction
+
+        si = _build_system_instruction("English")
+        # Anti-AI baseline rules
+        assert "FUNCTIONALLY" in si
+        assert "CONTEXT-AWARE" in si
+        assert "RESTRUCTURE" in si
+        assert "EXACTLY as-is" in si  # onomatopoeia rule preserved
+        # Default preset
+        assert "NATURAL" in si
+        # Target language landed in the prompt
+        assert "Target language: English." in si
+
+    def test_formal_preset_swaps_block(self):
+        from processors.translator.gemini_client import _build_system_instruction
+
+        si = _build_system_instruction("Indonesian", style_preset="formal")
+        assert "FORMAL" in si
+        assert "no contractions" in si
+        assert "NATURAL" not in si.split("Style preset: ")[1]
+
+    def test_unknown_preset_falls_back_to_natural(self):
+        from processors.translator.gemini_client import _build_system_instruction
+
+        si = _build_system_instruction("English", style_preset="ridiculous")
+        assert "NATURAL" in si
+
+    def test_style_note_appended_additively_not_replaced(self):
+        from processors.translator.gemini_client import _build_system_instruction
+
+        si = _build_system_instruction(
+            "English",
+            style_preset="natural",
+            style_note="keep JP honorifics like senpai/shishou raw",
+        )
+        # Preset block still present
+        assert "NATURAL" in si
+        # Note appended with the explicit delimiter
+        assert "--- Additional user style note ---" in si
+        assert "senpai/shishou" in si
+        assert "--- End user style note ---" in si
+
+    def test_blank_style_note_does_not_inject_delimiter(self):
+        from processors.translator.gemini_client import _build_system_instruction
+
+        si_blank = _build_system_instruction("English", style_note="   ")
+        si_none = _build_system_instruction("English", style_note=None)
+        assert "user style note" not in si_blank
+        assert "user style note" not in si_none
+
+
+# ─── Translator processor wires style + seed into Gemini payload ─────────
+
+class TestTranslatorProcessorWiring:
+    def test_constructor_normalises_unknown_preset(self):
+        from processors.translator.processor import TranslatorProcessor
+
+        p = TranslatorProcessor(
+            target_language="id",
+            style_preset="academic",
+            style_note="  ",
+        )
+        assert p.style_preset == "natural"
+        assert p.style_note is None
+
+    def test_constructor_accepts_known_preset_and_note(self):
+        from processors.translator.processor import TranslatorProcessor
+
+        p = TranslatorProcessor(
+            target_language="en",
+            style_preset="formal",
+            style_note="academic register",
+        )
+        assert p.style_preset == "formal"
+        assert p.style_note == "academic register"
+
+    def test_translate_prompt_no_longer_inlines_baseline_rules(self):
+        """Anti-AI rules must live in systemInstruction, not in user message."""
+        from processors.translator.gemini_client import _build_translate_prompt
+
+        prompt = _build_translate_prompt(["Hello.", "World."], "Indonesian")
+        assert "Indonesian" in prompt
+        # Old baseline phrasing must not be duplicated in the user message
+        assert "kyaaaa" not in prompt
+        assert "ufufufu" not in prompt
+        assert "natural speech style" not in prompt
+

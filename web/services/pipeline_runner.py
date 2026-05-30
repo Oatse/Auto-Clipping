@@ -162,27 +162,47 @@ async def run_transcription_only(
             json.dump({"segments": el_original_data}, f, ensure_ascii=False, indent=2)
         log(f"✓ ElevenLabs original transcript saved: {el_original_path.name}")
 
-        # Auto-translate via Gemini if a target language is set.
-        if target_language and config.GEMINI_API_KEYS:
-            log(f"Auto-translating to '{target_language}' via Gemini...")
+        # Auto-translate via the configured backend if a target language is set.
+        # Per-job override (set from the Auto-Subtitle UI selector) wins over
+        # the global config default — that's the whole point of the toggle.
+        backend = (
+            getattr(job, "translator_backend", None)
+            or getattr(config, "TRANSLATOR_BACKEND", "gemini")
+            or "gemini"
+        ).lower()
+        backend_label = "Claude (9router)" if backend == "claude" else "Gemini"
+        backend_ready = (
+            (backend == "gemini" and bool(config.GEMINI_API_KEYS))
+            or (backend == "claude" and bool(getattr(config, "NINEROUTER_API_KEY", "")))
+        )
+        if target_language and backend_ready:
+            log(f"Auto-translating to '{target_language}' via {backend_label}...")
             if not getattr(config, "DEEPL_API_KEY", ""):
                 log(
-                    "Note: DEEPL_API_KEY not set. If Gemini fails, subtitles "
+                    f"Note: DEEPL_API_KEY not set. If {backend_label} fails, subtitles "
                     "will be left in the SOURCE language (no fallback)."
                 )
             from processors.translator import TranslatorProcessor
-            translator = TranslatorProcessor(target_language=target_language)
+            translator = TranslatorProcessor(
+                target_language=target_language,
+                backend=backend,
+                spicy_filter=bool(getattr(job, "spicy_filter", True)),
+            )
+            if translator.spicy_filter:
+                log("Spicy filter ON — R18 vocabulary will be softened (e.g. ochinchin → wiener).")
             segments, _ = await translator.translate(
                 segments=segments,
                 output_dir=output_dir / "phase2_translation",
                 regroup=True,
             )
             log(
-                f"✓ Auto-translate + word-level recheck selesai: "
+                f"✓ Auto-translate + word-level recheck selesai via {backend_label}: "
                 f"{len(segments)} segmen → '{target_language}'"
             )
-        elif not config.GEMINI_API_KEYS:
+        elif backend == "gemini" and not config.GEMINI_API_KEYS:
             log("⚠ No GEMINI_API_KEYS configured — skipping auto-translate")
+        elif backend == "claude" and not getattr(config, "NINEROUTER_API_KEY", ""):
+            log("⚠ NINEROUTER_API_KEY not set — skipping auto-translate (Claude backend)")
 
         # Persist canonical transcript JSON.
         transcript_output_dir = output_dir / "phase1_transcription"

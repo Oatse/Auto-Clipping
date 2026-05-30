@@ -18,7 +18,7 @@ const fileRemove      = document.getElementById('fileRemove');
 const uploadForm      = document.getElementById('uploadForm');
 const transcribeBtn   = document.getElementById('transcribeBtn');
 const targetLang      = document.getElementById('targetLang');
-const whisperModel    = document.getElementById('whisperModel');
+const translatorBackend = document.getElementById('translatorBackend');
 const refreshBtn      = document.getElementById('refreshBtn');
 
 // Advanced options
@@ -33,6 +33,7 @@ const speakerCountDec        = document.getElementById('speakerCountDec');
 const speakerCountInc        = document.getElementById('speakerCountInc');
 const speakerCountVal        = document.getElementById('speakerCountVal');
 const speakerCountPills      = document.getElementById('speakerCountPills');
+const spicyFilterEnabled    = document.getElementById('spicyFilterEnabled');
 
 // Transcribing screen
 const transcribingStatus = document.getElementById('transcribingStatus');
@@ -45,7 +46,37 @@ export function setupUpload() {
   setupAdvancedOptions();
   setupForm();
   setupModelSwitchNote();
+  setupTranslatorBackend();
   setupClipPicker();
+}
+
+// ── Translation engine selector ────────────────────────────────────────────
+// Syncs the hero "Translate" pill with the dropdown so the user can see at
+// a glance which translator the next job will use. The selector itself is
+// the source of truth — no localStorage; users frequently swap backends
+// per-job during a Gemini rate-limit storm.
+function setupTranslatorBackend() {
+  if (!translatorBackend) return;
+  const heroLabel = document.getElementById('heroTranslateLabel');
+  const hint = document.getElementById('translatorBackendHint');
+
+  const labelMap = {
+    gemini: 'Gemini',
+    claude: 'Claude (9router)',
+  };
+  const hintMap = {
+    gemini: 'Speech-to-text always runs on ElevenLabs Scribe. This switch only changes which model translates the transcript. Gemini 3.5 Flash is the default — fastest and cheapest.',
+    claude: 'Speech-to-text still runs on ElevenLabs Scribe. Claude Opus 4.7 (via 9router) is the recommended fallback when Gemini 3.5 / 2.5 Flash returns 503 — slower per-batch but more reliable under load.',
+  };
+
+  const sync = () => {
+    const v = (translatorBackend.value || 'gemini').toLowerCase();
+    if (heroLabel) heroLabel.textContent = labelMap[v] || labelMap.gemini;
+    if (hint) hint.textContent = hintMap[v] || hintMap.gemini;
+  };
+
+  translatorBackend.addEventListener('change', sync);
+  sync();
 }
 
 // ── Drag & Drop ────────────────────────────────────────────────────────────
@@ -152,15 +183,12 @@ function setSpeakerCount(n) {
 
 // ── ElevenLabs model note & advanced options sync ───────────────────────────
 function setupModelSwitchNote() {
-  // The transcription-engine field is hidden on the upload card now (only
-  // ElevenLabs is supported). The quota chip used to live here but it
-  // duplicated the floating nav pill, so the per-key quota lives there
-  // instead. Keep this stub so existing call sites don't break, but do
-  // not query DOM nodes that no longer exist.
-  if (!whisperModel) return;
-
-  // Make sure any stale advanced-row description label still reflects
-  // the engine we ship with.
+  // The transcription-engine field used to live on the upload card but was
+  // repurposed into the Translation engine selector (Gemini / Claude). The
+  // ElevenLabs quota chip used to live there too — it duplicated the
+  // floating nav pill so the per-key quota lives there now. This stub
+  // exists only so the upload-screen description label stays in sync if
+  // it's ever re-introduced.
   const descEl = document.querySelector('#speakerDetectionEnabled')
     ?.closest('.advanced-row')
     ?.querySelector('.advanced-row-desc');
@@ -176,19 +204,62 @@ function setupForm() {
     e.preventDefault();
     if (!S.selectedFile) return;
 
-    transcribeBtn.disabled = true;
-    transcribeBtn.classList.add('loading');
-    transcribeBtn.querySelector('.btn-text').textContent = 'Uploading...';
+    // Resolve every form-touching node at submit time. Module-load-time
+    // const refs cause a misleading "Cannot read properties of null
+    // (reading 'value')" toast whenever a template rename ships ahead
+    // of a JS deploy or a stale ESM lives in the browser cache (which
+    // is exactly how this regression surfaced after the
+    // whisperModel → translatorBackend rename). A late lookup with
+    // explicit null guards turns the same condition into an actionable
+    // error message instead of a 7-word mystery.
+    const targetLangEl     = document.getElementById('targetLang');
+    const speakerDetEl     = document.getElementById('speakerDetectionEnabled');
+    const numSpeakersOnEl  = document.getElementById('numSpeakersEnabled');
+    const backendEl        = document.getElementById('translatorBackend');
+    const spicyEl          = document.getElementById('spicyFilterEnabled');
+    const submitBtn        = document.getElementById('transcribeBtn') || transcribeBtn;
+    const submitBtnText    = submitBtn && submitBtn.querySelector('.btn-text');
+
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.classList.add('loading');
+      if (submitBtnText) submitBtnText.textContent = 'Uploading...';
+    }
+
+    if (!targetLangEl) {
+      toast.error(
+        'Upload form is out of date — please hard-refresh (Ctrl+Shift+R) and try again.'
+      );
+      if (submitBtn) {
+        submitBtn.classList.remove('loading');
+        submitBtn.disabled = !S.selectedFile;
+        if (submitBtnText) submitBtnText.textContent = 'Transcribe & preview';
+      }
+      return;
+    }
 
     try {
       const formData = new FormData();
       formData.append('video', S.selectedFile);
-      formData.append('target_language', targetLang.value);
+      formData.append('target_language', targetLangEl.value);
       formData.append('transcribe_only', true);
-      formData.append('speaker_detection', speakerDetectionEnabled.checked);
-      formData.append('whisper_model', whisperModel.value);
+      // Speaker-detection switch — default ON if the toggle ever goes
+      // missing, since that's the upstream pipeline's safer default
+      // (multi-speaker transcripts can always be flattened later, but
+      // a flat transcript can't be re-diarised without re-running STT).
+      formData.append(
+        'speaker_detection',
+        speakerDetEl ? speakerDetEl.checked : true,
+      );
+      if (backendEl && backendEl.value) {
+        formData.append('translator_backend', backendEl.value);
+      }
+      if (spicyEl) {
+        formData.append('spicy_filter', spicyEl.checked);
+      }
 
-      if (speakerDetectionEnabled.checked && numSpeakersEnabled.checked) {
+      const wantSpeakerCap = speakerDetEl?.checked && numSpeakersOnEl?.checked;
+      if (wantSpeakerCap) {
         formData.append('num_speakers', S.numSpeakersCount);
       }
 
@@ -205,9 +276,11 @@ function setupForm() {
       window.location.href = `/editor/${job.id}`;
     } catch (err) {
       toast.error('Failed to start transcription: ' + err.message);
-      transcribeBtn.classList.remove('loading');
-      transcribeBtn.querySelector('.btn-text').textContent = 'Transcribe & preview';
-      transcribeBtn.disabled = !S.selectedFile;
+      if (submitBtn) {
+        submitBtn.classList.remove('loading');
+        if (submitBtnText) submitBtnText.textContent = 'Transcribe & preview';
+        submitBtn.disabled = !S.selectedFile;
+      }
     }
   });
 
@@ -395,7 +468,12 @@ export async function startJobFromClip(clipPath, clipFilename) {
     formData.append('clip_path', clipPath);
     formData.append('target_language', targetLang.value);
     formData.append('speaker_detection', speakerDetectionEnabled.checked);
-    formData.append('whisper_model', whisperModel.value);
+    if (translatorBackend && translatorBackend.value) {
+      formData.append('translator_backend', translatorBackend.value);
+    }
+    if (spicyFilterEnabled) {
+      formData.append('spicy_filter', spicyFilterEnabled.checked);
+    }
 
     if (speakerDetectionEnabled.checked && numSpeakersEnabled.checked) {
       formData.append('num_speakers', S.numSpeakersCount);

@@ -28,6 +28,7 @@ GEMINI_API_KEYS: list[str] = [
         os.getenv("GEMINI_API_KEY_01", ""),
         os.getenv("GEMINI_API_KEY_02", ""),
         os.getenv("GEMINI_API_KEY_03", ""),
+        os.getenv("GEMINI_API_KEY_04", ""),
         os.getenv("GEMINI_API_KEY", ""),          # legacy single-key fallback
     ] if k
 ]
@@ -106,6 +107,27 @@ TRANSLATOR_GEMINI_FALLBACK_MODELS: list[str] = [
         "gemini-3.5-flash,gemini-2.5-flash",
     ).split(",") if m.strip()
 ]
+
+
+# ─── Translator backend selector ─────────────────────────────────────────────
+# Phase 2 translator backend. "gemini" is the default and matches the legacy
+# behaviour. "claude" routes plain-text + regroup calls through an
+# OpenAI-compatible endpoint (e.g. 9router) speaking to Claude. Use this as a
+# temporary swap when Gemini is rate-limited (HTTP 503).
+TRANSLATOR_BACKEND: str = os.getenv("TRANSLATOR_BACKEND", "gemini").strip().lower()
+
+# 9router (OpenAI-compatible) endpoint used by the Claude backend. Defaults
+# match the local Kiro Pro setup; override per-machine in .env.
+NINEROUTER_BASE_URL: str = os.getenv(
+    "NINEROUTER_BASE_URL", "http://localhost:20128/v1",
+).rstrip("/")
+NINEROUTER_API_KEY: str = os.getenv("NINEROUTER_API_KEY", "")
+
+# Claude model id served by 9router. Default to the +Thinking variant for
+# translation quality; override to a cheaper tier (sonnet, haiku) when needed.
+TRANSLATOR_CLAUDE_MODEL: str = os.getenv(
+    "TRANSLATOR_CLAUDE_MODEL", "kr/claude-opus-4.7-thinking",
+)
 
 
 # ─── Clip Finder ─────────────────────────────────────────────────────────────

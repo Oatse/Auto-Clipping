@@ -50,6 +50,8 @@ class Job(BaseModel):
     transcribe_only: bool = False          # Jika True, pipeline berhenti setelah phase 1
     num_speakers: int | None = None        # Manual speaker count override (None = auto)
     speaker_detection: bool = True         # False = skip gap detection, semua SPEAKER_00
+    translator_backend: str | None = None  # "gemini" | "claude" | None (use config default)
+    spicy_filter: bool = True              # Soft-censor R18: ochinchin → wiener, etc.
 
     class Config:
         use_enum_values = True

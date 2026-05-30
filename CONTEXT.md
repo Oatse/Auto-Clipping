@@ -61,6 +61,14 @@ _Avoid_: Manifest, summary file, info.
 The Workspace that chains Clip Finder's moment detection, Auto-Subtitle's captioning, and Short Maker's reframing into one job. Produces a list of finished, captioned, reframed **Clips** from a single YouTube URL.
 _Avoid_: Auto Clip Maker, Auto Maker Clip, Full Auto, One-Shot.
 
+**Style Preset**:
+Named bundle of translation-tone rules consumed by the Auto-Subtitle translator. Two presets in v1: `natural` (default — conversational, idiom-functional, light fillers, no internet slang) and `formal` (full sentences, no contractions, neutral register). Affects only how the translator phrases the target text; never affects STT, Moment detection, segment timing, or rendering. Stored on the Job so re-runs are reproducible.
+_Avoid_: Tone, voice, profile (profile is **Scoring Profile**), mode (mode is the detection mode).
+
+**Style Note**:
+Optional free-form user instruction appended additively to the active **Style Preset** for one **Job** (e.g. "keep JP honorifics like senpai/shishou", "academic register"). Lives in the Auto-Subtitle workspace's advanced section and on All In's caption settings. Never replaces the Style Preset — only extends it.
+_Avoid_: Custom prompt, instruction, hint, override.
+
 ## Relationships
 
 - A **Source video** yields zero or more **Moments**.
