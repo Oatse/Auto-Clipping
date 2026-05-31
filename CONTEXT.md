@@ -69,6 +69,10 @@ _Avoid_: Tone, voice, profile (profile is **Scoring Profile**), mode (mode is th
 Optional free-form user instruction appended additively to the active **Style Preset** for one **Job** (e.g. "keep JP honorifics like senpai/shishou", "academic register"). Lives in the Auto-Subtitle workspace's advanced section and on All In's caption settings. Never replaces the Style Preset — only extends it.
 _Avoid_: Custom prompt, instruction, hint, override.
 
+**Natural Caption Style**:
+Render-time post-processing pass that makes finished subtitles read naturally on vertical short-form. Two passes: drop a single trailing `.` `,` `。` `、` from each segment's display text and last `WordTimestamp` (preserving `?` `!` `…` and mid-text punctuation), then split any segment whose text exceeds 24 characters into 2-3 word-aligned sub-segments at the most balanced cut point — preferring word boundaries that already end in punctuation. Runs after `Sanitizer` and before the renderer in `pipeline_runner`, so timing is already monotonic by the time we slice. Toggleable per-Job (default ON), shared by **Auto-Subtitle** and **All In** because both consume the same `TranscriptSegment` shape.
+_Avoid_: Subtitle cleaner, line wrap, punctuation strip, reflow.
+
 ## Relationships
 
 - A **Source video** yields zero or more **Moments**.

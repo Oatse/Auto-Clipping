@@ -313,6 +313,7 @@ async def create_job(
     speaker_detection: bool = Form(True),
     translator_backend: str | None = Form(None),
     spicy_filter: bool = Form(True),
+    natural_caption: bool = Form(True),
 ):
     """Create a Job from an uploaded video and start the pipeline."""
     if not (video.filename or "").lower().endswith(
@@ -359,6 +360,7 @@ async def create_job(
         speaker_detection=speaker_detection,
         translator_backend=backend,
         spicy_filter=spicy_filter,
+        natural_caption=natural_caption,
     )
     job_state.jobs[job_id] = job
 
@@ -732,6 +734,7 @@ async def create_job_from_clip(
     speaker_detection: bool = Form(True),
     translator_backend: str | None = Form(None),
     spicy_filter: bool = Form(True),
+    natural_caption: bool = Form(True),
 ):
     """Create an auto-subtitle Job from an existing Clip Finder video file."""
     clip_file = Path(clip_path)

@@ -34,6 +34,7 @@ const speakerCountInc        = document.getElementById('speakerCountInc');
 const speakerCountVal        = document.getElementById('speakerCountVal');
 const speakerCountPills      = document.getElementById('speakerCountPills');
 const spicyFilterEnabled    = document.getElementById('spicyFilterEnabled');
+const naturalCaptionEnabled = document.getElementById('naturalCaptionEnabled');
 
 // Transcribing screen
 const transcribingStatus = document.getElementById('transcribingStatus');
@@ -256,6 +257,9 @@ function setupForm() {
       }
       if (spicyEl) {
         formData.append('spicy_filter', spicyEl.checked);
+      }
+      if (naturalCaptionEnabled) {
+        formData.append('natural_caption', naturalCaptionEnabled.checked);
       }
 
       const wantSpeakerCap = speakerDetEl?.checked && numSpeakersOnEl?.checked;

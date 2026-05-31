@@ -24,7 +24,18 @@ Public API
 >>> sanitizer.sanitize_segment_only(segs)   # skip word-level passes
 """
 
+from .natural_caption import (
+    DEFAULT_MAX_LINE_CHARS,
+    DEFAULT_MAX_LINES,
+    apply_natural_caption_style,
+)
 from .policy import TimingPolicy
 from .sanitizer import Sanitizer
 
-__all__ = ["TimingPolicy", "Sanitizer"]
+__all__ = [
+    "TimingPolicy",
+    "Sanitizer",
+    "apply_natural_caption_style",
+    "DEFAULT_MAX_LINE_CHARS",
+    "DEFAULT_MAX_LINES",
+]

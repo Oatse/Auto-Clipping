@@ -52,6 +52,7 @@ class Job(BaseModel):
     speaker_detection: bool = True         # False = skip gap detection, semua SPEAKER_00
     translator_backend: str | None = None  # "gemini" | "claude" | None (use config default)
     spicy_filter: bool = True              # Soft-censor R18: ochinchin → wiener, etc.
+    natural_caption: bool = True           # Drop trailing . / , and split long lines for short-form readability.
 
     class Config:
         use_enum_values = True

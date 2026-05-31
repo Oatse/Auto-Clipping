@@ -31,6 +31,8 @@ from models.transcript import (
     sanitize_timestamps,
 )
 
+from processors.timing import apply_natural_caption_style
+
 from .job_models import Job, JobStatus, PHASE_LABELS
 from .transcript_sync import sync_segment_words_with_text
 
@@ -199,6 +201,20 @@ async def run_transcription_only(
                 f"✓ Auto-translate + word-level recheck selesai via {backend_label}: "
                 f"{len(segments)} segmen → '{target_language}'"
             )
+
+            # Natural Caption Style — drop trailing ``.`` / ``,`` and split
+            # long segments into 2-3 sub-segments. Runs here in transcribe-
+            # only too so the editor preview shows the cleaned-up subtitles
+            # the user toggled in the upload form. The render pipeline runs
+            # the same pass again later; the pass is idempotent so the
+            # double application is a no-op.
+            if getattr(job, "natural_caption", True):
+                before = len(segments)
+                segments = apply_natural_caption_style(segments)
+                log(
+                    "✓ Natural caption style: trailing micro-punct dropped, "
+                    f"{before} segmen → {len(segments)} segmen"
+                )
         elif backend == "gemini" and not config.GEMINI_API_KEYS:
             log("⚠ No GEMINI_API_KEYS configured — skipping auto-translate")
         elif backend == "claude" and not getattr(config, "NINEROUTER_API_KEY", ""):
@@ -406,6 +422,16 @@ async def run_render_pipeline(
             translated_segments,
             segment_level_only=skip_recheck,
         )
+
+        # Natural Caption Style — drop trailing ``.`` / ``,`` and split
+        # long segments into 2-3 sub-segments so short-form viewers
+        # don't get a wall of text at the bottom of the screen. Runs
+        # AFTER sanitize so the per-word timestamps used as cut anchors
+        # are already monotonic. Toggleable per-Job (default True).
+        if getattr(job, "natural_caption", True):
+            translated_segments = apply_natural_caption_style(
+                translated_segments,
+            )
 
         # Phase 3 — Subtitle Rendering
         set_phase(3)
