@@ -30,6 +30,11 @@ DURATION & PACING:
 
 For each clip output highlight_type (karma_arc | genuine_reaction | clutch_play | chaotic_plea | other) and dead_air_timestamps (array of timestamps in seconds where silence > 5s occurs inside the clip).`;
 
+// ── General Preset Instructions ───────────────────────────────────────────
+const GENERAL_PRESET = `From start to finish, all moments like funny, goofy, relatable, exciting, sad, desperate, or any kind of laugh moment. and since this moment searching is done by text reading of the llm add like 10-30s offset for each moment so we don't look any important context, I'd like it to have like 20 different clips or so
+
+Do not cut until the VTuber has fully processed the event. Duration 2–10 minutes. Ensure the "Story Arc" feels like a mini episode with a full event without cutted in the middle event`;
+
 // ── Setup ──────────────────────────────────────────────────────────────────
 export function setupClipFinder() {
   const cfUrl          = document.getElementById('cfUrl');
@@ -43,6 +48,7 @@ export function setupClipFinder() {
   const cfEnableAudio  = document.getElementById('cfEnableAudio');
   const cfEnableChat   = document.getElementById('cfEnableChat');
   const cfPresetVtuber = document.getElementById('cfPresetVtuber');
+  const cfPresetGeneral = document.getElementById('cfPresetGeneral');
   const cfPresetClear  = document.getElementById('cfPresetClear');
 
   function updateFindBtn() {
@@ -59,6 +65,9 @@ export function setupClipFinder() {
     if (cfPresetVtuber && cfInstructions.value !== VTUBER_HIGHLIGHTS_PRESET) {
       cfPresetVtuber.classList.remove('active');
     }
+    if (cfPresetGeneral && cfInstructions.value !== GENERAL_PRESET) {
+      cfPresetGeneral.classList.remove('active');
+    }
   });
   updateFindBtn();
 
@@ -73,6 +82,25 @@ export function setupClipFinder() {
       } else {
         cfInstructions.value = VTUBER_HIGHLIGHTS_PRESET;
         cfPresetVtuber.classList.add('active');
+        if (cfPresetGeneral) cfPresetGeneral.classList.remove('active');
+        if (cfPresetClear) cfPresetClear.classList.remove('hidden');
+      }
+      cfInstructions.dispatchEvent(new Event('input'));
+    });
+  }
+
+  // General preset chip — toggle preset text in/out
+  if (cfPresetGeneral) {
+    cfPresetGeneral.addEventListener('click', () => {
+      const isActive = cfPresetGeneral.classList.contains('active');
+      if (isActive) {
+        cfInstructions.value = '';
+        cfPresetGeneral.classList.remove('active');
+        if (cfPresetClear) cfPresetClear.classList.add('hidden');
+      } else {
+        cfInstructions.value = GENERAL_PRESET;
+        cfPresetGeneral.classList.add('active');
+        if (cfPresetVtuber) cfPresetVtuber.classList.remove('active');
         if (cfPresetClear) cfPresetClear.classList.remove('hidden');
       }
       cfInstructions.dispatchEvent(new Event('input'));
@@ -84,6 +112,7 @@ export function setupClipFinder() {
     cfPresetClear.addEventListener('click', () => {
       cfInstructions.value = '';
       if (cfPresetVtuber) cfPresetVtuber.classList.remove('active');
+      if (cfPresetGeneral) cfPresetGeneral.classList.remove('active');
       cfPresetClear.classList.add('hidden');
       cfInstructions.dispatchEvent(new Event('input'));
     });
