@@ -16,10 +16,26 @@ Selesai, ter-commit & ter-push:
 - [x] **Step 9** — Kalibrasi ambang di VOD nyata (data di bawah).
 - [x] **BONUS** — Fix app tidak bisa boot sama sekali (Starlette 1.0 hapus `add_event_handler`). `8258930`
 
-Belum (butuh `premiere-pro-mcp` terpasang lebih dulu):
-- [ ] **Step 6** — Bridge MCP: `create_project` + `import_fcp_xml` one-click.
-- [ ] **Step 4b** — Loop subtitle all-in Premiere (export audio → ElevenLabs → caption balik).
-- [ ] **Step 8** — Auto-connect projek Premiere dari "Start Analyze".
+- [x] **Step 6** — Bridge Premiere: `premiere-pro-mcp` terpasang, `bridge_client.py` (Python→Premiere, teruji live), import one-click dari panel. `085148e` `994a356`
+- [x] **Panel Auto-Clip** — UI penuh di dalam Premiere (URL, model, ambang, progress, daftar momen, tombol Import), signed + auto-start server. `da8de88`
+
+Belum:
+- [ ] **Step 4b** — Loop subtitle all-in Premiere. **Butuh export audio dari timeline Premiere**, dan itu memerlukan preset `.epr` / Adobe Media Encoder (`exportAsMediaDirect(path, presetPath, workAreaType)`). Ini satu-satunya bagian yang belum punya jalur teknis terverifikasi.
+- [x] ~~Step 8 — Auto-connect projek~~ — **TIDAK PERLU LAGI.** Panel hanya berjalan di dalam projek yang sudah terbuka, dan `importFiles` memasukkan timeline ke projek itu. Rencana "bikin projek baru otomatis" jadi mubazir.
+
+## Temuan penting dari uji nyata (Premiere 2023)
+
+Diverifikasi langsung lewat bridge ke Premiere yang berjalan:
+
+| Panggilan | Hasil |
+|---|---|
+| `app.openFCPXML(xml)` | ❌ `Not Enough Parameters` — butuh 2 argumen |
+| `app.openFCPXML(xml, projPath)` | ✅ jalan, tapi **membuat projek terpisah** |
+| `app.project.importFiles([xml], true, rootItem, false)` | ✅ **impor ke projek yang sedang terbuka** ← dipakai |
+
+Dua jebakan yang memakan waktu dan sekarang dijaga test:
+1. **Path harus absolut.** Premiere punya working directory sendiri; path relatif (`output/compilation/...`) resolve ke nihil dan muncul sebagai "file/folder not found".
+2. **Extension harus ber-signature.** `PlayerDebugMode` saja tidak cukup di Premiere modern — unsigned ditolak dengan `Signature verification failed` di `CEP11-PPRO.log`, dan panel **tidak muncul tanpa error apa pun** di UI.
 
 ## Hasil kalibrasi ambang (VOD nyata, Hololive 113 menit)
 
