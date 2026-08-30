@@ -419,6 +419,28 @@ async def get_transcript(job_id: str) -> dict:
                 }
                 for w in seg["words"]
             ]
+        # Restore per-segment effect + manual position so the editor
+        # re-hydrates what update_transcript persisted. Without this the
+        # GET dropped both, so a saved effect vanished on reload. Normalize
+        # through the same helpers as the PUT path so stale/invalid stored
+        # values are cleaned identically on the way out.
+        raw_effect = seg.get("effect")
+        effect = (
+            normalize_segment_effect(raw_effect)
+            if isinstance(raw_effect, dict)
+            else None
+        )
+        if effect is not None:
+            entry["effect"] = effect
+        pos_x, pos_y, has_position = normalize_segment_position(
+            seg.get("pos_x"),
+            seg.get("pos_y"),
+            bool(seg.get("pos_override", False)),
+        )
+        if has_position:
+            entry["pos_x"] = pos_x
+            entry["pos_y"] = pos_y
+            entry["pos_override"] = True
         if entry["text"]:
             segments.append(entry)
 
