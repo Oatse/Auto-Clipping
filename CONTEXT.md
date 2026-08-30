@@ -37,6 +37,10 @@ _Avoid_: Variant, version, cut type.
 Named bundle of `ClipScore` weights tuned for a content style — currently `vtuber` (default), `podcast`, `news`, `gaming`, `asmr`. The profile only changes how candidate **Moments** are ranked; it never affects detection, boundary refinement, or rendering. Stored on the Job so re-runs are reproducible.
 _Avoid_: Niche, genre, mode (mode is the detection mode: single-shot vs multi-stage).
 
+**Detection Model**:
+Named LLM backend that drives moment detection and scoring on the **Clip Finder** Workspace. Four values in v1: `gemini` (default — Gemini 3.5 Flash via Google), `kiro-opus-4.7` (Claude Opus 4.7 thinking-agentic via 9router / Kiro Pro), `kiro-sonnet-4.6` (Claude Sonnet 4.6 thinking-agentic via 9router / Kiro Pro), `kiro-auto` (Kiro's own auto-routed model via 9router). The Detection Model only swaps the LLM transport — detection prompts, the scoring rubric, boundary refinement, and rendering are unchanged across backends. Stored on the Job so re-runs are reproducible.
+_Avoid_: AI engine, LLM provider, model picker, backend (backend is the **Translator backend** on Auto-Subtitle).
+
 **Hook**:
 The first 1-3 seconds of a **Moment** that determine whether a viewer keeps watching. The Hook Optimizer is the boundary-refinement pass that snaps `Moment.start` to a strong opening line (question, exclamation, name-drop) when one exists in a ±3 s window.
 _Avoid_: Intro, opener, lead.

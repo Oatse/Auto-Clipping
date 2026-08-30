@@ -9,6 +9,7 @@ let cfJobId = null;
 let cfSSE   = null;
 let cfMode  = 'single-shot';
 let cfScoringProfile = 'vtuber';   // ADR-0003 Scoring Profile
+let cfModel = 'gemini';            // Detection LLM backend
 
 // ── VTuber Highlights Preset Instructions ─────────────────────────────────
 const VTUBER_HIGHLIGHTS_PRESET = `Find high-engagement VTuber highlights using these criteria:
@@ -131,6 +132,28 @@ export function setupClipFinder() {
   if (cfModeSingle) cfModeSingle.addEventListener('click', () => setMode('single-shot'));
   if (cfModeMulti)  cfModeMulti.addEventListener('click',  () => setMode('multi-stage'));
 
+  // AI model select — drives the LLM backend used for moment detection /
+  // scoring. Detection prompts and the scoring rubric stay unchanged
+  // across backends; only the model deciding which segments matter is
+  // swapped. Module-level cfModel is the source of truth for the POST.
+  const cfModelEl = document.getElementById('cfModel');
+  const cfModelHint = document.getElementById('cfModelHint');
+  if (cfModelEl) {
+    const hintMap = {
+      'gemini': 'Gemini 3.5 Flash via Google. Fastest and cheapest — the default.',
+      'kiro-opus-4.7': 'Claude Opus 4.7 thinking-agentic via 9router (Kiro Pro). Slower per call but reasons harder about borderline moments.',
+      'kiro-sonnet-4.6': 'Claude Sonnet 4.6 thinking-agentic via 9router (Kiro Pro). Balanced — closer to Gemini speed with stronger reasoning than Flash.',
+      'kiro-auto': "Kiro's auto-routed model via 9router. Lets Kiro pick the best fit for the prompt size.",
+    };
+    const syncModelHint = () => {
+      const v = (cfModelEl.value || 'gemini').toLowerCase();
+      cfModel = v;
+      if (cfModelHint && hintMap[v]) cfModelHint.textContent = hintMap[v];
+    };
+    cfModelEl.addEventListener('change', syncModelHint);
+    syncModelHint();
+  }
+
   // ADR-0003 Scoring Profile — segmented control. Mirrors the All In
   // workspace pattern. Stays in module-level cfScoringProfile so the
   // Find Clips POST body can read it without re-querying the DOM.
@@ -185,6 +208,7 @@ export function setupClipFinder() {
           enable_audio_signals: cfEnableAudio ? cfEnableAudio.checked : true,
           enable_chat_signals:  cfEnableChat  ? cfEnableChat.checked  : true,
           scoring_profile: cfScoringProfile,
+          model: cfModel,
         }),
       });
 
@@ -491,6 +515,7 @@ function cfRenderClipsInfoOnly(job) {
     const scoreHtml    = cfRenderScore(clip);
     const hunterHtml   = cfRenderHunter(clip);
     const highlightHtml= cfRenderHighlight(clip);
+    const confHtml     = cfRenderConfidence(clip);
     const signalsHtml  = cfRenderClipSignals(clip);
 
     if (isDownloaded) {
@@ -507,7 +532,7 @@ function cfRenderClipsInfoOnly(job) {
           <span class="cf-clip-duration">${durFmt}</span>
         </div>
         <div class="cf-clip-info">
-          <div class="cf-clip-number">${hunterHtml}#${idx + 1}${highlightHtml}</div>
+          <div class="cf-clip-number">${hunterHtml}#${idx + 1}${highlightHtml}${confHtml}</div>
           <div class="cf-clip-title">${escHtml(clip.title || 'Clip ' + (idx + 1))}</div>
           <div class="cf-clip-time">${startFmt} - ${endFmt}</div>
           ${scoreHtml}
@@ -546,7 +571,7 @@ function cfRenderClipsInfoOnly(job) {
           </svg>
         </div>
         <div class="cf-clip-info">
-          <div class="cf-clip-number">${hunterHtml}#${idx + 1}${highlightHtml}</div>
+          <div class="cf-clip-number">${hunterHtml}#${idx + 1}${highlightHtml}${confHtml}</div>
           <div class="cf-clip-title">${escHtml(clip.title || 'Clip ' + (idx + 1))}</div>
           <div class="cf-clip-time">${startFmt} - ${endFmt} (${durFmt})</div>
           ${scoreHtml}
@@ -577,14 +602,18 @@ function cfRenderClipsInfoOnly(job) {
 function cfRenderScore(clip) {
   const s = clip.score;
   if (!s || typeof s.total !== 'number') return '';
+  // Quote / Persona lead: they carry the most weight in the VTuber
+  // profile, so they belong where the eye lands first.
   const dims = [
+    ['Quote',   s.quotability],
+    ['Persona', s.character_moment],
     ['Hook',    s.retention_hook],
     ['Emotion', s.emotional_intensity],
+    ['Fresh',   s.novelty],
     ['Cycle',   s.completeness],
-    ['Replay',  s.replayability],
-  ];
+  ].filter(([, v]) => typeof v === 'number');
   return `
-    <div class="cf-clip-score">
+    <div class="cf-clip-score${clip.low_confidence ? ' cf-clip-score--low' : ''}">
       <div class="cf-clip-score-total">${(s.total || 0).toFixed(1)}<small>/10</small></div>
       <div class="cf-clip-score-bars">
         ${dims.map(([name, val]) => {
@@ -631,7 +660,11 @@ function cfRenderClipSignals(clip) {
     acc[s.kind] = (acc[s.kind] || 0) + 1;
     return acc;
   }, {});
-  const entries = Object.entries(counts).slice(0, 4);
+  // Chat asking for a clip is the strongest signal we have, so it is
+  // always shown even when four other kinds compete for the same row.
+  const entries = Object.entries(counts)
+    .sort((a, b) => (b[0] === 'chat_clip_intent') - (a[0] === 'chat_clip_intent'))
+    .slice(0, 4);
   return `
     <div class="cf-clip-signals">
       ${entries.map(([k, n]) =>
@@ -648,10 +681,17 @@ function cfSignalLabel(kind) {
     chat_spike: 'chat spike',
     chat_emote: 'emote storm',
     chat_superchat: 'superchat',
+    chat_clip_intent: '💬 chat wants this clipped',
     scene_cut: 'scene cut',
     generic: 'signal',
   };
   return map[kind] || kind;
+}
+
+function cfRenderConfidence(clip) {
+  if (!clip.low_confidence) return '';
+  return ` <span class="cf-clip-badge cf-clip-badge--lowconf"
+    title="Scored below the confidence threshold — included to fill the quota, not because it stood out.">weak</span>`;
 }
 
 async function cfDownloadSingleClip(btn, jobId) {

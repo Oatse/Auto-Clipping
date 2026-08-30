@@ -440,6 +440,28 @@ class TestScorerDeterministic:
         feats = ClipScorer._deterministic_features(cand, signals, 10, 60)
         assert feats["audio_peak_db"] == 0.0
 
+    def test_clip_intent_scored_from_strongest_burst(self):
+        cand = ClipCandidate(start=10, end=60, title="x")
+        signals = [
+            SignalEvent(SignalKind.CHAT_CLIP_INTENT, start=15, end=20,
+                        intensity=0.25, label="2x chat asking for a clip"),
+            SignalEvent(SignalKind.CHAT_CLIP_INTENT, start=40, end=45,
+                        intensity=1.0, label="8x chat asking for a clip"),
+        ]
+        feats = ClipScorer._deterministic_features(cand, signals, 10, 120)
+        # Strongest burst wins; bursts are not summed, so a long clip
+        # cannot out-score a tight one by spanning more windows.
+        assert feats["clip_intent_score"] == 10.0
+
+    def test_clip_intent_zero_without_signal(self):
+        cand = ClipCandidate(start=10, end=60, title="x")
+        signals = [
+            SignalEvent(SignalKind.CHAT_SPIKE, start=15, end=20,
+                        label="chat 4.0x baseline"),
+        ]
+        feats = ClipScorer._deterministic_features(cand, signals, 10, 120)
+        assert feats["clip_intent_score"] == 0.0
+
 
 # ─── Domain model serialization ──────────────────────────────────────────────
 
@@ -467,6 +489,22 @@ class TestSerialization:
         s2 = SignalEvent.from_dict(d)
         assert s2.kind == SignalKind.CHAT_SPIKE
         assert s2.intensity == 0.8
+
+    def test_clip_low_confidence_flag_serialised(self):
+        """Weak moments stay in the payload but are flagged for the UI."""
+        weak = Clip(start=0, end=20, title="filler",
+                    score=ClipScore(retention_hook=1.0))
+        strong = Clip(
+            start=100, end=120, title="banger",
+            score=ClipScore(
+                retention_hook=9, emotional_intensity=9, completeness=8,
+                replayability=9, shorts_friendly=9, quotability=10,
+                character_moment=9, novelty=8, duration_fit=10,
+                clip_intent_score=10,
+            ),
+        )
+        assert weak.to_dict()["low_confidence"] is True
+        assert strong.to_dict()["low_confidence"] is False
 
     def test_unknown_hunter_falls_back(self):
         assert HunterTag.coerce("bogus") == HunterTag.GENERAL

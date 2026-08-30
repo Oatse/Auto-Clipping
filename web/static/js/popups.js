@@ -156,13 +156,14 @@ export function openSpeakerPicker(anchorEl, segIdx) {
     <div class="speaker-picker-header">Change Speaker</div>
     <div class="speaker-picker-list">
       ${seen.map(sp => {
-        const idx = parseInt((sp.match(/\d+$/) || ['0'])[0], 10);
+        const match = sp.match(/\d+$/);
+        const label = match ? `S${parseInt(match[0], 10)}` : sp;
         const color = S.getSpeakerColor(sp);
-        const label = `S${idx}`;
+        const name = match ? `Speaker ${parseInt(match[0], 10)}` : sp;
         const active = sp === currentSpeaker ? ' speaker-picker-item-active' : '';
         return `<button class="speaker-picker-item${active}" data-speaker="${sp}" style="--sp-color:${color}">
           <span class="speaker-picker-badge" style="color:${color};border-color:${color}">${label}</span>
-          <span class="speaker-picker-name">Speaker ${idx}</span>
+          <span class="speaker-picker-name">${name}</span>
           ${sp === currentSpeaker ? '<span class="speaker-picker-check">✓</span>' : ''}
         </button>`;
       }).join('')}
@@ -213,6 +214,7 @@ export function openSpeakerPicker(anchorEl, segIdx) {
       closeSpeakerPicker();
       _renderTranscriptList();
       _buildSpeakerStylePanel();
+      renderTimeline();
       onStyleChange();
       _scheduleAutoSave();
     });

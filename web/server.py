@@ -11,6 +11,7 @@ Workspaces live under ``web/routes/``:
   - clip_finder.py    (Workspace 02) /api/clip-finder/*
   - short_maker.py    (Workspace 03) /api/short-maker/*
   - all_in.py         (Workspace 04) /api/all-in/*
+  - multi_pov.py      (Workspace 05) /api/multi-pov/*
 
 Cross-cutting concerns:
   - system.py         /api/system, /api/elevenlabs/quota, /api/gemini/quota
@@ -51,6 +52,10 @@ from web.routes.all_in import (
     router as all_in_router,
     register_restore_hook as _register_all_in_restore,
 )
+from web.routes.multi_pov import (
+    router as multi_pov_router,
+    register_restore_hook as _register_multi_pov_restore,
+)
 
 
 # ─── App Setup ────────────────────────────────────────────────────────────────
@@ -87,6 +92,9 @@ app.include_router(short_maker_router)
 
 app.include_router(all_in_router)
 _register_all_in_restore(app)
+
+app.include_router(multi_pov_router)
+_register_multi_pov_restore(app)
 
 
 # ─── Templates + page router ──────────────────────────────────────────────────

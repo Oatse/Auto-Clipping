@@ -64,7 +64,7 @@
       <div class="style-section">
         <label class="style-label">Text colour</label>
         <div class="color-row" style="display:flex; align-items:center; gap: var(--s-3);">
-          <input type="color" class="color color-input" id="fontColor" value="#ffffff" />
+          <input type="color" class="color color-input" id="fontColor" value="#ffffff" data-color-label="Text colour" />
           <div class="color-swatches" id="colorSwatches" style="display:flex; gap: 6px; flex-wrap:wrap;">
             <button class="swatch active" data-color="#ffffff" style="background:#fff;" title="White"></button>
             <button class="swatch" data-color="#ffe600" style="background:#ffe600;" title="Yellow"></button>
@@ -83,7 +83,7 @@
         </label>
         <div class="stroke-controls" id="strokeControls">
           <div class="stroke-row" style="display:grid; grid-template-columns: auto 1fr; gap: var(--s-3); align-items:center;">
-            <input type="color" class="color color-input" id="strokeColor" value="#000000" />
+            <input type="color" class="color color-input" id="strokeColor" value="#000000" data-color-label="Stroke colour" />
             <div>
               <span class="stroke-sublabel">Width <span class="style-value" id="strokeWidthVal">3</span> px</span>
               <input type="range" class="range" id="strokeWidth" min="0" max="12" value="3" step="1" />
@@ -101,7 +101,7 @@
         </label>
         <div class="glow-controls hidden" id="glowControls">
           <div class="stroke-row" style="display:grid; grid-template-columns: auto 1fr; gap: var(--s-3); align-items:center;">
-            <input type="color" class="color color-input" id="glowColor" value="#ff006e" />
+            <input type="color" class="color color-input" id="glowColor" value="#ff006e" data-color-label="Glow colour" />
             <div>
               <span class="stroke-sublabel">Blur <span class="style-value" id="glowBlurVal">12</span> px</span>
               <input type="range" class="range" id="glowBlur" min="0" max="40" value="12" step="1" />
@@ -132,6 +132,22 @@
         </div>
       </div>
 
+      <div class="style-section" id="segmentEffectControls">
+        <label class="style-label">Selected segment effect <span class="style-value" id="segmentEffectTarget">Select a subtitle segment</span></label>
+        <div class="segment-effect-grid">
+          <button type="button" class="tag segment-effect-btn is-active" data-segment-effect="none">None</button>
+          <button type="button" class="tag segment-effect-btn" data-segment-effect="wave-horizontal">Wave H</button>
+          <button type="button" class="tag segment-effect-btn" data-segment-effect="wave-vertical">Wave V</button>
+          <button type="button" class="tag segment-effect-btn" data-segment-effect="shake">Shake</button>
+        </div>
+        <label class="style-label segment-effect-strength-label" for="segmentEffectStrength">Strength</label>
+        <select class="select select--square" id="segmentEffectStrength">
+          <option value="soft">Soft</option>
+          <option value="medium" selected>Medium</option>
+          <option value="expert">Expert</option>
+        </select>
+      </div>
+
       <div class="style-section">
         <label class="style-label" style="display:flex; justify-content:space-between; align-items:center;">
           <span>Background box</span>
@@ -139,7 +155,7 @@
         </label>
         <div class="bgbox-controls hidden" id="bgBoxControls">
           <div class="stroke-row" style="display:grid; grid-template-columns: auto 1fr; gap: var(--s-3); align-items:center;">
-            <input type="color" class="color color-input" id="bgBoxColor" value="#000000" />
+            <input type="color" class="color color-input" id="bgBoxColor" value="#000000" data-color-label="Background colour" />
             <div>
               <span class="stroke-sublabel">Opacity <span class="style-value" id="bgOpacityVal">60</span>%</span>
               <input type="range" class="range" id="bgOpacity" min="0" max="100" value="60" step="5" />

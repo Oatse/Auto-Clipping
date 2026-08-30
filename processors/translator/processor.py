@@ -66,14 +66,34 @@ class TranslatorProcessor:
         # so existing call sites (main.py, web/server.py) pick up the env var
         # without code changes. Pass an explicit value to force a backend
         # (used by the standalone test scripts).
+        #
+        # Supported values:
+        #   "gemini"       — Gemini 3.5 Flash via generativelanguage.googleapis.com
+        #   "claude"       — Claude Opus 4.7 via 9router (NINEROUTER_BASE_URL)
+        #   "codex-gpt-5.5" — Codex GPT-5.5 via 9router (cx/gpt-5.5)
+        #   "codex-gpt-5.4" — Codex GPT-5.4 via 9router (cx/gpt-5.4)
+        _VALID_BACKENDS = {"gemini", "claude", "codex-gpt-5.5", "codex-gpt-5.4"}
         backend_resolved = (backend or config.TRANSLATOR_BACKEND or "gemini").strip().lower()
-        if backend_resolved not in {"gemini", "claude"}:
+        if backend_resolved not in _VALID_BACKENDS:
             logger.warning(
                 "Unknown translator backend '{}', falling back to 'gemini'",
                 backend_resolved,
             )
             backend_resolved = "gemini"
         self.backend = backend_resolved
+
+        # Resolve the concrete model ID to pass to the underlying client.
+        # For Gemini the model chain lives inside gemini_client; we don't
+        # need to surface it here. For 9router backends we pick it up once
+        # so _translate_batch / _regroup_one_batch don't repeat the lookup.
+        if backend_resolved == "claude":
+            self.model: str | None = getattr(config, "TRANSLATOR_CLAUDE_MODEL", None)
+        elif backend_resolved == "codex-gpt-5.5":
+            self.model = getattr(config, "TRANSLATOR_CODEX_GPT55_MODEL", "cx/gpt-5.5")
+        elif backend_resolved == "codex-gpt-5.4":
+            self.model = getattr(config, "TRANSLATOR_CODEX_GPT54_MODEL", "cx/gpt-5.4")
+        else:
+            self.model = None  # Gemini: resolved inside gemini_client
 
     # ── Public entrypoint ───────────────────────────────────────────────────
 
@@ -103,12 +123,13 @@ class TranslatorProcessor:
                 original_speakers.append(seg.speaker)
 
         api_keys = config.GEMINI_API_KEYS
-        # When the Claude backend is selected we don't need Gemini keys at
-        # all, but we still gate on a usable backend. The Claude client
+        # When the Claude/codex backend is selected we don't need Gemini keys
+        # at all, but we still gate on a usable backend. The Claude client
         # checks NINEROUTER_API_KEY internally and returns None when missing.
+        _is_9router = self.backend in {"claude", "codex-gpt-5.5", "codex-gpt-5.4"}
         backend_ready = (
             (self.backend == "gemini" and bool(api_keys))
-            or (self.backend == "claude" and bool(config.NINEROUTER_API_KEY))
+            or (_is_9router and bool(config.NINEROUTER_API_KEY))
         )
         if backend_ready:
             logger.info("Translator backend: {}", self.backend)
@@ -123,8 +144,9 @@ class TranslatorProcessor:
                 logger.warning("No GEMINI_API_KEYS configured — returning original text")
             else:
                 logger.warning(
-                    "Claude backend selected but NINEROUTER_API_KEY is missing — "
+                    "%s backend selected but NINEROUTER_API_KEY is missing — "
                     "returning original text",
+                    self.backend,
                 )
             if regroup and any(seg.words for seg in segments):
                 translated = local_group_from_segments(segments)
@@ -202,12 +224,13 @@ class TranslatorProcessor:
                 self.backend,
             )
 
-            if self.backend == "claude":
+            if self.backend in {"claude", "codex-gpt-5.5", "codex-gpt-5.4"}:
                 translated_texts = await call_claude_translate(
                     texts, lang_name, api_keys,
                     style_preset=self.style_preset,
                     style_note=self.style_note,
                     spicy_filter=self.spicy_filter,
+                    model=self.model,
                 )
             else:
                 translated_texts = await call_gemini_translate(
@@ -310,12 +333,13 @@ class TranslatorProcessor:
         api_keys: list[str],
     ) -> list[TranscriptSegment]:
         """Process a single regroup batch through the active backend + fallbacks."""
-        if self.backend == "claude":
+        if self.backend in {"claude", "codex-gpt-5.5", "codex-gpt-5.4"}:
             groups, best_partial_groups = await call_claude_regroup(
                 words, speakers, target_lang_name, api_keys,
                 style_preset=self.style_preset,
                 style_note=self.style_note,
                 spicy_filter=self.spicy_filter,
+                model=self.model,
             )
         else:
             groups, best_partial_groups = await call_gemini_regroup(
@@ -390,8 +414,8 @@ class TranslatorProcessor:
             "translator_backend": self.backend,
             "translator_model_chain": list(getattr(config, "TRANSLATOR_GEMINI_FALLBACK_MODELS", []) or []),
             "translator_model_primary": (
-                getattr(config, "TRANSLATOR_CLAUDE_MODEL", None)
-                if self.backend == "claude"
+                self.model
+                if self.backend in {"claude", "codex-gpt-5.5", "codex-gpt-5.4"}
                 else getattr(config, "TRANSLATOR_GEMINI_MODEL", None)
             ),
             "segment_count": segment_count,

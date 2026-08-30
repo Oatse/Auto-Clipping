@@ -243,19 +243,79 @@ def build_hunter_prompt(
 # ─── Scoring prompt (Tier-3 stage 2) ─────────────────────────────────────────
 
 
+# Persona line per Scoring Profile. The rater's frame of reference is
+# what makes the difference between "technically a good short" and "a
+# clip this audience actually watches", so it is set explicitly rather
+# than left to the model's generic priors.
+_RATER_PERSONA: dict[str, str] = {
+    "vtuber": (
+        "You are a senior editor for a VTuber clip channel. Your audience is "
+        "existing fans who watch clip compilations daily — they have seen "
+        "thousands of stream highlights and are bored by generic ones. They "
+        "come for personality, not for events: the line they will quote in "
+        "the comments, the moment the performer's real self slips past the "
+        "persona, the noise that becomes a community in-joke. A moment can "
+        "be loud, dramatic, and completely worthless to them."
+    ),
+    "gaming": (
+        "You are an editor for a gaming highlights channel. Your audience "
+        "wants plays and reactions with a clear setup and payoff, and can "
+        "tell a genuinely impressive moment from a merely noisy one."
+    ),
+    "podcast": (
+        "You are an editor cutting a long-form podcast into shareable "
+        "segments. Your audience wants one self-contained idea per clip."
+    ),
+    "news": (
+        "You are a news producer cutting broadcast segments. Your audience "
+        "wants the substance up front and full context inside the clip."
+    ),
+    "asmr": (
+        "You are an editor for an ASMR channel. Your audience wants "
+        "sustained, consistent, comfortable sections — not peaks."
+    ),
+}
+
+_CALIBRATION = """SCORING CALIBRATION — read before scoring anything.
+Use the WHOLE 0-10 range. Anchors:
+  0-2  Nothing happens. Filler, setup with no payoff, dead air, admin talk.
+  3-4  Mildly pleasant but forgettable. A small chuckle, a routine reaction.
+       MOST candidates in a typical stream belong here.
+  5-6  Solid. Worth including in a long compilation, not worth its own upload.
+  7-8  Strong. You would give this its own upload and expect it to do well.
+  9-10 Exceptional. The kind of moment that gets re-uploaded by other
+       channels and quoted for months. There is usually AT MOST ONE of
+       these in an entire stream — often zero.
+
+Grade on a curve across the candidate set: rank them against EACH OTHER,
+not against an absolute ideal. If every candidate lands in 6-8 you have
+not actually rated anything, and your output is useless. Push weak
+candidates down into 2-4 even when they are pleasant.
+
+Loudness is NOT quality. A scream with no context scores low on
+quotability and character_moment even if the audio peak is huge. Do not
+let a signal summary talk you into a high score on its own."""
+
+
 def build_scoring_prompt(
     *,
     candidates: Sequence[ClipCandidate],
     transcript: Sequence[Segment],
     instructions: str,
     signals: Sequence[SignalEvent] = (),
+    profile: str = "vtuber",
 ) -> str:
-    """Ask the LLM to rate each candidate on 5 axes (0-10).
+    """Ask the LLM to rate each candidate on 8 axes (0-10).
 
     Per-candidate signal summaries are injected so the LLM can
     cross-reference what the ear / chat already vouches for. The
     summary is short (1 line per candidate) so token cost stays
     proportional to N candidates — see May-28 audit "#11".
+
+    ``profile`` selects the rater persona. The five original dimensions
+    describe a generic short; the three added ones (quotability,
+    character_moment, novelty) are what separate a clip a VTuber
+    audience re-watches from one that merely contains an event.
     """
     cand_lines = []
     for i, c in enumerate(candidates):
@@ -269,25 +329,53 @@ def build_scoring_prompt(
     transcript_text = render_transcript(transcript)
 
     signals_note = (
-        "\nSIGNALS LEGEND: each candidate may carry a short summary of "
-        "audio peaks (loud bursts), chat spikes (live-chat msgs/sec "
-        "above baseline), emote storms, superchats, and scene cuts that "
-        "fall inside its range. Treat these as hints — a clip with both "
-        "an audio peak AND a chat spike is almost always more "
-        "clip-worthy than one with neither.\n"
+        "\nSIGNALS LEGEND: each candidate may carry a summary of audio "
+        "peaks (loud bursts), chat spikes (live-chat msgs/sec above "
+        "baseline) with QUOTED chat messages, emote storms, superchats, "
+        "scene cuts, and CLIP REQUESTS — moments where chat literally "
+        "typed 'clip it' / '切り抜き'. Weigh these as follows:\n"
+        "  * Chat requesting a clip is the single strongest evidence "
+        "available: the audience nominated the moment themselves. "
+        "Treat it as near-proof of high replayability and quotability.\n"
+        "  * QUOTED chat text tells you WHY chat reacted — a spike of "
+        "greetings means nothing, a spike of 'SHE DID NOT JUST SAY THAT' "
+        "means everything. Read the quotes, do not just count the spike.\n"
+        "  * An audio peak on its own is weak evidence. Loud is not good.\n"
         if signals else ""
     )
 
+    persona = _RATER_PERSONA.get(
+        (profile or "vtuber").lower(), _RATER_PERSONA["vtuber"]
+    )
+
     return (
-        "You are a video clip rater. For EACH candidate clip below, score five "
-        "qualitative dimensions on a 0-10 scale and return a JSON array.\n\n"
+        f"{persona}\n\n"
+        "For EACH candidate clip below, score eight qualitative dimensions "
+        "on a 0-10 scale and return a JSON array.\n\n"
+        f"{_CALIBRATION}\n\n"
         "DIMENSIONS:\n"
         "- retention_hook (0-10): Strength of the FIRST 3 seconds as a hook. "
         "10 = stops scrolling instantly, 0 = boring intro.\n"
-        "- emotional_intensity (0-10): Peak emotional payoff (joy/shock/anger/etc).\n"
-        "- completeness (0-10): Does it have setup → climax → aftermath?\n"
-        "- replayability (0-10): Would someone re-watch this?\n"
+        "- emotional_intensity (0-10): Peak emotional payoff (joy/shock/anger/etc). "
+        "Genuine, uncontrolled emotion scores high; performed emotion does not.\n"
+        "- completeness (0-10): Does it have setup → climax → aftermath? "
+        "A clip cut before the reaction lands is incomplete no matter how good "
+        "the peak was.\n"
+        "- replayability (0-10): Would someone watch this a SECOND time?\n"
         "- shorts_friendly (0-10): Self-contained, no external context needed.\n"
+        "- quotability (0-10): Is there a specific line, scream, mispronunciation, "
+        "or noise that viewers will repeat in comments, turn into a thumbnail, or "
+        "make into an in-joke? A moment can be very funny live and score 2 here "
+        "if there is nothing to quote. This is the dimension that separates a "
+        "clip that spreads from one that does not.\n"
+        "- character_moment (0-10): Does the performer's real personality break "
+        "through — losing composure, an unguarded opinion, breaking character, "
+        "genuine vulnerability, an unhinged tangent? Routine on-brand behaviour "
+        "scores low. This is what fans actually subscribe for.\n"
+        "- novelty (0-10): Compared to the OTHER candidates in this list, how "
+        "different is this moment? If three candidates are all 'screams at a "
+        "jumpscare', the best one keeps its score and the others drop to 2-3. "
+        "Repetition is the main reason a compilation feels boring.\n"
         f"{signals_note}"
         f"\nUSER INTENT: {instructions or '(none)'}\n\n"
         f"TRANSCRIPT (for context):\n{transcript_text}\n\n"
@@ -299,12 +387,18 @@ def build_scoring_prompt(
         '- "completeness": number 0-10\n'
         '- "replayability": number 0-10\n'
         '- "shorts_friendly": number 0-10\n'
+        '- "quotability": number 0-10\n'
+        '- "character_moment": number 0-10\n'
+        '- "novelty": number 0-10\n'
         '- "punchline_seconds_from_start": number — seconds from the '
         "candidate start to the payoff beat (the word/phrase the viewer "
         "is here for). Use null when the candidate has no clear single "
         "punchline (e.g. a slow exchange that builds throughout).\n"
-        '- "comment": one-sentence rationale (max 120 chars)\n'
-        "Order by index ascending. Score honestly — give low marks to weak clips."
+        '- "comment": one-sentence rationale (max 120 chars) naming the '
+        "specific beat that earned the score — not a restatement of the title.\n"
+        "Order by index ascending. Before you emit the array, check your own "
+        "spread: if more than half your totals sit within 2 points of each "
+        "other, re-score with the anchors above."
     )
 
 
@@ -324,11 +418,22 @@ def _signals_summary_for(
     counts: dict[str, int] = {}
     max_peak_db: float = 0.0
     max_chat_ratio: float = 0.0
+    # What chat said, not just how much of it there was. Capped at a few
+    # short excerpts so the per-candidate line stays one line even when a
+    # long clip overlaps many spikes.
+    chat_quotes: list[str] = []
+    clip_requests: list[str] = []
     for s in signals:
         if s.end < candidate.start or s.start > candidate.end:
             continue
         kind = s.kind.value
         counts[kind] = counts.get(kind, 0) + 1
+        if s.kind == SignalKind.CHAT_CLIP_INTENT:
+            if s.sample:
+                clip_requests.append(s.sample)
+            continue
+        if s.kind == SignalKind.CHAT_SPIKE and s.sample:
+            chat_quotes.append(s.sample)
         if s.kind == SignalKind.AUDIO_PEAK:
             try:
                 # label e.g. "+18.5 dB above baseline"
@@ -365,6 +470,13 @@ def _signals_summary_for(
         parts.append(f"{counts[SignalKind.CHAT_SUPERCHAT.value]} superchat(s)")
     if SignalKind.SCENE_CUT.value in counts:
         parts.append(f"{counts[SignalKind.SCENE_CUT.value]} scene cut(s)")
+    if SignalKind.CHAT_CLIP_INTENT.value in counts:
+        n = counts[SignalKind.CHAT_CLIP_INTENT.value]
+        parts.append(f"** CHAT REQUESTED A CLIP HERE ({n} burst(s)) **")
+    if clip_requests:
+        parts.append(f'clip requests: "{" / ".join(clip_requests[:2])[:120]}"')
+    if chat_quotes:
+        parts.append(f'chat said: "{" / ".join(chat_quotes[:2])[:160]}"')
     return ", ".join(parts)
 
 

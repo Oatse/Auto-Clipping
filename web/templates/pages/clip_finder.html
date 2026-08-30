@@ -89,6 +89,19 @@
               </div>
             </div>
 
+            <div class="field">
+              <label class="field__label" for="cfModel">AI model</label>
+              <select class="select" id="cfModel" name="model">
+                <option value="gemini" selected>Gemini 3.5 Flash &mdash; default, fastest</option>
+                <option value="kiro-opus-4.7">Kiro &middot; Opus 4.7 &mdash; deeper, slower</option>
+                <option value="kiro-sonnet-4.6">Kiro &middot; Sonnet 4.6 &mdash; balanced</option>
+                <option value="kiro-auto">Kiro &middot; Auto &mdash; routed by Kiro</option>
+                <option value="codex-gpt-5.5">Codex &middot; GPT-5.5 via 9router &mdash; latest</option>
+                <option value="codex-gpt-5.4">Codex &middot; GPT-5.4 via 9router &mdash; stable</option>
+              </select>
+              <p class="field__hint" id="cfModelHint">Picks the LLM that scores moments. Detection prompts and the scoring rubric stay identical &mdash; only the model deciding which segments matter changes.</p>
+            </div>
+
             <div class="row">
               <label class="def-list__row" style="border-bottom:0; padding:0;">
                 <div>

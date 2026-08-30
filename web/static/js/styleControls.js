@@ -4,6 +4,7 @@
 
 import * as S from './state.js';
 import { onStyleChange } from './subtitleEngine.js';
+import { refreshColorPickers, setColorInputValue, setupColorPickers } from './colorPicker.js';
 
 // ── DOM Refs ───────────────────────────────────────────────────────────────
 const fontFamilyEl    = document.getElementById('fontFamily');
@@ -33,49 +34,79 @@ const subtitleOverlay = document.getElementById('subtitleOverlay');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 export function setupStyleControls() {
+  setupColorPickers();
+
   fontSizeEl.addEventListener('input', () => {
     fontSizeVal.textContent = fontSizeEl.value;
     onStyleChange();
+    S.triggerAutoSave();
   });
+
   strokeWidthEl.addEventListener('input', () => {
     strokeWidthVal.textContent = strokeWidthEl.value;
     onStyleChange();
+    S.triggerAutoSave();
   });
+
   glowBlurEl.addEventListener('input', () => {
     glowBlurVal.textContent = glowBlurEl.value;
     onStyleChange();
+    S.triggerAutoSave();
   });
+
   bgOpacityEl.addEventListener('input', () => {
     bgOpacityVal.textContent = bgOpacityEl.value;
     onStyleChange();
+    S.triggerAutoSave();
   });
 
-  fontColorEl.addEventListener('input', onStyleChange);
-  strokeColorEl.addEventListener('input', onStyleChange);
-  glowColorEl.addEventListener('input', onStyleChange);
-  bgBoxColorEl.addEventListener('input', onStyleChange);
-  fontFamilyEl.addEventListener('change', onStyleChange);
+  fontColorEl.addEventListener('input', () => {
+    onStyleChange();
+    S.triggerAutoSave();
+  });
+
+  strokeColorEl.addEventListener('input', () => {
+    onStyleChange();
+    S.triggerAutoSave();
+  });
+
+  glowColorEl.addEventListener('input', () => {
+    onStyleChange();
+    S.triggerAutoSave();
+  });
+
+  bgBoxColorEl.addEventListener('input', () => {
+    onStyleChange();
+    S.triggerAutoSave();
+  });
+
+  fontFamilyEl.addEventListener('change', () => {
+    onStyleChange();
+    S.triggerAutoSave();
+  });
 
   strokeEnabledEl.addEventListener('change', () => {
     strokeControls.classList.toggle('hidden', !strokeEnabledEl.checked);
     onStyleChange();
+    S.triggerAutoSave();
   });
   glowEnabledEl.addEventListener('change', () => {
     glowControls.classList.toggle('hidden', !glowEnabledEl.checked);
     onStyleChange();
+    S.triggerAutoSave();
   });
   bgBoxEnabledEl.addEventListener('change', () => {
     bgBoxControls.classList.toggle('hidden', !bgBoxEnabledEl.checked);
     onStyleChange();
+    S.triggerAutoSave();
   });
 
   colorSwatches.querySelectorAll('.swatch').forEach(btn => {
     btn.addEventListener('click', () => {
       const color = btn.dataset.color;
-      fontColorEl.value = color;
+      setColorInputValue(fontColorEl, color);
       colorSwatches.querySelectorAll('.swatch').forEach(s => s.classList.remove('active'));
       btn.classList.add('active');
-      onStyleChange();
     });
   });
 
@@ -88,6 +119,7 @@ export function setupStyleControls() {
       btn.classList.add('is-active');
       S.setCurrentAnim(btn.dataset.anim);
       onStyleChange();
+      S.triggerAutoSave();
     });
   });
 
@@ -102,6 +134,7 @@ export function setupStyleControls() {
       S.setCurrentPos(btn.dataset.pos);
       subtitleOverlay.className = 'subtitle-overlay pos-' + S.currentPos;
       onStyleChange();
+      S.triggerAutoSave();
     });
   });
 
@@ -113,6 +146,7 @@ export function setupStyleControls() {
       presetGrid.querySelectorAll('.preset').forEach(b => b.classList.remove('is-active'));
       btn.classList.add('is-active');
       applyPreset(btn.dataset.preset);
+      S.triggerAutoSave();
     });
   });
 }
@@ -158,5 +192,87 @@ export function applyPreset(name) {
   });
   subtitleOverlay.className = 'subtitle-overlay pos-' + S.currentPos;
 
+  refreshColorPickers();
+  onStyleChange();
+}
+
+// ── Style Configuration Application ─────────────────────────────────────────
+export function applyStyleConfig(config) {
+  if (!config) return;
+
+  if (config.fontFamily !== undefined && fontFamilyEl) fontFamilyEl.value = config.fontFamily;
+  if (config.fontSize !== undefined && fontSizeEl) {
+    fontSizeEl.value = config.fontSize;
+    fontSizeVal.textContent = config.fontSize;
+  }
+  if (config.fontColor !== undefined && fontColorEl) {
+    fontColorEl.value = config.fontColor;
+    if (colorSwatches) {
+      colorSwatches.querySelectorAll('.swatch').forEach(s => {
+        s.classList.toggle('active', s.dataset.color.toLowerCase() === config.fontColor.toLowerCase());
+      });
+    }
+  }
+
+  if (config.strokeEnabled !== undefined && strokeEnabledEl) {
+    strokeEnabledEl.checked = config.strokeEnabled;
+    strokeControls.classList.toggle('hidden', !config.strokeEnabled);
+  }
+  if (config.strokeColor !== undefined && strokeColorEl) strokeColorEl.value = config.strokeColor;
+  if (config.strokeWidth !== undefined && strokeWidthEl) {
+    strokeWidthEl.value = config.strokeWidth;
+    strokeWidthVal.textContent = config.strokeWidth;
+  }
+
+  if (config.glowEnabled !== undefined && glowEnabledEl) {
+    glowEnabledEl.checked = config.glowEnabled;
+    glowControls.classList.toggle('hidden', !config.glowEnabled);
+  }
+  if (config.glowColor !== undefined && glowColorEl) glowColorEl.value = config.glowColor;
+  if (config.glowBlur !== undefined && glowBlurEl) {
+    glowBlurEl.value = config.glowBlur;
+    glowBlurVal.textContent = config.glowBlur;
+  }
+
+  if (config.bgBoxEnabled !== undefined && bgBoxEnabledEl) {
+    bgBoxEnabledEl.checked = config.bgBoxEnabled;
+    bgBoxControls.classList.toggle('hidden', !config.bgBoxEnabled);
+  }
+  if (config.bgBoxColor !== undefined && bgBoxColorEl) bgBoxColorEl.value = config.bgBoxColor;
+  if (config.bgOpacity !== undefined && bgOpacityEl) {
+    bgOpacityEl.value = config.bgOpacity;
+    bgOpacityVal.textContent = config.bgOpacity;
+  }
+
+  if (config.anim !== undefined) {
+    S.setCurrentAnim(config.anim);
+    if (animGrid) {
+      animGrid.querySelectorAll('.anim-btn').forEach(b => {
+        b.classList.toggle('is-active', b.dataset.anim === config.anim);
+      });
+    }
+  }
+
+  if (config.pos !== undefined) {
+    S.setCurrentPos(config.pos);
+    if (positionGrid) {
+      positionGrid.querySelectorAll('.pos-btn').forEach(b => {
+        b.classList.toggle('is-active', b.dataset.pos === config.pos);
+      });
+    }
+    if (subtitleOverlay) {
+      subtitleOverlay.className = 'subtitle-overlay pos-' + S.currentPos;
+    }
+  }
+
+  if (config.speakerStyles !== undefined) {
+    S.setSpeakerStyles(JSON.parse(JSON.stringify(config.speakerStyles)));
+  }
+
+  if (presetGrid) {
+    presetGrid.querySelectorAll('.preset').forEach(b => b.classList.remove('is-active'));
+  }
+
+  refreshColorPickers();
   onStyleChange();
 }

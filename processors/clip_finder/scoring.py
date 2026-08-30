@@ -48,9 +48,16 @@ class ClipScorer:
         signals: Sequence[SignalEvent] = (),
         min_clip: float = 15.0,
         max_clip: float = 120.0,
+        profile: str = "vtuber",
         log_fn: LogFn | None = None,
     ) -> list[Clip]:
-        """Return Clip instances with a populated `score` field."""
+        """Return Clip instances with a populated `score` field.
+
+        ``profile`` is the Job's Scoring Profile. It already re-weights
+        the total downstream; passing it here also lets the rubric prompt
+        adopt the matching editorial persona, so an ASMR job is not rated
+        by a VTuber-clip editor.
+        """
         if not candidates:
             return []
 
@@ -59,7 +66,7 @@ class ClipScorer:
             for c in candidates
         ]
         llm_scores = await self._llm_rubric(
-            candidates, transcript, instructions, signals, log_fn
+            candidates, transcript, instructions, signals, profile, log_fn
         )
 
         clips: list[Clip] = []
@@ -70,10 +77,14 @@ class ClipScorer:
                 completeness=llm.get("completeness", 0.0),
                 replayability=llm.get("replayability", 0.0),
                 shorts_friendly=llm.get("shorts_friendly", 0.0),
+                quotability=llm.get("quotability", 0.0),
+                character_moment=llm.get("character_moment", 0.0),
+                novelty=llm.get("novelty", 0.0),
                 audio_peak_db=det["audio_peak_db"],
                 chat_spike_ratio=det["chat_spike_ratio"],
                 duration_fit=det["duration_fit"],
                 coincidence_bonus=det.get("coincidence_bonus", 0.0),
+                clip_intent_score=det.get("clip_intent_score", 0.0),
             )
             overlapping_signals = self._signals_in_range(cand, signals)
             clip = Clip.from_candidate(cand, score=score)
@@ -180,11 +191,26 @@ class ClipScorer:
             # 0s overlap → 0 bonus, 5s overlap → 10 bonus.
             coincidence_bonus = min(10.0, best_overlap * 2.0)
 
+        # Clip-intent — chat literally nominating the moment. Scored on
+        # the strongest single request burst inside the range rather than
+        # the sum, so a long clip does not out-score a tight one merely
+        # by spanning more windows. intensity is already normalised 0-1
+        # by the extractor (saturating at 8 requests), so ×10 puts it on
+        # the same 0-10 footing as every other feature.
+        clip_intent_score = 0.0
+        for s in signals:
+            if s.kind != SignalKind.CHAT_CLIP_INTENT:
+                continue
+            if s.end < candidate.start or s.start > candidate.end:
+                continue
+            clip_intent_score = max(clip_intent_score, min(10.0, s.intensity * 10.0))
+
         return {
             "audio_peak_db": round(max_peak_db, 2),
             "chat_spike_ratio": round(max_chat_ratio, 2),
             "duration_fit": round(duration_fit, 2),
             "coincidence_bonus": round(coincidence_bonus, 2),
+            "clip_intent_score": round(clip_intent_score, 2),
         }
 
     # ── Stage 2: LLM rubric ──────────────────────────────────────────────
@@ -195,6 +221,7 @@ class ClipScorer:
         transcript: Sequence[Segment],
         instructions: str,
         signals: Sequence[SignalEvent],
+        profile: str,
         log_fn: LogFn | None,
     ) -> list[dict[str, float]]:
         if not self._client:
@@ -207,6 +234,9 @@ class ClipScorer:
                     "completeness": 5.0,
                     "replayability": 5.0,
                     "shorts_friendly": 5.0,
+                    "quotability": 5.0,
+                    "character_moment": 5.0,
+                    "novelty": 5.0,
                 }
                 for _ in candidates
             ]
@@ -224,6 +254,7 @@ class ClipScorer:
             transcript=condensed,
             instructions=instructions,
             signals=signals,
+            profile=profile,
         )
 
         try:
@@ -251,6 +282,9 @@ class ClipScorer:
             "completeness": 5.0,
             "replayability": 5.0,
             "shorts_friendly": 5.0,
+            "quotability": 5.0,
+            "character_moment": 5.0,
+            "novelty": 5.0,
         }
 
     @staticmethod
@@ -289,6 +323,9 @@ class ClipScorer:
                 "completeness": _coerce(obj.get("completeness"), 5.0),
                 "replayability": _coerce(obj.get("replayability"), 5.0),
                 "shorts_friendly": _coerce(obj.get("shorts_friendly"), 5.0),
+                "quotability": _coerce(obj.get("quotability"), 5.0),
+                "character_moment": _coerce(obj.get("character_moment"), 5.0),
+                "novelty": _coerce(obj.get("novelty"), 5.0),
                 "punchline_seconds_from_start": punchline_val,
             }
         return out

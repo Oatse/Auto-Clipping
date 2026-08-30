@@ -71,20 +71,20 @@ def _ae_position(
     font_size = int(style.get("fontSize", 42))
     x = vid_w / 2
     if pos == "top":
-        # Match ASS alignment=8: MarginV ~2.5% from top edge.
+        # Match ASS alignment=8: MarginV ~4% from top edge.
         # AE anchor is at text baseline, so add ~25% of fontSize below
         # the top margin to place text body at the same visual position.
-        margin_v = round(vid_h * 0.025)
+        margin_v = round(vid_h * 0.04)
         y = margin_v + font_size * 0.75
     elif pos == "center":
         y = vid_h * 0.50
     else:  # bottom
         # Match ASS alignment=2: text bottom at vid_h - MarginV where
-        # MarginV = round(vid_h * 0.025).  AE text anchor sits at the
+        # MarginV = round(vid_h * 0.04).  AE text anchor sits at the
         # baseline, roughly 25% of fontSize above the text bottom, so
         # we subtract that offset to align the visible text bottom with
         # the rendered video.
-        margin_v = round(vid_h * 0.025)
+        margin_v = round(vid_h * 0.04)
         y = vid_h - margin_v - font_size * 0.25
     return f"[{x:.1f}, {y:.1f}]"
 
@@ -113,6 +113,23 @@ def _get_speaker_stroke_color(seg: dict, style: dict) -> str | None:
         val = speaker_styles[speaker]
         if isinstance(val, dict):
             return val.get("strokeColor")
+    return None
+
+
+def _get_speaker_glow_color(seg: dict, style: dict) -> str | None:
+    """Get per-speaker glow / shadow color override, or None to use global default.
+
+    Mirrors the preview / ASS-render behavior: when set, this color
+    replaces the global ``glowColor`` for that speaker's drop-shadow
+    effects.  Returning None signals the caller to fall back to the
+    global value.
+    """
+    speaker = seg.get("speaker", "SPEAKER_00")
+    speaker_styles = style.get("speakerStyles", {})
+    if speaker in speaker_styles:
+        val = speaker_styles[speaker]
+        if isinstance(val, dict):
+            return val.get("glowColor")
     return None
 
 
@@ -366,16 +383,18 @@ def generate_ae_script(
         # Glow effect — two stacked Drop Shadow effects at distance=0 to
         # approximate the double-layer CSS text-shadow used in preview.
         if glow_enabled and glow_blur > 0:
+            # Per-speaker glow color override (matches preview/ASS render).
+            seg_glow_color = _get_speaker_glow_color(seg, style_config) or glow_color
             jpg_lines = [
                 f"        // Glow effect (two Drop Shadows at distance 0, matching preview)",
                 f"        var ds1 = layer.property('Effects').addProperty('ADBE Drop Shadow');",
-                f"        ds1.property('Shadow Color').setValue({_ae_color(glow_color)});",
+                f"        ds1.property('Shadow Color').setValue({_ae_color(seg_glow_color)});",
                 f"        ds1.property('Opacity').setValue(100);",
                 f"        ds1.property('Direction').setValue(0);",
                 f"        ds1.property('Distance').setValue(0);",
                 f"        ds1.property('Softness').setValue({glow_blur});",
                 f"        var ds2 = layer.property('Effects').addProperty('ADBE Drop Shadow');",
-                f"        ds2.property('Shadow Color').setValue({_ae_color(glow_color)});",
+                f"        ds2.property('Shadow Color').setValue({_ae_color(seg_glow_color)});",
                 f"        ds2.property('Opacity').setValue(80);",
                 f"        ds2.property('Direction').setValue(0);",
                 f"        ds2.property('Distance').setValue(0);",

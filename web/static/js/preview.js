@@ -12,9 +12,11 @@ import { renderTimeline } from './timeline.js';
 import { openSplitDialog, mergeSegmentWithNext } from './timeline.js';
 import { loadJobs } from './jobs.js';
 import { clearFile } from './upload.js';
-import { onStyleChange, startSubtitleSync, renderActiveSubtitles, injectSetActiveSeg } from './subtitleEngine.js';
-import { setupStyleControls } from './styleControls.js';
+import { onStyleChange, startSubtitleSync, renderActiveSubtitles, injectSetActiveSeg, collectStyle } from './subtitleEngine.js';
+import { setupStyleControls, applyStyleConfig, applyPreset } from './styleControls.js';
 import { openTimeEditor, openSpeakerPicker, injectPopupCallbacks } from './popups.js';
+import { injectSegmentEffectPreview, setActiveSegmentEffectIndex, setupSegmentEffects } from './segmentEffects.js';
+import { enhanceColorInput } from './colorPicker.js';
 
 // ── DOM Refs ───────────────────────────────────────────────────────────────
 const previewVideo     = document.getElementById('previewVideo');
@@ -33,22 +35,43 @@ const videoWrap        = document.querySelector('.video-preview-wrap');
 const speakerStylesSection = document.getElementById('speakerStylesSection');
 const speakerStylesPanel   = document.getElementById('speakerStylesPanel');
 const strokeColorEl        = document.getElementById('strokeColor');
+const glowColorEl          = document.getElementById('glowColor');
 
 // ── Setup ──────────────────────────────────────────────────────────────────
 export function setupPreview() {
   setupPreviewControls();
   setupStyleControls();
+  setupSegmentEffects();
+  injectSegmentEffectPreview(() => {
+    onStyleChange();
+    renderTimeline();
+    renderTranscriptList();
+  });
   // Inject setActiveSeg into subtitle engine (avoids circular dep)
   injectSetActiveSeg(setActiveSeg);
   // Inject callbacks into popups module
   injectPopupCallbacks({ renderTranscriptList, buildSpeakerStylePanel, scheduleAutoSave });
+
+  // Set up auto-save request binding
+  S.setOnSaveRequest(scheduleAutoSave);
+
+  window.addEventListener('beforeunload', (e) => {
+    if (S.autoSaveTimer) {
+      e.preventDefault();
+      e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
+      return e.returnValue;
+    }
+  });
 }
 
 // ── Save / Auto-Save ───────────────────────────────────────────────────────
 export function scheduleAutoSave() {
   if (S.autoSaveTimer) clearTimeout(S.autoSaveTimer);
   showAutoSaveIndicator('pending');
-  S.setAutoSaveTimer(setTimeout(() => saveTranscript(true), S.AUTOSAVE_DELAY));
+  S.setAutoSaveTimer(setTimeout(() => {
+    S.setAutoSaveTimer(null);
+    saveTranscript(true);
+  }, S.AUTOSAVE_DELAY));
 }
 
 export async function saveTranscript(isAutoSave = false) {
@@ -63,7 +86,10 @@ export async function saveTranscript(isAutoSave = false) {
     await apiFetch(`/api/jobs/${S.activeJobId}/transcript`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ segments: S.transcriptData }),
+      body: JSON.stringify({
+        segments: S.transcriptData,
+        style_config: collectStyle()
+      }),
     });
     showAutoSaveIndicator('saved');
     if (!isAutoSave) {
@@ -99,6 +125,14 @@ export function openPreviewScreen(jobId) {
   previewVideo.src = videoUrl;
   previewVideo.load();
 
+  // Reset and load styling configuration
+  S.setSpeakerStyles({});
+  if (S.loadedStyleConfig && Object.keys(S.loadedStyleConfig).length > 0) {
+    applyStyleConfig(S.loadedStyleConfig);
+  } else {
+    applyPreset('vtuber-pop');
+  }
+
   renderTranscriptList();
   buildSpeakerStylePanel();
   initOriginalTranscriptToggle();
@@ -126,9 +160,14 @@ function buildSpeakerStylePanel() {
   seen.forEach(sp => {
     if (!S.speakerStyles[sp]) {
       const idx = parseInt((sp.match(/\d+$/) || ['0'])[0], 10);
-      S.speakerStyles[sp] = { color: S.SPEAKER_COLORS[idx % S.SPEAKER_COLORS.length], strokeColor: null };
-    } else if (!('strokeColor' in S.speakerStyles[sp])) {
-      S.speakerStyles[sp].strokeColor = null;
+      S.speakerStyles[sp] = {
+        color:       S.SPEAKER_COLORS[idx % S.SPEAKER_COLORS.length],
+        strokeColor: null,
+        glowColor:   null,
+      };
+    } else {
+      if (!('strokeColor' in S.speakerStyles[sp])) S.speakerStyles[sp].strokeColor = null;
+      if (!('glowColor'   in S.speakerStyles[sp])) S.speakerStyles[sp].glowColor   = null;
     }
   });
 
@@ -140,17 +179,21 @@ function buildSpeakerStylePanel() {
 
   speakerStylesPanel.innerHTML = '';
   seen.forEach(sp => {
-    const idx        = parseInt((sp.match(/\d+$/) || ['0'])[0], 10);
-    const label      = `Speaker ${idx}`;
+    const match      = sp.match(/\d+$/);
+    const label      = match ? `Speaker ${parseInt(match[0], 10)}` : sp;
+    const badgeLabel = match ? `S${parseInt(match[0], 10)}` : sp;
     const color      = S.speakerStyles[sp].color;
     const strokeOverride = S.speakerStyles[sp].strokeColor;
     const strokeVal  = strokeOverride || strokeColorEl.value || '#000000';
     const strokeActive = !!strokeOverride;
+    const glowOverride = S.speakerStyles[sp].glowColor;
+    const glowVal    = glowOverride || (glowColorEl ? glowColorEl.value : '#ffffff') || '#ffffff';
+    const glowActive = !!glowOverride;
 
     const row = document.createElement('div');
     row.className = 'speaker-style-row';
     row.innerHTML = `
-      <span class="speaker-style-badge" style="color:${color};border-color:${color}">S${idx}</span>
+      <span class="speaker-style-badge" style="color:${color};border-color:${color}">${badgeLabel}</span>
       <span class="speaker-style-name">${label}</span>
       <div class="speaker-color-group">
         <span class="speaker-color-label">Fill</span>
@@ -161,32 +204,69 @@ function buildSpeakerStylePanel() {
         <input type="color" class="color-input speaker-stroke-input ${strokeActive ? 'active-override' : ''}" value="${strokeVal}" data-speaker="${sp}" title="Stroke color for ${sp} (click × to reset)" />
         <button class="speaker-stroke-clear ${strokeActive ? '' : 'hidden'}" data-speaker="${sp}" title="Reset to global stroke">×</button>
       </div>
+      <div class="speaker-color-group">
+        <span class="speaker-color-label">Glow</span>
+        <input type="color" class="color-input speaker-glow-input ${glowActive ? 'active-override' : ''}" value="${glowVal}" data-speaker="${sp}" title="Glow / shadow color for ${sp} (click × to reset)" />
+        <button class="speaker-glow-clear ${glowActive ? '' : 'hidden'}" data-speaker="${sp}" title="Reset to global glow">×</button>
+      </div>
     `;
 
     const fillInput = row.querySelector('.speaker-color-input');
+    enhanceColorInput(fillInput);
     fillInput.addEventListener('input', () => {
       S.speakerStyles[sp] = { ...S.speakerStyles[sp], color: fillInput.value };
       row.querySelector('.speaker-style-badge').style.color = fillInput.value;
       row.querySelector('.speaker-style-badge').style.borderColor = fillInput.value;
       renderTranscriptList();
+      renderTimeline();
       onStyleChange();
+      scheduleAutoSave();
     });
 
     const strokeInput = row.querySelector('.speaker-stroke-input');
     const strokeClear = row.querySelector('.speaker-stroke-clear');
+    enhanceColorInput(strokeInput);
     strokeInput.addEventListener('input', () => {
       S.speakerStyles[sp] = { ...S.speakerStyles[sp], strokeColor: strokeInput.value };
       strokeInput.classList.add('active-override');
       strokeClear.classList.remove('hidden');
+      renderTimeline();
       onStyleChange();
+      scheduleAutoSave();
     });
     strokeClear.addEventListener('click', (e) => {
       e.stopPropagation();
       S.speakerStyles[sp] = { ...S.speakerStyles[sp], strokeColor: null };
       strokeInput.value = strokeColorEl.value || '#000000';
+      strokeInput._syncColorPicker?.();
       strokeInput.classList.remove('active-override');
       strokeClear.classList.add('hidden');
+      renderTimeline();
       onStyleChange();
+      scheduleAutoSave();
+    });
+
+    const glowInput = row.querySelector('.speaker-glow-input');
+    const glowClear = row.querySelector('.speaker-glow-clear');
+    enhanceColorInput(glowInput);
+    glowInput.addEventListener('input', () => {
+      S.speakerStyles[sp] = { ...S.speakerStyles[sp], glowColor: glowInput.value };
+      glowInput.classList.add('active-override');
+      glowClear.classList.remove('hidden');
+      renderTimeline();
+      onStyleChange();
+      scheduleAutoSave();
+    });
+    glowClear.addEventListener('click', (e) => {
+      e.stopPropagation();
+      S.speakerStyles[sp] = { ...S.speakerStyles[sp], glowColor: null };
+      glowInput.value = (glowColorEl ? glowColorEl.value : '#ffffff') || '#ffffff';
+      glowInput._syncColorPicker?.();
+      glowInput.classList.remove('active-override');
+      glowClear.classList.add('hidden');
+      renderTimeline();
+      onStyleChange();
+      scheduleAutoSave();
     });
 
     speakerStylesPanel.appendChild(row);
@@ -198,11 +278,12 @@ export function renderTranscriptList() {
   transcriptBody.innerHTML = '';
   S.transcriptData.forEach((seg, idx) => {
     const speakerColor = S.getSpeakerColor(seg.speaker);
-    const speakerNum = seg.speaker
-      ? (seg.speaker.match(/\d+$/) || ['0'])[0]
-      : '0';
-    const speakerLabel = `S${parseInt(speakerNum, 10)}`;
+    const match = seg.speaker ? seg.speaker.match(/\d+$/) : null;
+    const speakerLabel = match ? `S${parseInt(match[0], 10)}` : (seg.speaker || 'S0');
     const isLast = idx === S.transcriptData.length - 1;
+    const effectLabel = seg.effect?.type === 'wave'
+      ? `Wave ${seg.effect.axis === 'vertical' ? 'V' : 'H'}`
+      : (seg.effect?.type === 'shake' ? 'Shake' : '');
     const div = document.createElement('div');
     div.className = 'transcript-seg';
     div.dataset.idx = idx;
@@ -216,6 +297,7 @@ export function renderTranscriptList() {
       </div>
       <div class="seg-row-content">
         <span class="seg-speaker seg-speaker-btn" style="color:${speakerColor};border-color:${speakerColor}" data-idx="${idx}" title="Click to change speaker">${speakerLabel}<span class="seg-speaker-edit-icon">✎</span></span>
+        ${effectLabel ? `<span class="seg-effect-badge">${effectLabel}</span>` : ''}
         <span class="seg-text" ${S.editMode ? 'contenteditable="true"' : ''}>${escHtml(seg.text)}</span>
       </div>
     `;
@@ -268,10 +350,8 @@ function renderOriginalTranscriptList() {
   transcriptBody.innerHTML = '';
   S.originalTranscriptData.forEach((seg, idx) => {
     const speakerColor = S.getSpeakerColor(seg.speaker);
-    const speakerNum = seg.speaker
-      ? (seg.speaker.match(/\d+$/) || ['0'])[0]
-      : '0';
-    const speakerLabel = `S${parseInt(speakerNum, 10)}`;
+    const match = seg.speaker ? seg.speaker.match(/\d+$/) : null;
+    const speakerLabel = match ? `S${parseInt(match[0], 10)}` : (seg.speaker || 'S0');
     const div = document.createElement('div');
     div.className = 'transcript-seg transcript-seg-original';
     div.dataset.idx = idx;
@@ -348,6 +428,7 @@ async function checkOriginalTranscriptAvailable(jobId) {
 }
 
 export function setActiveSeg(idx) {
+  setActiveSegmentEffectIndex(idx);
   transcriptBody.querySelectorAll('.transcript-seg').forEach((el, i) => {
     el.classList.toggle('active', i === idx);
   });
@@ -361,6 +442,29 @@ function setupPreviewControls() {
   if (saveBtn) {
     saveBtn.addEventListener('click', () => saveTranscript(false));
   }
+
+  const isTextEntryTarget = (target) => {
+    if (!target) return false;
+    if (target.isContentEditable) return true;
+    const tagName = target.tagName;
+    return tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT';
+  };
+
+  const togglePreviewFromSpace = (e) => {
+    if (e.code !== 'Space' || isTextEntryTarget(e.target)) return;
+    const previewScreen = document.getElementById('screen-preview');
+    if (!previewScreen || !previewScreen.classList.contains('active')) return;
+    if (e.type === 'keydown') {
+      if (e.repeat) return;
+      if (previewVideo.paused) previewVideo.play();
+      else previewVideo.pause();
+    }
+    e.preventDefault();
+    e.stopImmediatePropagation();
+  };
+
+  document.addEventListener('keydown', togglePreviewFromSpace, true);
+  document.addEventListener('keyup', togglePreviewFromSpace, true);
 
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key === 's') {
@@ -445,7 +549,19 @@ function setupPreviewControls() {
 
   const navBackBtn = document.getElementById('navBackBtn');
   if (navBackBtn) {
-    navBackBtn.addEventListener('click', () => {
+    navBackBtn.addEventListener('click', async () => {
+      if (S.autoSaveTimer) {
+        clearTimeout(S.autoSaveTimer);
+        S.setAutoSaveTimer(null);
+      }
+      if (S.activeJobId && S.transcriptData.length && !S.isSaving) {
+        try {
+          showAutoSaveIndicator('saving');
+          await saveTranscript(true);
+        } catch (err) {
+          console.error('Auto-save on back failed:', err);
+        }
+      }
       const activeScreen = document.querySelector('.app-screen.active');
       const screenId = activeScreen ? activeScreen.id : '';
       if (screenId === 'screen-preview') {
@@ -458,6 +574,7 @@ function setupPreviewControls() {
       }
       showScreen('upload');
       switchTab('subtitle');
+      window.location.href = '/auto-subtitle';
     });
   }
 

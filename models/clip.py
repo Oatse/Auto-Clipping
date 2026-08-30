@@ -80,6 +80,11 @@ class SignalKind(str, Enum):
     CHAT_SPIKE = "chat_spike"           # Message velocity > baseline x N
     CHAT_EMOTE_STORM = "chat_emote"     # Same emote ≥ K times in window
     CHAT_SUPERCHAT = "chat_superchat"   # Paid superchat moment
+    # Chat explicitly asking for a clip ("clip it", "切り抜き", "klip ini").
+    # The highest-precision clip-worthiness signal available for VTuber
+    # VODs: the audience is literally nominating the moment. Distinct
+    # from CHAT_SPIKE, which only measures volume, not intent.
+    CHAT_CLIP_INTENT = "chat_clip_intent"
     SCENE_CUT = "scene_cut"             # Visual scene change
     GENERIC = "generic"
 
@@ -159,6 +164,21 @@ class ClipScore:
     # of a clip-worthy moment per chat_signals.py — see May-28 audit "#6".
     coincidence_bonus: float = 0.0
 
+    # ── VTuber-native rubric dimensions (LLM) ────────────────────────────
+    #
+    # The five dimensions above describe a generic "good short". They do
+    # not describe what makes a VTuber clip get watched, which is why the
+    # generic rubric alone produced technically-correct-but-boring picks.
+    # These three close that gap. All default to 0.0 so a ClipScore
+    # deserialised from a pre-existing job still constructs cleanly; the
+    # per-profile weights below are what decide whether they count.
+    quotability: float = 0.0         # Line/noise the community will repeat (LLM)
+    character_moment: float = 0.0    # The talent's real personality breaks through (LLM)
+    novelty: float = 0.0             # Distinct from the video's other moments (LLM)
+    # Deterministic: 0-10, driven by chat explicitly asking for a clip
+    # inside this range (SignalKind.CHAT_CLIP_INTENT).
+    clip_intent_score: float = 0.0
+
     @property
     def total(self) -> float:
         """Weighted overall score, 0-10. VTuber profile (legacy default).
@@ -192,6 +212,12 @@ class ClipScore:
             + self.completeness * w.completeness
             + self.replayability * w.replayability
             + self.shorts_friendly * w.shorts_friendly
+            # VTuber-native dimensions. ``getattr`` with a 0.0 default so a
+            # ProfileWeights built by older code (or a pickled profile)
+            # still evaluates instead of raising.
+            + self.quotability * getattr(w, "quotability", 0.0)
+            + self.character_moment * getattr(w, "character_moment", 0.0)
+            + self.novelty * getattr(w, "novelty", 0.0)
         )
 
         # Deterministic contributors. ``audio_peak_db`` already encodes
@@ -209,6 +235,7 @@ class ClipScore:
             + chat_norm * w.chat_norm_w
             + self.duration_fit * w.duration_fit_w
             + self.coincidence_bonus * coincidence_w
+            + self.clip_intent_score * getattr(w, "clip_intent_w", 0.0)
         )
 
         return round(min(10.0, llm_total + det_total), 2)
@@ -232,6 +259,10 @@ class ClipScore:
             chat_spike_ratio=float(data.get("chat_spike_ratio", 0.0)),
             duration_fit=float(data.get("duration_fit", 0.0)),
             coincidence_bonus=float(data.get("coincidence_bonus", 0.0)),
+            quotability=float(data.get("quotability", 0.0)),
+            character_moment=float(data.get("character_moment", 0.0)),
+            novelty=float(data.get("novelty", 0.0)),
+            clip_intent_score=float(data.get("clip_intent_score", 0.0)),
         )
 
 
@@ -333,7 +364,8 @@ class Clip:
         # value. ``ClipScore.to_dict()`` still emits a VTuber-default
         # ``total`` field; we overwrite it here once we know the profile.
         score_dict = self.score.to_dict()
-        score_dict["total"] = self.score.total_for(self.score_profile)
+        total = self.score.total_for(self.score_profile)
+        score_dict["total"] = total
         d: dict[str, Any] = {
             "start": round(self.start, 3),
             "end": round(self.end, 3),
@@ -345,6 +377,7 @@ class Clip:
             "score": score_dict,
             "score_profile": self.score_profile,
             "rescued": self.rescued,
+            "low_confidence": _is_low_confidence(total),
         }
         if self.file_idx is not None:
             d["file_idx"] = self.file_idx
@@ -412,6 +445,24 @@ def _is_numeric(s: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _is_low_confidence(total: float) -> bool:
+    """True when ``total`` sits below the configured confidence floor.
+
+    Read lazily from config rather than captured at import time so a
+    ``.env`` change takes effect on the next job without a restart of
+    the module graph. A threshold of 0 (or a missing/invalid config)
+    disables the flag, which keeps the pre-existing serialisation shape
+    for anyone who does not want the badge.
+    """
+    try:
+        import config as _config
+
+        floor = float(getattr(_config, "CLIP_FINDER_LOW_CONFIDENCE_BELOW", 0.0))
+    except Exception:  # noqa: BLE001 — a config problem must not break to_dict
+        return False
+    return floor > 0.0 and total < floor
 
 
 __all__ = [

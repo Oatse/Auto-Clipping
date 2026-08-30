@@ -107,6 +107,9 @@ export let jobsPanelTab = 'jobs';
 // Advanced options
 export let numSpeakersCount = 2;
 
+export let loadedStyleConfig = null;
+export let onSaveRequest = null;
+
 // State setters (needed because ES module exports are live bindings but only writable from the defining module)
 export function setSelectedFile(f) { selectedFile = f; }
 export function setActiveJobId(id) { activeJobId = id; }
@@ -136,6 +139,12 @@ export function setFsScale(s) { fsScale = s; }
 export function setPreviewWidthBeforeFs(w) { previewWidthBeforeFs = w; }
 export function setJobsPanelTab(t) { jobsPanelTab = t; }
 export function setNumSpeakersCount(n) { numSpeakersCount = n; }
+
+export function setLoadedStyleConfig(c) { loadedStyleConfig = c; }
+export function setOnSaveRequest(fn) { onSaveRequest = fn; }
+export function triggerAutoSave() {
+  if (onSaveRequest) onSaveRequest();
+}
 
 // Effects / Filters setters
 export function setEffectsData(d) { effectsData = d; }
@@ -262,4 +271,12 @@ export function getSpeakerColor(speakerId) {
 export function getSpeakerStrokeColor(speakerId) {
   if (!speakerId) return speakerStyles['SPEAKER_00']?.strokeColor || null;
   return speakerStyles[speakerId]?.strokeColor || null;
+}
+
+/** Per-speaker glow / shadow color override.
+ *  Returns null when the speaker has no override; the caller is then
+ *  expected to fall back to the global `style.glowColor`. */
+export function getSpeakerGlowColor(speakerId) {
+  if (!speakerId) return speakerStyles['SPEAKER_00']?.glowColor || null;
+  return speakerStyles[speakerId]?.glowColor || null;
 }

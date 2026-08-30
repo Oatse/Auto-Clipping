@@ -64,10 +64,14 @@ function setupTranslatorBackend() {
   const labelMap = {
     gemini: 'Gemini',
     claude: 'Claude (9router)',
+    'codex-gpt-5.5': 'Codex GPT-5.5',
+    'codex-gpt-5.4': 'Codex GPT-5.4',
   };
   const hintMap = {
     gemini: 'Speech-to-text always runs on ElevenLabs Scribe. This switch only changes which model translates the transcript. Gemini 3.5 Flash is the default — fastest and cheapest.',
     claude: 'Speech-to-text still runs on ElevenLabs Scribe. Claude Opus 4.7 (via 9router) is the recommended fallback when Gemini 3.5 / 2.5 Flash returns 503 — slower per-batch but more reliable under load.',
+    'codex-gpt-5.5': 'Speech-to-text still runs on ElevenLabs Scribe. Codex GPT-5.5 (via 9router) is the latest OpenAI model — uses the same 9router endpoint as Claude. Requires NINEROUTER_API_KEY.',
+    'codex-gpt-5.4': 'Speech-to-text still runs on ElevenLabs Scribe. Codex GPT-5.4 (via 9router) is the stable OpenAI model — uses the same 9router endpoint as Claude. Requires NINEROUTER_API_KEY.',
   };
 
   const sync = () => {
@@ -127,10 +131,10 @@ function setFile(file) {
 
 export function clearFile() {
   S.setSelectedFile(null);
-  fileInput.value = '';
-  dropZone.classList.remove('has-file');
-  dropZoneInner.classList.remove('hidden');
-  fileSelected.classList.add('hidden');
+  if (fileInput) fileInput.value = '';
+  if (dropZone) dropZone.classList.remove('has-file');
+  if (dropZoneInner) dropZoneInner.classList.remove('hidden');
+  if (fileSelected) fileSelected.classList.add('hidden');
   if (transcribeBtn) transcribeBtn.disabled = true;
 }
 
@@ -357,8 +361,14 @@ export async function watchTranscription(jobId) {
 export async function fetchTranscript(jobId) {
   try {
     const data = await apiFetch(`/api/jobs/${jobId}/transcript`);
+    if (data && data.style_config) {
+      S.setLoadedStyleConfig(data.style_config);
+    } else {
+      S.setLoadedStyleConfig(null);
+    }
     return data.segments || data;
   } catch {
+    S.setLoadedStyleConfig(null);
     return generateMockTranscript();
   }
 }

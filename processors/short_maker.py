@@ -155,23 +155,9 @@ def compute_default_top_crop(video_width: int, video_height: int) -> CropRegion:
     """
     Compute default center crop for the top grid.
 
-    Targets a 9:8 aspect ratio (1080:960) from the center of the video.
+    Defaults to the full video dimensions to keep the original aspect ratio.
     """
-    target_ratio = 9 / 8
-
-    if video_width / video_height > target_ratio:
-        # Video is wider than target — crop width
-        crop_h = video_height
-        crop_w = int(video_height * target_ratio)
-    else:
-        # Video is taller than target — crop height
-        crop_w = video_width
-        crop_h = int(video_width / target_ratio)
-
-    crop_x = (video_width - crop_w) // 2
-    crop_y = (video_height - crop_h) // 2
-
-    return CropRegion(x=crop_x, y=crop_y, w=crop_w, h=crop_h)
+    return CropRegion(x=0, y=0, w=video_width, h=video_height)
 
 
 def compute_default_bottom_crop(video_width: int, video_height: int) -> CropRegion:
@@ -270,26 +256,35 @@ async def make_short(
     _validate_crop(top_crop, info.width, info.height, "top")
     _validate_crop(bottom_crop, info.width, info.height, "bottom")
 
-    # Calculate grid heights accounting for padding
-    if padding > 0:
-        top_h = (SHORT_HEIGHT - padding) // 2
-        bot_h = SHORT_HEIGHT - padding - top_h
-    else:
-        top_h = GRID_HEIGHT
-        bot_h = GRID_HEIGHT
+    # Calculate grid heights accounting for padding and top_crop ratio
+    top_aspect = top_crop.w / top_crop.h
+    top_h = int(SHORT_WIDTH / top_aspect)
+    top_h -= top_h % 2  # Ensure even height for h264
+
+    # Leave at least some space for the bottom grid
+    max_top_h = SHORT_HEIGHT - padding - 100
+    if top_h > max_top_h:
+        top_h = max_top_h
+        top_h -= top_h % 2
+
+    bot_h = SHORT_HEIGHT - padding - top_h
+    bot_h -= bot_h % 2  # Ensure even height
+    
+    # Recalculate padding if rounding caused a mismatch
+    actual_padding = SHORT_HEIGHT - top_h - bot_h
 
     # Build FFmpeg complex filtergraph
     filter_complex = (
         f"[0:v]crop={top_crop.w}:{top_crop.h}:{top_crop.x}:{top_crop.y},"
-        f"scale={SHORT_WIDTH}:{top_h}:flags=lanczos[top];"
+        f"scale={SHORT_WIDTH}:{top_h}:flags=lanczos,setsar=1[top];"
         f"[0:v]crop={bottom_crop.w}:{bottom_crop.h}:{bottom_crop.x}:{bottom_crop.y},"
-        f"scale={SHORT_WIDTH}:{bot_h}:flags=lanczos[bottom];"
+        f"scale={SHORT_WIDTH}:{bot_h}:flags=lanczos,setsar=1[bottom];"
     )
 
-    if padding > 0:
+    if actual_padding > 0:
         # Add black padding bar between grids
         filter_complex += (
-            f"color=black:{SHORT_WIDTH}x{padding}:d={info.duration}:r={info.fps}[pad];"
+            f"color=c=black:s={SHORT_WIDTH}x{actual_padding}:d={info.duration}:r={info.fps}[pad];"
             f"[top][pad][bottom]vstack=inputs=3[out]"
         )
     else:

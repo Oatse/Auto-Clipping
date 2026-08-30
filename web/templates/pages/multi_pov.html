@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Multi POV — ClipAuto{% endblock %}
+{% block body_class %}p-multipov{% endblock %}
+
+{% block content %}
+<section class="hero" data-reveal>
+  <div class="container container--wide">
+    <div class="hero__split">
+      <div>
+        <span class="eyebrow is-lime" data-reveal-item><span class="dot"></span>Workspace · 05</span>
+        <h1 class="hero__title" data-reveal-item>
+          Same event,<br/><em>every angle.</em>
+        </h1>
+        <p class="hero__sub" data-reveal-item>
+          Paste 2–5 YouTube URLs from the same event. The AI finds clips from each source
+          independently, then groups matching moments into multi-POV pairs — ready to cut.
+        </p>
+      </div>
+      <aside class="hero__aside" data-reveal-item>
+        <div class="surface surface--ink">
+          <div class="metric">
+            <span class="metric__value" style="color: var(--c-lime);" data-counter data-target="5">0</span>
+            <span class="metric__label" style="color: rgba(255,255,255,0.72);">Sources per job (max)</span>
+          </div>
+        </div>
+        <dl class="hero__aside-meta">
+          <div><dt>Pipeline</dt><dd>Parallel per-source</dd></div>
+          <div><dt>Matching</dt><dd>LLM cross-match</dd></div>
+        </dl>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="screen-multipov">
+  <div class="container container--wide">
+    <div class="workbench">
+
+      <!-- LEFT: form + log -->
+      <div style="display:grid; gap: var(--s-6);">
+
+        <!-- Source URLs form -->
+        <div class="surface" data-reveal>
+          <div class="surface__head">
+            <div>
+              <h2 class="surface__title">Configure POV sources</h2>
+              <p class="surface__desc">Add 2–5 YouTube URLs from the same event. Provide short labels (optional) to identify each source in the results.</p>
+            </div>
+          </div>
+
+          <div style="display:grid; gap: var(--s-5);">
+            <!-- Dynamic source rows -->
+            <div id="mpovSourceList" style="display:grid; gap: var(--s-4);">
+              <!-- Source 0 (permanent) -->
+              <div class="mpov-source" data-idx="0">
+                <div style="display:grid; gap: var(--s-3);">
+                  <div class="field">
+                    <label class="field__label" for="mpovUrl0">Source 1 · YouTube URL <span class="field__req">*</span></label>
+                    <input class="input" id="mpovUrl0" type="url" placeholder="https://www.youtube.com/watch?v=…" />
+                  </div>
+                  <div class="row" style="gap: var(--s-4);">
+                    <div class="field" style="flex:1;">
+                      <label class="field__label" for="mpovLabel0">Label (optional)</label>
+                      <input class="input" id="mpovLabel0" type="text" placeholder="e.g. Player A, Caster, Main cam" maxlength="40" />
+                    </div>
+                    <div class="field" style="flex:0 0 140px;">
+                      <label class="field__label" for="mpovOffset0">Start offset (mm:ss)</label>
+                      <input class="input input--mono" id="mpovOffset0" type="text" value="0" placeholder="03:54" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <!-- Source 1 (permanent) -->
+              <div class="mpov-source" data-idx="1">
+                <div style="display:grid; gap: var(--s-3);">
+                  <div class="field">
+                    <label class="field__label" for="mpovUrl1">Source 2 · YouTube URL <span class="field__req">*</span></label>
+                    <input class="input" id="mpovUrl1" type="url" placeholder="https://www.youtube.com/watch?v=…" />
+                  </div>
+                  <div class="row" style="gap: var(--s-4);">
+                    <div class="field" style="flex:1;">
+                      <label class="field__label" for="mpovLabel1">Label (optional)</label>
+                      <input class="input" id="mpovLabel1" type="text" placeholder="e.g. Player B, Co-host" maxlength="40" />
+                    </div>
+                    <div class="field" style="flex:0 0 140px;">
+                      <label class="field__label" for="mpovOffset1">Start offset (mm:ss)</label>
+                      <input class="input input--mono" id="mpovOffset1" type="text" value="0" placeholder="03:54" />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Add / Remove source buttons -->
+            <div style="display:flex; gap: var(--s-3);">
+              <button type="button" class="btn btn--ghost btn--sm" id="mpovAddSource" disabled>+ Add source</button>
+              <button type="button" class="btn btn--ghost btn--sm" id="mpovRemoveSource" style="display:none;">− Remove last</button>
+            </div>
+
+            <hr class="divider" />
+
+            <!-- Instructions -->
+            <div class="field">
+              <label class="field__label" for="mpovInstructions">What moments are you looking for?</label>
+              <textarea class="textarea" id="mpovInstructions" rows="3"
+                placeholder="e.g. clutch rounds, team wipes, funny reactions. Leave empty for 'all interesting moments'."></textarea>
+            </div>
+
+            <!-- Detection mode -->
+            <div class="field">
+              <span class="field__label">Detection mode</span>
+              <div class="segmented" role="tablist">
+                <button type="button" class="is-active" id="mpovModeSingle" data-mode="single-shot">Single-shot</button>
+                <button type="button" id="mpovModeMulti" data-mode="multi-stage">Multi-stage (deeper)</button>
+              </div>
+            </div>
+
+            <!-- AI model -->
+            <div class="field">
+              <label class="field__label" for="mpovModel">AI model</label>
+              <select class="select" id="mpovModel" name="model">
+                <option value="gemini" selected>Gemini 3.5 Flash &mdash; default, fastest</option>
+                <option value="kiro-opus-4.7">Kiro &middot; Opus 4.7 &mdash; deeper, slower</option>
+                <option value="kiro-sonnet-4.6">Kiro &middot; Sonnet 4.6 &mdash; balanced</option>
+                <option value="kiro-auto">Kiro &middot; Auto &mdash; routed by Kiro</option>
+                <option value="codex-gpt-5.5">Codex &middot; GPT-5.5 via 9router &mdash; latest</option>
+                <option value="codex-gpt-5.4">Codex &middot; GPT-5.4 via 9router &mdash; stable</option>
+              </select>
+              <p class="field__hint">Picks the LLM that scores moments. Detection prompts stay identical &mdash; only the model deciding which segments matter changes.</p>
+            </div>
+
+            <!-- Audio & Chat signals -->
+            <div class="row">
+              <label class="def-list__row" style="border-bottom:0; padding:0;">
+                <div>
+                  <div style="font-size: var(--fs-14); color: var(--c-ink);">Audio signals</div>
+                  <div class="field__hint">Detect loud peaks and crowd reactions.</div>
+                </div>
+                <label class="switch"><input type="checkbox" id="mpovAudio" checked /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+              </label>
+              <label class="def-list__row" style="border-bottom:0; padding:0;">
+                <div>
+                  <div style="font-size: var(--fs-14); color: var(--c-ink);">Chat signals</div>
+                  <div class="field__hint">Score moments using live-chat spikes (livestreams).</div>
+                </div>
+                <label class="switch"><input type="checkbox" id="mpovChat" checked /><span class="switch__track"></span><span class="switch__thumb"></span></label>
+              </label>
+            </div>
+
+            <!-- Scoring profile -->
+            <div class="field">
+              <span class="field__label">Scoring profile</span>
+              <div class="segmented" role="tablist" id="mpovScoringProfile">
+                <button type="button" class="is-active" data-profile="vtuber">VTuber</button>
+                <button type="button" data-profile="podcast">Podcast</button>
+                <button type="button" data-profile="news">News</button>
+                <button type="button" data-profile="gaming">Gaming</button>
+                <button type="button" data-profile="asmr">ASMR</button>
+              </div>
+              <p class="field__hint">Re-weights ranking for the chosen content niche. Detection prompts are unchanged &mdash; same Moments, different ranking.</p>
+            </div>
+
+            <button type="button" class="btn btn--lg" id="mpovStartBtn" style="justify-self:start;">
+              <span class="btn-text">Find multi-POV moments</span>
+              <span class="btn__icon"><svg width="14" height="14" viewBox="0 0 14 14"><circle cx="6" cy="6" r="4" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="M9.5 9.5L12 12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Log panel -->
+        <div class="surface surface--log" id="mpovLogPanel" style="display:none !important;" data-reveal>
+          <div class="surface__head">
+            <h2 class="surface__title">Live log</h2>
+            <div id="mpovStatusBadge" class="badge badge--neutral">Queued</div>
+          </div>
+          <div class="log" id="mpovLog"></div>
+        </div>
+
+      </div><!-- /LEFT -->
+
+      <!-- RIGHT: per-source progress + results -->
+      <div style="display:grid; gap: var(--s-6);">
+
+        <!-- Per-source progress cards -->
+        <div id="mpovSourceProgress" style="display:none;" data-reveal>
+          <h3 class="section-heading" style="margin-bottom: var(--s-4);">Source pipelines</h3>
+          <div id="mpovSourceCards" style="display:grid; gap: var(--s-4);"></div>
+        </div>
+
+        <!-- Results: multi-POV groups -->
+        <div id="mpovGroupsPanel" style="display:none;" data-reveal>
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: var(--s-4);">
+            <h3 class="section-heading">Multi-POV groups</h3>
+            <div style="display:flex; gap: var(--s-2); align-items:center;">
+              <span id="mpovSelectedBadge" class="badge badge--neutral" style="display:none;">0 selected</span>
+              <button class="btn btn--ghost btn--sm" id="mpovSelectAllBtn" style="display:none;">Select all</button>
+              <button class="btn btn--primary btn--sm" id="mpovDownloadSelectedBtn" style="display:none;">↓ Download selected</button>
+            </div>
+          </div>
+          <div id="mpovGroupsC1Warning" class="surface surface--warn" style="display:none; padding: var(--s-5); margin-bottom: var(--s-4);">
+            <strong>No multi-POV matches found.</strong>
+            All clips are shown below as single-source moments. Try adding more sources or adjusting your instructions.
+          </div>
+          <div id="mpovGroupsList" style="display:grid; gap: var(--s-5);"></div>
+        </div>
+
+        <!-- Results: unmatched clips -->
+        <div id="mpovUnmatchedPanel" style="display:none;" data-reveal>
+          <h3 class="section-heading" style="margin-bottom: var(--s-4);">Single-source moments <span class="badge badge--neutral" id="mpovUnmatchedBadge"></span></h3>
+          <div id="mpovUnmatchedList" style="display:grid; gap: var(--s-3);"></div>
+        </div>
+
+      </div><!-- /RIGHT -->
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script type="module" src="/static/js/multi_pov.js"></script>
+{% endblock %}

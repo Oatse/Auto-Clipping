@@ -57,22 +57,33 @@ class SubtitleSource:
         self,
         url: str,
         output_dir: Path,
-        lang: str = "en",
+        lang: str = "ja",
         log_fn: LogFn | None = None,
     ) -> list[Segment] | None:
         """Try every (strategy × format) combination, with cookie fallback."""
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        strategies = [
-            (f"auto-subs ({lang})",
-                {"writeautomaticsub": True, "subtitleslangs": [lang]}),
-            (f"manual subs ({lang})",
-                {"writesubtitles": True, "subtitleslangs": [lang]}),
+        # Build list of preferred languages to try in order
+        langs = [lang]
+        if lang in ("en", "ja"):
+            langs = ["ja", "en"]
+
+        strategies = []
+        for l in langs:
+            strategies.append(
+                (f"auto-subs ({l})", {"writeautomaticsub": True, "subtitleslangs": [l]})
+            )
+            strategies.append(
+                (f"manual subs ({l})", {"writesubtitles": True, "subtitleslangs": [l]})
+            )
+
+        # Fallback to any language
+        strategies.extend([
             ("auto-subs (any language)",
                 {"writeautomaticsub": True, "subtitleslangs": ["all", "-live_chat"]}),
             ("manual subs (any language)",
                 {"writesubtitles": True, "subtitleslangs": ["all", "-live_chat"]}),
-        ]
+        ])
         formats = [("json3", {"subtitlesformat": "json3"}),
                    ("srt/vtt", {"subtitlesformat": "srt/vtt/best"})]
 

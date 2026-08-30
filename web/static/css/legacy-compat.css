@@ -451,6 +451,9 @@
   border-bottom: 1px dashed var(--c-hairline);
   margin-top: 4px;
 }
+/* Whole score block dimmed for sub-threshold moments so a grid of cards
+   sorts itself visually before the user reads a single number. */
+.cf-clip-score--low { opacity: 0.55; }
 .cf-clip-score-total {
   font-family: var(--f-mono);
   font-size: var(--fs-22);
@@ -510,6 +513,9 @@
 .cf-clip-badge--genuine_reaction { background: #e7f1ff; color: #194c9d; }
 .cf-clip-badge--clutch_play      { background: #e1f7d8; color: #2f6a1d; }
 .cf-clip-badge--chaotic_plea     { background: #ffe3e3; color: #8e1f1f; }
+/* Below the confidence floor — present to fill the quota, not because it
+   earned a slot. Deliberately drab so it reads as "skip me" at a glance. */
+.cf-clip-badge--lowconf          { background: var(--c-paper-2); color: var(--c-ink-mute); }
 
 /* Per-clip signal pills */
 .cf-clip-signals {
@@ -532,6 +538,12 @@
 .cf-signal-pill--chat_emote     { background: #f3e7ff; color: #5a2c8a; }
 .cf-signal-pill--chat_superchat { background: #fff0c2; color: #7a5400; }
 .cf-signal-pill--scene_cut      { background: #e1f7d8; color: #2f6a1d; }
+/* Chat explicitly nominating the moment — the strongest signal we carry,
+   so it is the only pill with a border pulling the eye to it. */
+.cf-signal-pill--chat_clip_intent {
+  background: #d8f5e5; color: #0d5c39;
+  border: 1px solid #4bbd8a; font-weight: 600;
+}
 
 /* Action row */
 .cf-clip-actions {

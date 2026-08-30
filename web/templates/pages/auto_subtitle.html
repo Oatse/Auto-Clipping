@@ -80,6 +80,8 @@
               <select class="select" id="translatorBackend" name="translator_backend">
                 <option value="gemini" selected>Gemini 3.5 Flash &mdash; default, fastest</option>
                 <option value="claude">Claude Opus 4.7 (9router) &mdash; fallback when Gemini is rate-limited</option>
+                <option value="codex-gpt-5.5">Codex &middot; GPT-5.5 (9router) &mdash; latest OpenAI</option>
+                <option value="codex-gpt-5.4">Codex &middot; GPT-5.4 (9router) &mdash; stable OpenAI</option>
               </select>
               <div class="field__hint" id="translatorBackendHint" style="margin-top: 6px; color: var(--c-muted); font-size: var(--fs-12);">
                 Speech-to-text always runs on ElevenLabs Scribe. This switch only changes which model translates the transcript.

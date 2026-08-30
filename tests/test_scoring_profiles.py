@@ -49,6 +49,9 @@ class TestProfileTableIntegrity:
                 + w.completeness
                 + w.replayability
                 + w.shorts_friendly
+                + w.quotability
+                + w.character_moment
+                + w.novelty
             )
             assert 0.5 <= llm_sum <= 1.0, (
                 f"{profile.value} llm weight sum {llm_sum} outside [0.5, 1.0]"
@@ -61,17 +64,39 @@ class TestProfileTableIntegrity:
                     f"{profile.value}.{field} = {value} (negative weights forbidden)"
                 )
 
-    def test_vtuber_matches_legacy_weights(self):
-        """VTuber profile must match the pre-ADR-0003 weights byte-for-byte."""
+    def test_non_vtuber_profiles_keep_legacy_weights(self):
+        """Profiles that did not opt into the VTuber rubric must not drift.
+
+        The VTuber table was deliberately retuned away from the generic
+        short-form weights; podcast / news / ASMR were not, and a change
+        to them would be an accident.
+        """
+        podcast = PROFILES[ScoringProfile.PODCAST]
+        assert podcast.retention_hook == 0.20
+        assert podcast.completeness == 0.25
+        assert podcast.chat_norm_w == 0.0
+        news = PROFILES[ScoringProfile.NEWS]
+        assert news.emotional_intensity == 0.05
+        assert news.completeness == 0.30
+        asmr = PROFILES[ScoringProfile.ASMR]
+        assert asmr.audio_norm_w == 0.0
+        for w in (podcast, news, asmr):
+            assert w.quotability == 0.0
+            assert w.character_moment == 0.0
+            assert w.novelty == 0.0
+            assert w.clip_intent_w == 0.0
+
+    def test_vtuber_prioritises_vtuber_native_dimensions(self):
+        """Quotability + character together must outweigh the generic hook.
+
+        This is the whole point of the retune: a clip that merely opens
+        strongly must not beat one carrying a quotable, in-character beat.
+        """
         w = PROFILES[ScoringProfile.VTUBER]
-        assert w.retention_hook == 0.25
-        assert w.emotional_intensity == 0.20
-        assert w.completeness == 0.15
-        assert w.replayability == 0.10
-        assert w.shorts_friendly == 0.10
-        assert w.audio_norm_w == 0.05
-        assert w.chat_norm_w == 0.05
-        assert w.duration_fit_w == 0.10
+        assert w.quotability + w.character_moment > (
+            w.retention_hook + w.emotional_intensity
+        )
+        assert w.clip_intent_w > w.audio_norm_w
 
 
 # ─── weights_for() resolver ──────────────────────────────────────────────────
@@ -129,14 +154,44 @@ class TestProfileDifferentiation:
     """Same candidate must score differently under different profiles."""
 
     def _spike_clip(self) -> ClipScore:
-        """Loud audio peak + chat spike + low completeness — VTuber-ideal."""
+        """Loud peak + chat spike + a quotable in-character beat — VTuber-ideal.
+
+        The VTuber-native dimensions are populated because under the
+        retuned table loudness alone is explicitly no longer what makes
+        a moment VTuber-ideal — see ``_loud_but_empty_clip``.
+        """
         return ClipScore(
             retention_hook=8.0,
             emotional_intensity=9.0,
             completeness=3.0,
             replayability=4.0,
             shorts_friendly=8.0,
+            quotability=9.0,
+            character_moment=8.0,
+            novelty=7.0,
             audio_peak_db=25.0,    # +25 dB → very loud
+            chat_spike_ratio=4.0,
+            duration_fit=8.0,
+            clip_intent_score=8.0,
+        )
+
+    def _loud_but_empty_clip(self) -> ClipScore:
+        """Identical loudness, nothing quotable and nothing revealed.
+
+        This is the shape of clip the old weights over-rewarded: it
+        peaks hard and chat moves, but there is no line to repeat and
+        no personality on display.
+        """
+        return ClipScore(
+            retention_hook=8.0,
+            emotional_intensity=9.0,
+            completeness=3.0,
+            replayability=4.0,
+            shorts_friendly=8.0,
+            quotability=1.0,
+            character_moment=1.0,
+            novelty=2.0,
+            audio_peak_db=25.0,
             chat_spike_ratio=4.0,
             duration_fit=8.0,
         )
@@ -157,6 +212,20 @@ class TestProfileDifferentiation:
     def test_spike_clip_scores_higher_under_vtuber_than_podcast(self):
         s = self._spike_clip()
         assert s.total_for(ScoringProfile.VTUBER) > s.total_for(ScoringProfile.PODCAST)
+
+    def test_loud_but_unquotable_loses_to_quotable_under_vtuber(self):
+        """The regression guard for 'loud but boring' picks.
+
+        Both clips are equally loud and equally spiky in chat; the only
+        difference is whether there is anything to quote or any
+        personality on show. Under the VTuber profile that difference
+        must decide the ranking.
+        """
+        quotable = self._spike_clip().total_for(ScoringProfile.VTUBER)
+        loud = self._loud_but_empty_clip().total_for(ScoringProfile.VTUBER)
+        assert quotable > loud
+        # And the gap must be decisive, not a rounding artefact.
+        assert quotable - loud >= 1.5
 
     def test_explainer_clip_scores_higher_under_podcast_than_vtuber(self):
         s = self._explainer_clip()

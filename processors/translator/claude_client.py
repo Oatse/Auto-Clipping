@@ -110,6 +110,7 @@ async def call_claude_translate(
     style_preset: str = "natural",
     style_note: str | None = None,
     spicy_filter: bool = False,
+    model: str | None = None,
 ) -> list[str] | None:
     """Translate a batch of plain texts via Claude over the 9router proxy.
 
@@ -119,6 +120,9 @@ async def call_claude_translate(
     The ``api_keys`` parameter is accepted (and ignored) so the orchestrator
     can swap this function in for ``call_gemini_translate`` without changing
     its call site. The actual API key is read from ``config.NINEROUTER_API_KEY``.
+
+    Pass ``model`` to override ``config.TRANSLATOR_CLAUDE_MODEL`` — used by
+    the codex-gpt-5.5 / codex-gpt-5.4 backends which share this transport.
     """
     if not config.NINEROUTER_API_KEY:
         logger.error(
@@ -135,7 +139,7 @@ async def call_claude_translate(
     )
 
     payload = {
-        "model": config.TRANSLATOR_CLAUDE_MODEL,
+        "model": model or config.TRANSLATOR_CLAUDE_MODEL,
         "messages": [
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": user_prompt},
@@ -220,11 +224,15 @@ async def call_claude_regroup(
     style_preset: str = "natural",
     style_note: str | None = None,
     spicy_filter: bool = False,
+    model: str | None = None,
 ) -> tuple[list[dict] | None, list[dict] | None]:
     """Word-level grouping + translation via Claude over the 9router proxy.
 
     Returns ``(groups, best_partial_groups)`` matching the Gemini client
     signature so the orchestrator's salvage path keeps working unchanged.
+
+    Pass ``model`` to override ``config.TRANSLATOR_CLAUDE_MODEL`` — used by
+    the codex-gpt-5.5 / codex-gpt-5.4 backends which share this transport.
     """
     if not config.NINEROUTER_API_KEY:
         logger.error(
@@ -240,7 +248,7 @@ async def call_claude_regroup(
     )
 
     payload = {
-        "model": config.TRANSLATOR_CLAUDE_MODEL,
+        "model": model or config.TRANSLATOR_CLAUDE_MODEL,
         "messages": [
             {"role": "system", "content": system_instruction},
             {"role": "user", "content": user_prompt},

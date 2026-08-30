@@ -129,6 +129,16 @@ TRANSLATOR_CLAUDE_MODEL: str = os.getenv(
     "TRANSLATOR_CLAUDE_MODEL", "kr/claude-opus-4.7-thinking",
 )
 
+# Codex (9router) model ids for the auto-subtitle translator backend.
+# Two flavours: gpt-5.5 (latest) and gpt-5.4 (stable). Both go through
+# the same OpenAI-compatible /v1/chat/completions endpoint as the Claude path.
+TRANSLATOR_CODEX_GPT55_MODEL: str = os.getenv(
+    "TRANSLATOR_CODEX_GPT55_MODEL", "cx/gpt-5.5",
+)
+TRANSLATOR_CODEX_GPT54_MODEL: str = os.getenv(
+    "TRANSLATOR_CODEX_GPT54_MODEL", "cx/gpt-5.4",
+)
+
 
 # ─── Clip Finder ─────────────────────────────────────────────────────────────
 # Gemini model used for clip detection / scoring. Override by setting
@@ -154,6 +164,14 @@ CLIP_FINDER_MODE: str = os.getenv("CLIP_FINDER_MODE", "single-shot")
 # Maximum clips returned by multi-stage selection. Single-shot ignores this.
 CLIP_FINDER_MAX_CLIPS: int = int(os.getenv("CLIP_FINDER_MAX_CLIPS", "12"))
 
+# Moments whose profile-weighted score falls below this are still returned —
+# the quota is always filled — but they are flagged ``low_confidence`` so the
+# UI can visually separate "this is a real clip" from "this only made the list
+# because the quota wasn't full". Set to 0 to disable the flag entirely.
+CLIP_FINDER_LOW_CONFIDENCE_BELOW: float = float(
+    os.getenv("CLIP_FINDER_LOW_CONFIDENCE_BELOW", "5.5")
+)
+
 # Multimodal signal extraction toggles. Audio analysis adds a brief audio-only
 # download + ffmpeg pass; chat analysis is free for any video with chat replay.
 CLIP_FINDER_ENABLE_AUDIO_SIGNALS: bool = (
@@ -168,6 +186,45 @@ CLIP_FINDER_CACHE_DIR: Path = Path(
     os.getenv("CLIP_FINDER_CACHE_DIR", str(OUTPUT_DIR / "clip_finder_cache"))
 )
 CLIP_FINDER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+
+# ─── Clip Finder model selector ──────────────────────────────────────────────
+# Which LLM backend drives moment detection / scoring inside Clip Finder.
+# "gemini"          → Gemini 3.5 Flash via generativelanguage.googleapis.com
+#                     (default — fastest, cheapest, identical to legacy behaviour)
+# "kiro-opus-4.7"   → Claude Opus 4.7 thinking-agentic via 9router (Kiro Pro proxy)
+# "kiro-auto"       → Kiro's own auto-routed model via 9router
+#
+# Detection prompts, scoring rubric, boundary refinement, and rendering are
+# unchanged — only the transport / response provider differs. Stored on the
+# ClipFinderJob so re-runs are reproducible.
+CLIP_FINDER_MODEL: str = os.getenv("CLIP_FINDER_MODEL", "gemini").strip().lower()
+
+# Concrete 9router model ids exposed under the two non-Gemini options.
+# Keep these aligned with the auto-subtitle "Claude (9router)" path so users
+# get one Kiro Pro endpoint to manage; override per-machine in .env.
+CLIP_FINDER_KIRO_OPUS_MODEL: str = os.getenv(
+    "CLIP_FINDER_KIRO_OPUS_MODEL",
+    "kr/claude-opus-4.7-thinking-agentic",
+)
+CLIP_FINDER_KIRO_SONNET_MODEL: str = os.getenv(
+    "CLIP_FINDER_KIRO_SONNET_MODEL",
+    "kr/claude-sonnet-4.6-thinking-agentic",
+)
+CLIP_FINDER_KIRO_AUTO_MODEL: str = os.getenv(
+    "CLIP_FINDER_KIRO_AUTO_MODEL",
+    "kr/auto",
+)
+
+# Codex (9router) model ids. Two flavours: gpt-5.5 (latest) and gpt-5.4.
+# Override in .env if the 9router endpoint prefix changes.
+CLIP_FINDER_CODEX_GPT55_MODEL: str = os.getenv(
+    "CLIP_FINDER_CODEX_GPT55_MODEL",
+    "cx/gpt-5.5",
+)
+CLIP_FINDER_CODEX_GPT54_MODEL: str = os.getenv(
+    "CLIP_FINDER_CODEX_GPT54_MODEL",
+    "cx/gpt-5.4",
+)
 
 
 # ─── FFmpeg ───────────────────────────────────────────────────────────────────
@@ -190,4 +247,16 @@ MAX_UPLOAD_BYTES: int = int(
 # Chunk size for streaming uploads to disk (bytes).  1 MiB balances syscall
 # overhead vs. memory pressure for many concurrent uploads.
 UPLOAD_CHUNK_BYTES: int = int(os.getenv("UPLOAD_CHUNK_BYTES", str(1024 * 1024)))
+
+
+# ─── Multi POV (Workspace 05) ─────────────────────────────────────────────────
+# Confidence threshold 0.0–1.0. Cross-matching groups with confidence below
+# this value are kept but flagged is_multi_pov=False and rendered in the
+# "Single-Source Moments" section of the UI rather than the main grid.
+MULTI_POV_CONFIDENCE_THRESHOLD: float = float(
+    os.getenv("MULTI_POV_CONFIDENCE_THRESHOLD", "0.7")
+)
+
+# Maximum number of POV Source URLs accepted per job. Min is always 2.
+MULTI_POV_MAX_SOURCES: int = int(os.getenv("MULTI_POV_MAX_SOURCES", "5"))
 

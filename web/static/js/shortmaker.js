@@ -239,7 +239,13 @@ function drawShortPreview() {
   ctx.fillStyle = '#000';
   ctx.fillRect(0, 0, previewW, previewH);
 
-  const gridH = previewH / 2;
+  // Dynamically calculate grid heights based on top crop aspect ratio
+  const topAspect = smTopCrop.w / smTopCrop.h;
+  let topH_real = 1080 / topAspect;
+  if (topH_real > 1920 - 100) topH_real = 1920 - 100;
+  
+  const gridTopH = Math.round(previewH * (topH_real / 1920));
+  const gridBotH = previewH - gridTopH;
 
   // Check if video has frames to draw
   if (videoEl.readyState >= 2) {
@@ -248,7 +254,7 @@ function drawShortPreview() {
       ctx.drawImage(
         videoEl,
         smTopCrop.x, smTopCrop.y, smTopCrop.w, smTopCrop.h,
-        0, 0, previewW, gridH
+        0, 0, previewW, gridTopH
       );
     } catch (e) { /* ignore */ }
 
@@ -257,18 +263,18 @@ function drawShortPreview() {
       ctx.drawImage(
         videoEl,
         smBottomCrop.x, smBottomCrop.y, smBottomCrop.w, smBottomCrop.h,
-        0, gridH, previewW, gridH
+        0, gridTopH, previewW, gridBotH
       );
     } catch (e) { /* ignore */ }
   }
 
   // Label overlays
   ctx.fillStyle = 'rgba(99, 102, 241, 0.6)';
-  ctx.fillRect(0, gridH - 18, previewW, 18);
+  ctx.fillRect(0, gridTopH - 18, previewW, 18);
   ctx.fillStyle = '#fff';
   ctx.font = 'bold 10px Inter, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('GAMEPLAY', previewW / 2, gridH - 5);
+  ctx.fillText('GAMEPLAY', previewW / 2, gridTopH - 5);
 
   ctx.fillStyle = 'rgba(16, 185, 129, 0.6)';
   ctx.fillRect(0, previewH - 18, previewW, 18);
@@ -280,8 +286,8 @@ function drawShortPreview() {
   ctx.strokeStyle = 'rgba(255,255,255,0.4)';
   ctx.lineWidth = 1;
   ctx.beginPath();
-  ctx.moveTo(0, gridH);
-  ctx.lineTo(previewW, gridH);
+  ctx.moveTo(0, gridTopH);
+  ctx.lineTo(previewW, gridTopH);
   ctx.stroke();
 }
 
@@ -446,11 +452,53 @@ async function pollSmStatus() {
 // ── Phase Switching ────────────────────────────────────────────────────────
 
 function showSmPhase(phase) {
-  const phases = ['upload', 'uploading', 'loading-info', 'editor', 'processing', 'done'];
-  phases.forEach(p => {
-    const el = $('smPhase-' + p);
-    if (el) el.style.display = (p === phase) ? '' : 'none';
-  });
+  const dropZone = $('smDropZone');
+  const info = $('smInfoBlock');
+  const cropWrap = $('smCropWrap');
+  const genBtn = $('smGenerateBtn');
+  const newBtn = $('smNewBtn');
+  
+  const idleWrap = $('smIdleState');
+  const procWrap = $('smProcessWrap');
+  const doneWrap = $('smDoneWrap');
+  const badge = $('smStatusBadge');
+
+  if (phase === 'upload') {
+    dropZone?.classList.remove('has-file');
+    if (info) info.style.display = 'none';
+    if (cropWrap) cropWrap.style.display = 'none';
+    if (genBtn) genBtn.disabled = true;
+    if (newBtn) newBtn.style.display = 'none';
+    
+    if (idleWrap) idleWrap.style.display = '';
+    if (procWrap) procWrap.style.display = 'none';
+    if (doneWrap) doneWrap.style.display = 'none';
+    if (badge) badge.textContent = 'Idle';
+  } else if (phase === 'uploading' || phase === 'loading-info') {
+    dropZone?.classList.add('has-file');
+    if (badge) badge.textContent = phase === 'uploading' ? 'Uploading...' : 'Loading info...';
+  } else if (phase === 'editor') {
+    dropZone?.classList.add('has-file');
+    if (info) info.style.display = '';
+    if (cropWrap) cropWrap.style.display = '';
+    if (genBtn) genBtn.disabled = false;
+    if (newBtn) newBtn.style.display = '';
+    
+    if (idleWrap) idleWrap.style.display = '';
+    if (procWrap) procWrap.style.display = 'none';
+    if (doneWrap) doneWrap.style.display = 'none';
+    if (badge) badge.textContent = 'Ready';
+  } else if (phase === 'processing') {
+    if (genBtn) genBtn.disabled = true;
+    if (idleWrap) idleWrap.style.display = 'none';
+    if (procWrap) procWrap.style.display = '';
+    if (doneWrap) doneWrap.style.display = 'none';
+    if (badge) badge.textContent = 'Processing';
+  } else if (phase === 'done') {
+    if (procWrap) procWrap.style.display = 'none';
+    if (doneWrap) doneWrap.style.display = '';
+    if (badge) badge.textContent = 'Completed';
+  }
 }
 
 

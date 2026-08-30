@@ -60,8 +60,8 @@ import config
 
 from web.services import job_state
 from web.services.job_models import Job, JobStatus
+from processors.subtitle_effects import normalize_segment_effect, normalize_segment_position
 from web.services.upload_helpers import (
-    UploadTooLargeError,
     safe_upload_name,
     save_upload_streaming,
 )
@@ -75,6 +75,7 @@ router = APIRouter()
 
 class TranscriptUpdateRequest(BaseModel):
     segments: list[dict]
+    style_config: dict | None = None
 
 
 class RenderRequest(BaseModel):
@@ -330,23 +331,18 @@ async def create_job(
         )
 
     backend = (translator_backend or "").strip().lower() or None
-    if backend is not None and backend not in {"gemini", "claude"}:
+    _VALID_BACKENDS = {"gemini", "claude", "codex-gpt-5.5", "codex-gpt-5.4"}
+    if backend is not None and backend not in _VALID_BACKENDS:
         raise HTTPException(
             status_code=400,
-            detail="translator_backend must be 'gemini' or 'claude'",
+            detail="translator_backend must be one of: gemini, claude, codex-gpt-5.5, codex-gpt-5.4",
         )
 
     job_id = uuid.uuid4().hex[:12]
     safe_name = safe_upload_name(video.filename)
     upload_path = job_state.UPLOADS_DIR / f"{job_id}_{safe_name}"
 
-    # Stream upload chunk-by-chunk so multi-GB files don't blow RAM, and
-    # enforce config.MAX_UPLOAD_BYTES so a malicious client can't fill disk.
-    try:
-        await save_upload_streaming(video, upload_path)
-    except UploadTooLargeError as exc:
-        upload_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=413, detail=str(exc))
+    await save_upload_streaming(video, upload_path, max_bytes=0)
 
     job = Job(
         id=job_id,
@@ -426,7 +422,8 @@ async def get_transcript(job_id: str) -> dict:
         if entry["text"]:
             segments.append(entry)
 
-    return {"segments": segments, "job_id": job_id}
+    style_config = raw.get("style_config", {})
+    return {"segments": segments, "job_id": job_id, "style_config": style_config}
 
 
 @router.put("/api/jobs/{job_id}/transcript")
@@ -451,13 +448,41 @@ async def update_transcript(job_id: str, req: TranscriptUpdateRequest) -> dict:
         transcript_file.parent.mkdir(parents=True, exist_ok=True)
         job.transcript_path = str(transcript_file)
 
+    normalized_segments = []
+    for raw_segment in req.segments:
+        segment = dict(raw_segment)
+        raw_effect = segment.get("effect")
+        effect = normalize_segment_effect(raw_effect) if isinstance(raw_effect, dict) else None
+        if effect is None:
+            segment.pop("effect", None)
+        else:
+            segment["effect"] = effect
+        pos_x, pos_y, has_position = normalize_segment_position(
+            segment.get("pos_x"),
+            segment.get("pos_y"),
+            bool(segment.get("pos_override", False)),
+        )
+        if has_position:
+            segment["pos_x"] = pos_x
+            segment["pos_y"] = pos_y
+            segment["pos_override"] = True
+        else:
+            segment.pop("pos_x", None)
+            segment.pop("pos_y", None)
+            segment.pop("pos_override", None)
+        normalized_segments.append(segment)
+
+    data_to_save = {"segments": normalized_segments}
+    if req.style_config is not None:
+        data_to_save["style_config"] = req.style_config
+
     with transcript_file.open("w", encoding="utf-8") as f:
-        json.dump({"segments": req.segments}, f, ensure_ascii=False, indent=2)
+        json.dump(data_to_save, f, ensure_ascii=False, indent=2)
 
     return {
         "job_id": job_id,
         "saved": True,
-        "segments_count": len(req.segments),
+        "segments_count": len(normalized_segments),
     }
 
 
@@ -575,9 +600,6 @@ async def start_render(job_id: str, req: RenderRequest) -> dict:
 
     if job.status == JobStatus.RUNNING:
         raise HTTPException(status_code=409, detail="Job is already running.")
-
-    if job.status == JobStatus.COMPLETED and not job.transcribe_only:
-        raise HTTPException(status_code=409, detail="Job already completed.")
 
     if not job.video_path:
         raise HTTPException(
@@ -752,10 +774,11 @@ async def create_job_from_clip(
         )
 
     backend = (translator_backend or "").strip().lower() or None
-    if backend is not None and backend not in {"gemini", "claude"}:
+    _VALID_BACKENDS = {"gemini", "claude", "codex-gpt-5.5", "codex-gpt-5.4"}
+    if backend is not None and backend not in _VALID_BACKENDS:
         raise HTTPException(
             status_code=400,
-            detail="translator_backend must be 'gemini' or 'claude'",
+            detail="translator_backend must be one of: gemini, claude, codex-gpt-5.5, codex-gpt-5.4",
         )
 
     job_id = uuid.uuid4().hex[:12]

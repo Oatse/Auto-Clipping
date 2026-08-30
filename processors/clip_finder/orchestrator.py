@@ -30,6 +30,7 @@ from .cut_strategies import CutStrategy, expand as expand_cut_strategies
 from .detector import ClipDetector
 from .downloader import ClipDownloader
 from .gemini_client import GeminiClient
+from .nine_router_client import NineRouterClient
 from .heuristics import (
     fmt_duration,
     fmt_time,
@@ -69,7 +70,6 @@ class ClipFinder:
         self._cookies_browser = cookies_browser
         self._gemini_model = gemini_model
         self._cache = TranscriptCache(cache_dir) if cache_dir else None
-
         self._subs = SubtitleSource(cookies_file, cookies_browser)
         self._dl = ClipDownloader(cookies_file, cookies_browser)
         self._audio = AudioSignalExtractor(
@@ -85,7 +85,7 @@ class ClipFinder:
         self,
         url: str,
         output_dir: Path,
-        lang: str = "en",
+        lang: str = "ja",
         log_fn: LogFn | None = None,
         use_cache: bool = True,
     ) -> list[Segment] | None:
@@ -198,6 +198,7 @@ class ClipFinder:
         max_count: int | None = None,
         scoring_profile: ScoringProfile | str = ScoringProfile.VTUBER,
         cut_strategies: Sequence[CutStrategy | str] = (),
+        model: str = "gemini",
     ) -> list[Clip]:
         """Run clip detection. Returns scored, refined Clip objects.
 
@@ -211,6 +212,13 @@ class ClipFinder:
         ``cut_strategies`` fans each base Moment into N derived Moments
         — see ``processors.clip_finder.cut_strategies``. Default is the
         empty tuple (no fan-out, legacy behaviour).
+
+        ``model`` selects the LLM backend driving Hunters / detector /
+        scorer. ``"gemini"`` (default) keeps the legacy Gemini 3.5 Flash
+        path. ``"kiro-opus-4.7"`` and ``"kiro-auto"`` route through the
+        9router (Kiro Pro) proxy. Detection prompts, scoring rubric,
+        boundary refinement, and rendering are unchanged across all
+        backends — same Moments shape, different model.
         """
         if not transcript:
             return []
@@ -220,20 +228,10 @@ class ClipFinder:
         profile = ScoringProfile.coerce(scoring_profile)
         strategies = tuple(CutStrategy.coerce(s) for s in cut_strategies)
 
-        # Resolve fallback models from config so a deprecated primary model
-        # (e.g. preview Gemini that was rotated out) doesn't break detection.
-        try:
-            import config as _config  # local import to avoid cycle at module load
-            fallback_models = list(getattr(
-                _config, "CLIP_FINDER_GEMINI_FALLBACK_MODELS", [],
-            ))
-        except Exception:  # noqa: BLE001 — config is optional in tests
-            fallback_models = []
-
-        client = GeminiClient(
-            api_keys,
-            model=self._gemini_model,
-            fallback_models=fallback_models,
+        client = self._build_llm_client(
+            model=model,
+            api_keys=api_keys,
+            log_fn=log_fn,
         )
         video_duration = max((seg["end"] for seg in transcript), default=0.0)
         min_clip, max_clip = parse_duration_hints(instructions or "", video_duration)
@@ -323,6 +321,7 @@ class ClipFinder:
             signals=signals,
             min_clip=min_clip,
             max_clip=max_clip,
+            profile=profile.value,
             log_fn=log_fn,
         )
 
@@ -440,6 +439,7 @@ class ClipFinder:
             signals=signals,
             min_clip=min_clip,
             max_clip=max_clip,
+            profile=profile.value,
             log_fn=log_fn,
         )
 
@@ -481,6 +481,85 @@ class ClipFinder:
         return chosen
 
     # ── Public: download ─────────────────────────────────────────────────
+
+    def _build_llm_client(
+        self,
+        *,
+        model: str,
+        api_keys: list[str],
+        log_fn: LogFn | None = None,
+    ):
+        """Factory: construct the right backend client for ``model``.
+
+        Returns either a :class:`GeminiClient` or a
+        :class:`NineRouterClient` — both expose the same single-method
+        ``generate(...)`` surface that ``ClipDetector``, ``HunterRunner``,
+        and ``ClipScorer`` rely on, so the rest of the pipeline never
+        has to care which backend is in use.
+
+        Unknown ``model`` values are coerced to ``"gemini"`` with a
+        log line, so a stale persisted Job can still re-run on disk.
+        """
+        import config as _config  # local import to avoid cycle at module load
+
+        normalised = (model or "gemini").strip().lower()
+        if normalised in ("kiro-opus", "kiro-opus-4.7", "opus-4.7", "opus"):
+            kiro_model = getattr(
+                _config, "CLIP_FINDER_KIRO_OPUS_MODEL",
+                "kr/claude-opus-4.7-thinking-agentic",
+            )
+            if log_fn:
+                log_fn(f"LLM backend: Kiro Opus 4.7 ({kiro_model})")
+            return NineRouterClient(model=kiro_model)
+
+        if normalised in ("kiro-sonnet", "kiro-sonnet-4.6", "sonnet-4.6", "sonnet"):
+            kiro_model = getattr(
+                _config, "CLIP_FINDER_KIRO_SONNET_MODEL",
+                "kr/claude-sonnet-4.6-thinking-agentic",
+            )
+            if log_fn:
+                log_fn(f"LLM backend: Kiro Sonnet 4.6 ({kiro_model})")
+            return NineRouterClient(model=kiro_model)
+
+        if normalised in ("kiro-auto", "auto", "kiro"):
+            kiro_model = getattr(
+                _config, "CLIP_FINDER_KIRO_AUTO_MODEL", "kr/auto",
+            )
+            if log_fn:
+                log_fn(f"LLM backend: Kiro Auto ({kiro_model})")
+            return NineRouterClient(model=kiro_model)
+
+        if normalised in ("codex-gpt-5.5", "gpt-5.5", "cx/gpt-5.5", "codex-55"):
+            cx_model = getattr(
+                _config, "CLIP_FINDER_CODEX_GPT55_MODEL", "cx/gpt-5.5",
+            )
+            if log_fn:
+                log_fn(f"LLM backend: Codex GPT-5.5 via 9router ({cx_model})")
+            return NineRouterClient(model=cx_model)
+
+        if normalised in ("codex-gpt-5.4", "gpt-5.4", "cx/gpt-5.4", "codex-54"):
+            cx_model = getattr(
+                _config, "CLIP_FINDER_CODEX_GPT54_MODEL", "cx/gpt-5.4",
+            )
+            if log_fn:
+                log_fn(f"LLM backend: Codex GPT-5.4 via 9router ({cx_model})")
+            return NineRouterClient(model=cx_model)
+
+        if normalised != "gemini" and log_fn:
+            log_fn(
+                f"LLM backend: unknown model '{model}', falling back to Gemini",
+            )
+
+        fallback_models = list(getattr(
+            _config, "CLIP_FINDER_GEMINI_FALLBACK_MODELS", [],
+        ))
+        if log_fn:
+            log_fn(f"LLM backend: Gemini ({self._gemini_model})")
+        return GeminiClient(
+            api_keys,
+            model=self._gemini_model,
+            fallback_models=fallback_models,
+        )
 
     @staticmethod
     def _apply_scoring_profile(

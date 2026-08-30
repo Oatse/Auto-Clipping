@@ -25,6 +25,7 @@ from models.transcript import (
     PycapsWordEntry,
     TranscriptSegment,
 )
+from processors.subtitle_effects import effect_offset, normalize_segment_effect
 from utils.file_utils import ensure_dir
 
 
@@ -59,6 +60,33 @@ def _get_video_dimensions(video_path: Path) -> tuple[int, int]:
     return 1920, 1080  # safe fallback
 
 
+def _get_video_fps(video_path: Path) -> float:
+    import subprocess
+
+    from utils.ffmpeg_utils import FFPROBE_BIN
+
+    cmd = [
+        FFPROBE_BIN,
+        "-v", "quiet",
+        "-print_format", "json",
+        "-show_streams",
+        "-select_streams", "v:0",
+        str(video_path),
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        if result.returncode == 0:
+            streams = json.loads(result.stdout).get("streams", [])
+            if streams:
+                rate = streams[0].get("avg_frame_rate", "30/1")
+                numerator, denominator = (int(value) for value in rate.split("/", 1))
+                if denominator > 0 and numerator > 0:
+                    return numerator / denominator
+    except (OSError, ValueError, json.JSONDecodeError, subprocess.SubprocessError):
+        pass
+    return 30.0
+
+
 def _build_css_from_style(style: dict) -> str:
     """
     Convert a style_config dict (from the UI) into Pycaps-compatible CSS.
@@ -79,7 +107,7 @@ def _build_css_from_style(style: dict) -> str:
         animStyle       str   animation style name
     """
     font_family = style.get("fontFamily", "Arial, sans-serif")
-    font_size   = int(style.get("fontSize", 40))
+    font_size   = int(style.get("fontSize", 75))
     font_color  = style.get("fontColor", "#ffffff")
 
     stroke_enabled = bool(style.get("strokeEnabled", False))
@@ -265,29 +293,43 @@ def _secs_to_ass_time(secs: float) -> str:
 
 
 def _get_ass_anim_tag(anim_style: str) -> str:
-    """
-    Return ASS override tag string for entry animation effect.
-    Prepended to each Dialogue line text field.
-
-    Uses ASS \fad (fade) + \t (transform/scale) to simulate pop-in animations.
-    The \t tag animates from start to end time in milliseconds.
-    """
     tags = {
-        # Pop: fast fade + scale up then settle back — mimics Pycaps word-pop
-        "word-pop":      r"{\fad(80,100)\t(0,150,\fscx112\fscy112)\t(150,260,\fscx100\fscy100)}",
-        # Narration pop: same pop feel
-        "narration-pop": r"{\fad(80,100)\t(0,150,\fscx112\fscy112)\t(150,260,\fscx100\fscy100)}",
-        # Bounce: pop with overshoot (3-stage scale)
-        "bounce-in":     r"{\fad(60,80)\t(0,100,\fscx122\fscy122)\t(100,190,\fscx95\fscy95)\t(190,270,\fscx102\fscy102)\t(270,330,\fscx100\fscy100)}",
-        # Slide up: smooth fade + gentle scale grow
-        "slide-up":      r"{\fad(160,100)\t(0,220,\fscx105\fscy105)\t(220,320,\fscx100\fscy100)}",
-        # Zoom flash: sharp zoom then snap back
-        "zoom-flash":    r"{\fad(40,80)\t(0,100,\fscx125\fscy125)\t(100,200,\fscx100\fscy100)}",
-        # Typewriter / karaoke: clean fade only
+        "word-pop":      r"{\fad(80,100)}",
+        "narration-pop": r"{\fad(80,100)}",
+        "bounce-in":     r"{\fad(60,80)}",
+        "slide-up":      r"{\fad(160,100)}",
+        "zoom-flash":    r"{\fad(40,80)}",
         "typewriter":    r"{\fad(180,100)}",
         "karaoke":       r"{\fad(150,100)}",
     }
-    return tags.get(anim_style, r"{\fad(100,80)\t(0,150,\fscx110\fscy110)\t(150,250,\fscx100\fscy100)}")
+    return tags.get(anim_style, r"{\fad(100,80)}")
+
+
+def _split_ass_text_for_display(text: str, max_chars: int = 42) -> str:
+    normalized = " ".join(text.split())
+    if len(normalized) <= max_chars:
+        return normalized
+
+    split_points = [
+        idx for idx, char in enumerate(normalized)
+        if char == " " and 0 < idx < len(normalized) - 1
+    ]
+    if not split_points:
+        return normalized
+
+    midpoint = len(normalized) / 2
+    split_at = min(split_points, key=lambda idx: abs(idx - midpoint))
+    return f"{normalized[:split_at].rstrip()}\\N{normalized[split_at + 1:].lstrip()}"
+
+
+def _escape_ass_text(text: str) -> str:
+    return text.replace("{", r"\{").replace("}", r"\}")
+
+
+def _segment_value(segment: object, key: str, default: object = None) -> object:
+    if isinstance(segment, dict):
+        return segment.get(key, default)
+    return getattr(segment, key, default)
 
 
 def _build_ass_content(
@@ -295,6 +337,7 @@ def _build_ass_content(
     style: dict,
     video_width: int = 1920,
     video_height: int = 1080,
+    video_fps: float = 30.0,
 ) -> str:
     """
     Generate an ASS subtitle file supporting multiple simultaneous speakers.
@@ -308,7 +351,7 @@ def _build_ass_content(
     native pixels by the frontend) render at the expected proportional size.
     """
     font_name = style.get("fontFamily", "Arial, sans-serif").split(",")[0].strip().strip("'\"")
-    font_size = int(style.get("fontSize", 40))
+    font_size = int(style.get("fontSize", 75))
 
     stroke_enabled = bool(style.get("strokeEnabled", False))
     stroke_width   = int(style.get("strokeWidth", 3)) if stroke_enabled else 0
@@ -361,7 +404,7 @@ def _build_ass_content(
     style_lines = []
     # Margins are in the script coordinate space (=video native pixels since
     # PlayResX/PlayResY will be set to the video's native dimensions).
-    margin_v_base = round(video_height * 0.025)      # ~27 px at 1080p
+    margin_v_base = round(video_height * 0.04)
     margin_v_step = font_size + round(video_height * 0.012)  # gap between stacked speakers
 
     # Per-speaker color overrides from UI (style_config["speakerStyles"])
@@ -393,10 +436,32 @@ def _build_ass_content(
                 return _rgb_to_ass(sr, sg, sb)
         return outline_color
 
+    def _resolve_speaker_back_color(speaker: str) -> str:
+        """Return ASS BackColour (glow / box back) for a speaker.
+
+        Box background takes priority and is global (the box itself is a
+        global style choice — see [V4+ Styles] BorderStyle). When glow is
+        enabled and no box is present, we honour the per-speaker
+        glowColor override; otherwise we fall back to the global
+        back_color computed above.
+        """
+        if bg_box_enabled:
+            return back_color
+        if not glow_enabled:
+            return back_color
+        override = speaker_color_overrides.get(speaker)
+        if override and isinstance(override, dict):
+            gc = override.get("glowColor")
+            if gc:
+                gr, gg, gb = hex_to_rgb(gc)
+                return _rgb_to_ass(gr, gg, gb, 50)
+        return back_color
+
     for speaker in seen:
         r, g, b = _resolve_speaker_color(speaker)
         primary  = _rgb_to_ass(r, g, b)
         speaker_outline = _resolve_speaker_stroke_color(speaker)
+        speaker_back    = _resolve_speaker_back_color(speaker)
 
         # Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour,
         #         OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut,
@@ -404,7 +469,7 @@ def _build_ass_content(
         #         Alignment, MarginL, MarginR, MarginV, Encoding
         style_lines.append(
             f"Style: {speaker},{font_name},{font_size},{primary},&H00FFFFFF,"
-            f"{speaker_outline},{back_color},-1,0,0,0,"
+            f"{speaker_outline},{speaker_back},-1,0,0,0,"
             f"100,100,0,0,{border_style},{outline_size},{shadow_size},"
             f"{alignment},10,10,{margin_v_base},1"
         )
@@ -490,30 +555,68 @@ def _build_ass_content(
 
         line_margin_v = margin_v_base + stack_pos * margin_v_step
 
-        # ASS escapes: curly braces are control codes — must be escaped as \{ \}
-        # Use raw strings so the literal output is "\{" / "\}" (single backslash + brace).
-        text_esc = text.replace("{", r"\{").replace("}", r"\}")
-        anim_tag = _get_ass_anim_tag(style.get("animStyle", "word-pop"))
+        text_esc = _escape_ass_text(_split_ass_text_for_display(text))
+        custom_position = bool(_segment_value(seg, "pos_override", False))
+        raw_x = _segment_value(seg, "pos_x")
+        raw_y = _segment_value(seg, "pos_y")
+        if custom_position and isinstance(raw_x, (int, float)) and isinstance(raw_y, (int, float)):
+            base_x = round(max(0.0, min(100.0, float(raw_x))) * video_width / 100.0)
+            base_y = round(max(0.0, min(100.0, float(raw_y))) * video_height / 100.0)
+        else:
+            base_x = video_width // 2
+            if position_str == "top":
+                base_y = margin_v_base + font_size // 2 + stack_pos * margin_v_step
+            elif position_str == "center":
+                base_y = video_height // 2 + stack_pos * margin_v_step
+            else:
+                base_y = video_height - margin_v_base - font_size // 2 - stack_pos * margin_v_step
 
-        # Extra stroke layers (rendered behind primary text)
-        for es_idx, es in enumerate(sorted_extra):
-            es_w = int(es.get("width", 0))
-            es_c_hex = es.get("color", "#000000")
-            es_r, es_g, es_b = hex_to_rgb(es_c_hex)
-            es_ass_color = _rgb_to_ass(es_r, es_g, es_b)
-            # Override outline: \3c = outline color, \bord = outline width
-            # \4a&HFF = fully transparent shadow for extra stroke layers
-            override = r"{\3c" + es_ass_color + r"\bord" + str(es_w) + r"\4a&HFF&\shad0}"
-            dialogue_lines.append(
-                f"Dialogue: {es_idx},{_secs_to_ass_time(start)},{_secs_to_ass_time(end)},"
-                f"{sp},,0,0,{line_margin_v},,{anim_tag}{override}{text_esc}"
-            )
-
-        # Primary text layer (topmost)
-        dialogue_lines.append(
-            f"Dialogue: {base_layer},{_secs_to_ass_time(start)},{_secs_to_ass_time(end)},"
-            f"{sp},,0,0,{line_margin_v},,{anim_tag}{text_esc}"
+        normalized_effect = normalize_segment_effect(_segment_value(seg, "effect"))
+        anim_tag = "" if normalized_effect is not None else _get_ass_anim_tag(
+            style.get("animStyle", "word-pop"),
         )
+        if normalized_effect is not None and not custom_position:
+            base_y = round(video_height * ({"top": 0.08, "center": 0.50}.get(position_str, 0.92)))
+            layer_offset = round(font_size * 1.25 * stack_pos)
+            base_y += layer_offset if position_str == "top" else -layer_offset
+        frame_step = 1.0 / max(1.0, video_fps)
+        event_ranges = [(start, end, 0.0, 0.0)]
+        if normalized_effect is not None:
+            event_ranges = []
+            cursor = start
+            while cursor < end - 1e-6:
+                next_cursor = min(end, cursor + frame_step)
+                local_time = ((cursor + next_cursor) / 2.0) - start
+                offset_x, offset_y = effect_offset(
+                    normalized_effect,
+                    local_time=local_time,
+                    duration=end - start,
+                )
+                event_ranges.append((cursor, next_cursor, offset_x, offset_y))
+                cursor = next_cursor
+
+        for event_start, event_end, offset_x, offset_y in event_ranges:
+            position_tag = ""
+            if custom_position or normalized_effect is not None:
+                pos_x = round(max(0.0, min(float(video_width), base_x + offset_x * video_width)))
+                pos_y = round(max(0.0, min(float(video_height), base_y + offset_y * video_height)))
+                position_tag = rf"{{\an5\pos({pos_x},{pos_y})}}"
+
+            for es_idx, es in enumerate(sorted_extra):
+                es_w = int(es.get("width", 0))
+                es_c_hex = es.get("color", "#000000")
+                es_r, es_g, es_b = hex_to_rgb(es_c_hex)
+                es_ass_color = _rgb_to_ass(es_r, es_g, es_b)
+                override = r"{\3c" + es_ass_color + r"\bord" + str(es_w) + r"\4a&HFF&\shad0}"
+                dialogue_lines.append(
+                    f"Dialogue: {es_idx},{_secs_to_ass_time(event_start)},{_secs_to_ass_time(event_end)},"
+                    f"{sp},,0,0,{line_margin_v},,{anim_tag}{position_tag}{override}{text_esc}"
+                )
+
+            dialogue_lines.append(
+                f"Dialogue: {base_layer},{_secs_to_ass_time(event_start)},{_secs_to_ass_time(event_end)},"
+                f"{sp},,0,0,{line_margin_v},,{anim_tag}{position_tag}{text_esc}"
+            )
 
     styles_block = "\n".join(style_lines)
     dialogue_block = "\n".join(dialogue_lines)
@@ -702,7 +805,13 @@ class SubtitleRendererProcessor:
         logger.info("Video dimensions for ASS script: {}×{}", vid_w, vid_h)
 
         ass_path = output_path.parent / "subtitles.ass"
-        ass_content = _build_ass_content(segments, style, video_width=vid_w, video_height=vid_h)
+        ass_content = _build_ass_content(
+            segments,
+            style,
+            video_width=vid_w,
+            video_height=vid_h,
+            video_fps=_get_video_fps(video_path),
+        )
         ass_path.write_text(ass_content, encoding="utf-8")
 
         logger.info(

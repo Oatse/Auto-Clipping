@@ -6,6 +6,7 @@ import * as S from './state.js';
 import { escHtml } from './utils.js';
 import { updatePlayhead, updateTimeDisplay } from './timeline.js';
 import { updateFxPreview } from './effects.js';
+import { effectOffset, getSegmentEffect } from './segmentEffects.js';
 
 // ── DOM Refs ───────────────────────────────────────────────────────────────
 const previewVideo      = document.getElementById('previewVideo');
@@ -41,13 +42,19 @@ export function collectStyle() {
     bgBoxEnabled:  bgBoxEnabledEl.checked,
     bgBoxColor:    bgBoxColorEl ? bgBoxColorEl.value : '#000000',
     bgOpacity:     bgOpacityEl ? parseInt(bgOpacityEl.value) : 60,
+    anim:          S.currentAnim,
+    pos:           S.currentPos,
     speakerStyles: Object.fromEntries(
-      Object.entries(S.speakerStyles).map(([k, v]) => [k, { color: v.color, strokeColor: v.strokeColor || null }])
+      Object.entries(S.speakerStyles).map(([k, v]) => [k, {
+        color:       v.color,
+        strokeColor: v.strokeColor || null,
+        glowColor:   v.glowColor   || null,
+      }])
     ),
   };
 }
 
-export function buildWordStyle(style, speakerColor, speakerStrokeColor) {
+export function buildWordStyle(style, speakerColor, speakerStrokeColor, speakerGlowColor) {
   let parts = [];
   let shadows = [];
 
@@ -68,7 +75,7 @@ export function buildWordStyle(style, speakerColor, speakerStrokeColor) {
 
   if (style.glowEnabled && style.glowBlur > 0) {
     const gb = Math.round(style.glowBlur * S.fsScale);
-    const gc = style.glowColor;
+    const gc = speakerGlowColor || style.glowColor;
     shadows.push(`0 0 ${gb}px ${gc}`, `0 0 ${gb * 2}px ${gc}`);
   }
 
@@ -102,6 +109,52 @@ export function buildLineStyle(style, speakerColor) {
   ];
 
   return parts.join('; ');
+}
+
+function getVideoContentRect() {
+  const videoRect = previewVideo.getBoundingClientRect();
+  const width = previewVideo.videoWidth || videoRect.width;
+  const height = previewVideo.videoHeight || videoRect.height;
+  const scale = Math.min(videoRect.width / width, videoRect.height / height);
+  const contentWidth = width * scale;
+  const contentHeight = height * scale;
+  return {
+    left: videoRect.left + (videoRect.width - contentWidth) / 2,
+    top: videoRect.top + (videoRect.height - contentHeight) / 2,
+    width: contentWidth,
+    height: contentHeight,
+  };
+}
+
+function setSegmentVisualPosition(lineDiv, seg, layerIdx, style, offsetX = 0, offsetY = 0) {
+  const effect = getSegmentEffect(seg);
+  const hasOverride = Boolean(seg.posOverride || seg.pos_override);
+  if (!hasOverride && !effect) {
+    lineDiv.style.position = '';
+    lineDiv.style.left = '';
+    lineDiv.style.top = '';
+    lineDiv.style.transform = '';
+    return;
+  }
+
+  const contentRect = getVideoContentRect();
+  const overlayRect = subtitleOverlay.getBoundingClientRect();
+  const width = contentRect.width || 1;
+  const height = contentRect.height || 1;
+  let posX = Number(seg.posX ?? seg.pos_x ?? 50);
+  let posY = Number(seg.posY ?? seg.pos_y ?? 85);
+  if (!hasOverride) {
+    posX = 50;
+    posY = S.currentPos === 'top' ? 8 : (S.currentPos === 'center' ? 50 : 92);
+    const layerOffset = ((style.fontSize * S.fsScale * 1.25) / height) * 100 * layerIdx;
+    posY += S.currentPos === 'top' ? layerOffset : -layerOffset;
+  }
+  const left = contentRect.left - overlayRect.left + ((posX / 100) + offsetX) * width;
+  const top = contentRect.top - overlayRect.top + ((posY / 100) + offsetY) * height;
+  lineDiv.style.position = 'absolute';
+  lineDiv.style.left = `${left}px`;
+  lineDiv.style.top = `${top}px`;
+  lineDiv.style.transform = 'translate(-50%, -50%)';
 }
 
 // ── Trigger Re-render ──────────────────────────────────────────────────────
@@ -145,6 +198,13 @@ export function startSubtitleSync() {
     } else if (activeSegs.length > 0 && (S.currentAnim === 'karaoke' || S.currentAnim === 'narration-pop')) {
       activeSegs.forEach(seg => updateKaraokeHighlight(seg, t, seg._idx));
     }
+    activeSegs.forEach((seg) => {
+      const effect = getSegmentEffect(seg);
+      if (!effect) return;
+      const [offsetX, offsetY] = effectOffset(effect, t - seg.start, seg.end - seg.start);
+      const lineDiv = subtitleContainer.querySelector(`[data-seg-idx="${seg._idx}"]`);
+      if (lineDiv) setSegmentVisualPosition(lineDiv, seg, 0, collectStyle(), offsetX, offsetY);
+    });
 
     S.setSubtitleTimer(requestAnimationFrame(tick));
   }
@@ -157,10 +217,11 @@ export function startSubtitleSync() {
 function _createSubtitleLine(seg, layerIdx, style, isMultiSpeaker) {
   const speakerColor       = isMultiSpeaker ? S.getSpeakerColor(seg.speaker) : null;
   const speakerStrokeColor = isMultiSpeaker ? S.getSpeakerStrokeColor(seg.speaker) : null;
+  const speakerGlowColor   = isMultiSpeaker ? S.getSpeakerGlowColor(seg.speaker)   : null;
   const words = seg.text.split(' ');
 
   const wordsHtml = words.map((w) => {
-    return `<span class="sub-word" style="${buildWordStyle(style, speakerColor, speakerStrokeColor)}">${escHtml(w)}</span>`;
+    return `<span class="sub-word" style="${buildWordStyle(style, speakerColor, speakerStrokeColor, speakerGlowColor)}">${escHtml(w)}</span>`;
   }).join('');
 
   const lineDiv = document.createElement('div');
@@ -169,14 +230,7 @@ function _createSubtitleLine(seg, layerIdx, style, isMultiSpeaker) {
   lineDiv.dataset.speaker = seg.speaker || 'SPEAKER_00';
   lineDiv.style.cssText = buildLineStyle(style, speakerColor);
 
-  if (seg.posOverride || seg.pos_override) {
-    const px = seg.posX ?? seg.pos_x ?? 50;
-    const py = seg.posY ?? seg.pos_y ?? 85;
-    lineDiv.style.position = 'absolute';
-    lineDiv.style.left = px + '%';
-    lineDiv.style.top = py + '%';
-    lineDiv.style.transform = 'translate(-50%, -50%)';
-  }
+  setSegmentVisualPosition(lineDiv, seg, layerIdx, style);
 
   lineDiv.innerHTML = wordsHtml;
 
@@ -186,9 +240,10 @@ function _createSubtitleLine(seg, layerIdx, style, isMultiSpeaker) {
     e.preventDefault();
     const segIdx = parseInt(lineDiv.dataset.segIdx);
     const overlayRect = subtitleOverlay.getBoundingClientRect();
+    const contentRect = getVideoContentRect();
     const lineRect = lineDiv.getBoundingClientRect();
-    const actualPosX = ((lineRect.left + lineRect.width / 2) - overlayRect.left) / overlayRect.width * 100;
-    const actualPosY = ((lineRect.top + lineRect.height / 2) - overlayRect.top) / overlayRect.height * 100;
+    const actualPosX = ((lineRect.left + lineRect.width / 2) - contentRect.left) / contentRect.width * 100;
+    const actualPosY = ((lineRect.top + lineRect.height / 2) - contentRect.top) / contentRect.height * 100;
 
     const segData = S.transcriptData[segIdx];
     segData.posX = actualPosX;
@@ -208,6 +263,7 @@ function _createSubtitleLine(seg, layerIdx, style, isMultiSpeaker) {
       startX: e.clientX,
       startY: e.clientY,
       overlayRect,
+      contentRect,
       origPosX: actualPosX,
       origPosY: actualPosY,
     });
@@ -295,6 +351,7 @@ export function renderActiveSubtitles(activeSegs, currentTime, forceRebuild = fa
   sortedEntries.forEach(([speaker, seg], layerIdx) => {
     const speakerColor       = isMultiSpeaker ? S.getSpeakerColor(seg.speaker) : null;
     const speakerStrokeColor = isMultiSpeaker ? S.getSpeakerStrokeColor(seg.speaker) : null;
+    const speakerGlowColor   = isMultiSpeaker ? S.getSpeakerGlowColor(seg.speaker)   : null;
 
     let lineDiv = existingBySpeaker.get(speaker);
 
@@ -308,19 +365,12 @@ export function renderActiveSubtitles(activeSegs, currentTime, forceRebuild = fa
         lineDiv.style.cssText = buildLineStyle(style, speakerColor);
 
         // Handle position override change
-        if (seg.posOverride || seg.pos_override) {
-          const px = seg.posX ?? seg.pos_x ?? 50;
-          const py = seg.posY ?? seg.pos_y ?? 85;
-          lineDiv.style.position = 'absolute';
-          lineDiv.style.left = px + '%';
-          lineDiv.style.top = py + '%';
-          lineDiv.style.transform = 'translate(-50%, -50%)';
-        }
+        setSegmentVisualPosition(lineDiv, seg, layerIdx, style);
 
         // Rebuild word spans with new text
         const words = seg.text.split(' ');
         lineDiv.innerHTML = words.map(w =>
-          `<span class="sub-word" style="${buildWordStyle(style, speakerColor, speakerStrokeColor)}">${escHtml(w)}</span>`
+          `<span class="sub-word" style="${buildWordStyle(style, speakerColor, speakerStrokeColor, speakerGlowColor)}">${escHtml(w)}</span>`
         ).join('');
 
         // Skip entry animation — speaker is already visible on screen

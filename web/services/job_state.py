@@ -1,7 +1,7 @@
 """
-web/services/job_state.py — Shared in-memory state for the four workspace routers.
+web/services/job_state.py — Shared in-memory state for the five workspace routers.
 
-Holds the four Job dicts, four async-task dicts, and the four output
+Holds the five Job dicts, five async-task dicts, and the five output
 directories that pre-existed inside ``web/server.py`` as module
 globals. Pulling them into one module lets the per-workspace routers
 import their own slice without dragging the whole FastAPI app along.
@@ -45,8 +45,9 @@ OUTPUT_ROOT: Path = Path("./output")
 UPLOADS_DIR: Path = OUTPUT_ROOT / "uploads"
 CLIP_FINDER_DIR: Path = OUTPUT_ROOT / "clip_finder"
 ALL_IN_DIR: Path = OUTPUT_ROOT / "all_in"
+MULTI_POV_DIR: Path = OUTPUT_ROOT / "multi_pov"
 
-for _d in (OUTPUT_ROOT, UPLOADS_DIR, CLIP_FINDER_DIR, ALL_IN_DIR):
+for _d in (OUTPUT_ROOT, UPLOADS_DIR, CLIP_FINDER_DIR, ALL_IN_DIR, MULTI_POV_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 
@@ -91,6 +92,16 @@ all_in_jobs: dict[str, Any] = {}
 all_in_tasks: dict[str, asyncio.Task] = {}
 
 
+# ─── Multi POV Workspace (Workspace · 05) ────────────────────────────────────
+#
+# Job model: ``web.routes.multi_pov.MultiPOVJob``. Typed as ``Any`` for the
+# same reason as the other workspaces — the model lives in the route module
+# and importing it here would create a circular dependency.
+
+multi_pov_jobs: dict[str, Any] = {}
+multi_pov_tasks: dict[str, asyncio.Task] = {}
+
+
 # ─── Task lifecycle helper ───────────────────────────────────────────────────
 
 
@@ -125,6 +136,7 @@ __all__ = [
     "UPLOADS_DIR",
     "CLIP_FINDER_DIR",
     "ALL_IN_DIR",
+    "MULTI_POV_DIR",
     "jobs",
     "job_tasks",
     "cf_jobs",
@@ -133,5 +145,7 @@ __all__ = [
     "short_tasks",
     "all_in_jobs",
     "all_in_tasks",
+    "multi_pov_jobs",
+    "multi_pov_tasks",
     "track_task",
 ]

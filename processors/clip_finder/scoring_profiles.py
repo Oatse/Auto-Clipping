@@ -79,15 +79,30 @@ class ProfileWeights:
     # callers still construct cleanly. See May-28 audit "#6".
     coincidence_bonus_w: float = 0.0
 
+    # ── VTuber-native rubric weights ─────────────────────────────────────
+    #
+    # All default to 0.0, so every profile that does not opt in keeps its
+    # exact pre-existing ranking behaviour even though ``ClipScore`` now
+    # carries the extra dimensions.
+    quotability: float = 0.0
+    character_moment: float = 0.0
+    novelty: float = 0.0
+    # Deterministic weight for chat explicitly nominating the moment
+    # ("clip it", "切り抜き"). Only meaningful for content with a live
+    # chat replay, hence off by default for podcast / news / ASMR.
+    clip_intent_w: float = 0.0
+
 
 # ─── Profile tables ──────────────────────────────────────────────────────────
 #
 # Design notes on each profile:
 #
-# - VTUBER (default): matches the legacy weights from models/clip.py so
-#   nothing changes for current users. High retention_hook + emotional
-#   intensity + audio peak weight reflects the loud-spike-driven nature
-#   of VTuber livestream highlights.
+# - VTUBER (default): tuned for the clip-watching VTuber audience rather
+#   than for generic short-form. Weight sits on quotability, character
+#   moments, and chat clip-intent — what a fan compilation is actually
+#   made of — with the generic-shorts dimensions demoted to supporting
+#   roles. Loudness alone (audio_norm) is deliberately weak: it was the
+#   main reason "loud but boring" moments used to win.
 # - PODCAST: rewards completeness + replayability (a self-contained
 #   takeaway), penalises pure audio peaks (interview content rarely
 #   spikes in dB), and skips chat weight (most podcasts have no chat).
@@ -104,15 +119,24 @@ class ProfileWeights:
 
 PROFILES: dict[ScoringProfile, ProfileWeights] = {
     ScoringProfile.VTUBER: ProfileWeights(
-        retention_hook=0.25,
-        emotional_intensity=0.20,
-        completeness=0.15,
-        replayability=0.10,
-        shorts_friendly=0.10,
-        audio_norm_w=0.05,
-        chat_norm_w=0.05,
-        duration_fit_w=0.10,
-        coincidence_bonus_w=0.10,    # audio peak + chat spike = jackpot
+        # Rebalanced away from the generic-shorts rubric. The old table
+        # put 0.25 on retention_hook and nothing on quotability, so a
+        # loud-but-forgettable opening outranked the line the community
+        # would actually turn into a meme. The generic dimensions still
+        # matter — they just no longer decide the ranking alone.
+        retention_hook=0.14,
+        emotional_intensity=0.11,
+        completeness=0.07,
+        replayability=0.06,
+        shorts_friendly=0.04,
+        quotability=0.14,            # the line/noise that gets repeated
+        character_moment=0.12,       # the mask slipping is the product
+        novelty=0.07,                # punish ten variations of one moment
+        audio_norm_w=0.03,
+        chat_norm_w=0.04,
+        duration_fit_w=0.06,
+        coincidence_bonus_w=0.08,    # audio peak + chat spike = jackpot
+        clip_intent_w=0.12,          # chat asking for a clip beats any heuristic
     ),
     ScoringProfile.PODCAST: ProfileWeights(
         retention_hook=0.20,
@@ -137,15 +161,19 @@ PROFILES: dict[ScoringProfile, ProfileWeights] = {
         coincidence_bonus_w=0.0,
     ),
     ScoringProfile.GAMING: ProfileWeights(
-        retention_hook=0.20,
-        emotional_intensity=0.15,
-        completeness=0.20,
-        replayability=0.10,
-        shorts_friendly=0.10,
-        audio_norm_w=0.07,
+        retention_hook=0.17,
+        emotional_intensity=0.12,
+        completeness=0.15,
+        replayability=0.08,
+        shorts_friendly=0.07,
+        quotability=0.08,            # lighter than VTuber — play > persona
+        character_moment=0.06,
+        novelty=0.05,
+        audio_norm_w=0.06,
         chat_norm_w=0.05,
-        duration_fit_w=0.13,
-        coincidence_bonus_w=0.08,    # crowd reaction matters in gaming clips
+        duration_fit_w=0.10,
+        coincidence_bonus_w=0.07,    # crowd reaction matters in gaming clips
+        clip_intent_w=0.06,
     ),
     ScoringProfile.ASMR: ProfileWeights(
         retention_hook=0.15,

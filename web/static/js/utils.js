@@ -360,6 +360,10 @@ function _showDialog(opts) {
 }
 
 export function confirmDialog(message, options = {}) {
+  if (typeof message === 'object' && message !== null) {
+    options = message;
+    message = options.message;
+  }
   return _showDialog({
     message,
     title: options.title || 'Confirm',
@@ -371,6 +375,10 @@ export function confirmDialog(message, options = {}) {
 }
 
 export function promptDialog(message, options = {}) {
+  if (typeof message === 'object' && message !== null) {
+    options = message;
+    message = options.message;
+  }
   return _showDialog({
     message,
     title: options.title || 'Input required',
@@ -381,3 +389,4 @@ export function promptDialog(message, options = {}) {
     defaultValue: options.defaultValue,
   });
 }
+

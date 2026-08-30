@@ -50,7 +50,7 @@ class Job(BaseModel):
     transcribe_only: bool = False          # Jika True, pipeline berhenti setelah phase 1
     num_speakers: int | None = None        # Manual speaker count override (None = auto)
     speaker_detection: bool = True         # False = skip gap detection, semua SPEAKER_00
-    translator_backend: str | None = None  # "gemini" | "claude" | None (use config default)
+    translator_backend: str | None = None  # "gemini" | "claude" | "codex-gpt-5.5" | "codex-gpt-5.4" | None (use config default)
     spicy_filter: bool = True              # Soft-censor R18: ochinchin → wiener, etc.
     natural_caption: bool = True           # Drop trailing . / , and split long lines for short-form readability.
 

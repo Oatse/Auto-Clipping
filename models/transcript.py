@@ -61,6 +61,7 @@ class TranscriptSegment:
     pos_x: float | None = None        # Per-segment X position override (0-100%)
     pos_y: float | None = None        # Per-segment Y position override (0-100%)
     pos_override: bool = False         # Whether to use custom position
+    effect: dict[str, str] | None = None
 
     @property
     def duration(self) -> float:
@@ -78,6 +79,8 @@ class TranscriptSegment:
             d["pos_x"] = self.pos_x
             d["pos_y"] = self.pos_y
             d["pos_override"] = True
+        if self.effect:
+            d["effect"] = dict(self.effect)
         return d
 
     @classmethod
@@ -91,6 +94,11 @@ class TranscriptSegment:
             pos_x=data.get("pos_x"),
             pos_y=data.get("pos_y"),
             pos_override=data.get("pos_override", False),
+            effect=(
+                dict(data["effect"])
+                if isinstance(data.get("effect"), dict)
+                else None
+            ),
         )
 
 

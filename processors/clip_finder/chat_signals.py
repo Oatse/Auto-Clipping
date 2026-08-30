@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import re
 from collections import Counter
 from pathlib import Path
 from typing import Any, Callable
@@ -36,6 +37,37 @@ SUPERCHAT_KEYS = (          # YT live-chat renderer types that carry money
     "liveChatPaidStickerRenderer",
     "liveChatSponsorshipsGiftPurchaseAnnouncementRenderer",
 )
+
+# ─── Clip-intent mining ──────────────────────────────────────────────────────
+#
+# When chat types "clip it" the audience has explicitly nominated the
+# moment — a far stronger signal than raw message velocity, which also
+# fires on greetings, raids, and emote spam. Patterns are deliberately
+# narrow: a bare "clip" is not enough, because in shooter streams it
+# usually means a magazine. Requiring an adjacent it/that/this (or the
+# unambiguous Japanese terms) keeps precision high, and CLIP_INTENT_MIN
+# means one stray message never creates an event on its own.
+CLIP_INTENT_MIN = 2         # distinct clip-intent msgs in WINDOW_SECONDS
+CLIP_INTENT_PATTERNS: tuple[re.Pattern[str], ...] = (
+    re.compile(r"\bclip\s+(it|that|this|these|him|her|them)\b", re.IGNORECASE),
+    re.compile(r"\bclip(p?ed|ping)\b", re.IGNORECASE),
+    re.compile(r"\bclip[\s-]?worthy\b", re.IGNORECASE),
+    re.compile(r"\b(someone|somebody|pls|please|plz)\s+clip\b", re.IGNORECASE),
+    re.compile(r"\bneeds?\s+(a\s+)?clip\b", re.IGNORECASE),
+    # "CLIP!!!" / "clip it!!" — the exclamation run is what makes this
+    # intent rather than a magazine reference, so the word itself can be
+    # matched case-insensitively without dragging in false positives.
+    re.compile(r"\bclip\s*(it)?\s*!{2,}", re.IGNORECASE),
+    re.compile(r"切り抜き|きりぬき|クリップ"),        # JP: kirinuki / clip
+    re.compile(r"\bklip\s+(ini|itu)\b", re.IGNORECASE),   # ID
+)
+
+
+def _is_clip_intent(text: str) -> bool:
+    """True when a chat message is explicitly asking for a clip."""
+    if not text:
+        return False
+    return any(p.search(text) for p in CLIP_INTENT_PATTERNS)
 
 
 class ChatSignalExtractor:
@@ -72,6 +104,7 @@ class ChatSignalExtractor:
         events.extend(self._compute_velocity_spikes(messages))
         events.extend(self._compute_emote_storms(messages))
         events.extend(self._collect_superchats(messages))
+        events.extend(self._compute_clip_intent(messages))
 
         events.sort(key=lambda e: e.start)
         if log_fn:
@@ -79,7 +112,8 @@ class ChatSignalExtractor:
             log_fn(
                 f"ChatSignals: {counts.get('chat_spike', 0)} spikes, "
                 f"{counts.get('chat_emote', 0)} emote storms, "
-                f"{counts.get('chat_superchat', 0)} superchats "
+                f"{counts.get('chat_superchat', 0)} superchats, "
+                f"{counts.get('chat_clip_intent', 0)} clip requests "
                 f"(from {len(messages)} messages)"
             )
         return events
@@ -245,10 +279,17 @@ class ChatSignalExtractor:
             return []
 
         counts = [0] * n_buckets
+        # Keep what chat actually said per bucket, not just how much. The
+        # scoring prompt quotes these back to the LLM so it can tell a
+        # spike of "hello" from a spike of "SHE DID NOT JUST SAY THAT".
+        texts: list[Counter] = [Counter() for _ in range(n_buckets)]
         for m in messages:
             idx = int(m["t"] // WINDOW_SECONDS)
             if 0 <= idx < n_buckets:
                 counts[idx] += 1
+                body = (m.get("text") or "").strip()
+                if body:
+                    texts[idx][body[:60]] += 1
 
         # Use median of all buckets as baseline
         sorted_counts = sorted(counts)
@@ -268,12 +309,18 @@ class ChatSignalExtractor:
                 start = i * WINDOW_SECONDS
                 end = (j + 1) * WINDOW_SECONDS
                 peak_ratio = max(counts[k] / baseline for k in range(i, j + 1))
+                window_texts: Counter = Counter()
+                for k in range(i, j + 1):
+                    window_texts.update(texts[k])
                 events.append(SignalEvent(
                     kind=SignalKind.CHAT_SPIKE,
                     start=float(start),
                     end=float(end),
                     intensity=min(1.0, peak_ratio / 10.0),
                     label=f"chat {peak_ratio:.1f}x baseline",
+                    sample=" | ".join(
+                        t for t, _ in window_texts.most_common(3)
+                    )[:160],
                 ))
                 i = j + 1
             else:
@@ -311,6 +358,40 @@ class ChatSignalExtractor:
                     label=f"{count}x {label}",
                     sample=label,
                 ))
+        return events
+
+    @staticmethod
+    def _compute_clip_intent(messages: list[dict]) -> list[SignalEvent]:
+        """Emit CHAT_CLIP_INTENT where chat asked for the moment to be clipped.
+
+        Bucketed on the same WINDOW_SECONDS grid as velocity spikes so the
+        two line up when they co-occur. ``intensity`` saturates at 8
+        requests in a window — beyond that the audience has clearly made
+        its point and more messages add no information.
+        """
+        if not messages:
+            return []
+
+        buckets: dict[int, list[str]] = {}
+        for m in messages:
+            text = (m.get("text") or "").strip()
+            if not text or not _is_clip_intent(text):
+                continue
+            buckets.setdefault(int(m["t"] // WINDOW_SECONDS), []).append(text)
+
+        events: list[SignalEvent] = []
+        for idx, hits in sorted(buckets.items()):
+            if len(hits) < CLIP_INTENT_MIN:
+                continue
+            start = idx * WINDOW_SECONDS
+            events.append(SignalEvent(
+                kind=SignalKind.CHAT_CLIP_INTENT,
+                start=float(start),
+                end=float(start + WINDOW_SECONDS),
+                intensity=min(1.0, len(hits) / 8.0),
+                label=f"{len(hits)}x chat asking for a clip",
+                sample=" | ".join(h[:60] for h in hits[:3])[:160],
+            ))
         return events
 
     @staticmethod

@@ -340,7 +340,21 @@ class Sanitizer:
         next_anchor: float | None,
         floor: float,
     ) -> None:
-        """Spread one identical-start cluster across the available window."""
+        """Spread one identical-start cluster across the available window.
+
+        The per-word stride is capped at :attr:`TimingPolicy.duration_max`
+        so a long gap before ``next_anchor`` (silence, a missed STT word,
+        a scene cut, or a different speaker filling the interval) does
+        NOT manufacture multi-second word durations.  Without this cap,
+        two consecutive identical-anchor kanji separated from the next
+        real word by 15 s would each get a 7.5 s duration — long enough
+        to trip later overlap fixes and produce visibly broken subtitle
+        timing on words like ``来た来た来た`` or ``頭文字``.
+
+        When the natural even-stride exceeds the cap, the cluster only
+        occupies the first ``cluster_size * duration_max`` seconds of
+        the window and the remainder stays silent.
+        """
         cluster_size = len(cluster_indices)
 
         # Default per-word stride is the policy floor.
@@ -349,7 +363,7 @@ class Sanitizer:
             window = next_anchor - anchor
             even_stride = window / cluster_size
             if even_stride >= floor:
-                stride = even_stride
+                stride = min(even_stride, self.policy.duration_max)
 
         for offset, idx in enumerate(cluster_indices):
             w, _ = all_words_with_sp[idx]
@@ -369,6 +383,14 @@ class Sanitizer:
         """Trim ``end`` to the *next same-speaker word's* ``start``.
 
         Cross-speaker overlap (interruption) is intentionally preserved.
+
+        When the next same-speaker word actually starts BEFORE the
+        current word (out-of-order ordering — possible after the
+        translator's word-level recheck pass reshuffles segment
+        membership), trimming would leave ``end < start``.  In that
+        case we collapse the current word to a zero-duration anchor at
+        its own ``start`` instead of moving ``end`` to the past — the
+        downstream cap pass will then floor the duration if needed.
 
         Optimisation: the previous implementation was O(N**2) — for every
         word it scanned forwards looking for the next same-speaker word.
@@ -393,7 +415,9 @@ class Sanitizer:
                 cur_w, _ = all_words_with_sp[cur_idx]
                 nxt_w, _ = all_words_with_sp[nxt_idx]
                 if cur_w.end > nxt_w.start:
-                    cur_w.end = round(nxt_w.start, 3)
+                    # Never let the trim push ``end`` below ``start``.
+                    new_end = max(cur_w.start, nxt_w.start)
+                    cur_w.end = round(new_end, 3)
                     fixes += 1
         return fixes
 
@@ -434,7 +458,13 @@ class Sanitizer:
                         new_end = round(cur.start + min_dur, 3)
                     cur.end = new_end
                     # Trim the last word's end if it extends past the segment.
+                    # Defensive: never let the trim push word.end below
+                    # word.start (out-of-order word ordering can show up
+                    # after the translator's recheck pass reshuffles
+                    # segment membership — collapse to the word's own
+                    # start instead of moving end into the past).
                     if cur.words and cur.words[-1].end > cur.end:
-                        cur.words[-1].end = cur.end
+                        last_w = cur.words[-1]
+                        last_w.end = max(last_w.start, cur.end)
                     fixes += 1
         return fixes

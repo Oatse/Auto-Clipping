@@ -77,6 +77,12 @@ class ClipFinderJob(BaseModel):
     # ``vtuber`` which preserves the legacy weight table byte-for-byte
     # so jobs without an explicit profile produce identical rankings.
     scoring_profile: str = "vtuber"
+    # Detection model backend driving moment detection / scoring.
+    # ``gemini`` (default — Gemini 3.5 Flash), ``kiro-opus-4.7`` (Claude
+    # Opus 4.7 thinking-agentic via 9router), or ``kiro-auto`` (Kiro's
+    # auto-routed model via 9router). Stored on the Job so re-runs are
+    # reproducible and visible in job_meta.json.
+    model: str = "gemini"
     status: str = "queued"
     progress_pct: float = 0.0
     phase_label: str = "Queued"
@@ -104,6 +110,9 @@ class ClipFinderRequest(BaseModel):
     # ADR-0003 Scoring Profile (optional, defaults to ``vtuber`` which
     # is the legacy weighting). Mirrors the All In workspace contract.
     scoring_profile: str = "vtuber"
+    # Detection model backend (optional, defaults to config.CLIP_FINDER_MODEL
+    # or "gemini"). Validated against a small enum below.
+    model: str | None = None
 
 
 # ─── Internal helpers ────────────────────────────────────────────────────────
@@ -292,6 +301,22 @@ async def create_clip_finder_job(req: ClipFinderRequest) -> dict:
     if mode not in ("single-shot", "multi-stage"):
         raise HTTPException(status_code=400, detail=f"Invalid mode '{mode}'")
 
+    # Detection model backend. Empty / None falls through to config default
+    # (which itself defaults to "gemini"). Validated against the canonical
+    # set so an invalid value fails with a clear 400 instead of being
+    # silently coerced to Gemini deep inside the orchestrator.
+    raw_model = (req.model or getattr(config, "CLIP_FINDER_MODEL", "gemini") or "gemini")
+    detection_model = raw_model.strip().lower()
+    valid_models = {"gemini", "kiro-opus-4.7", "kiro-sonnet-4.6", "kiro-auto", "codex-gpt-5.5", "codex-gpt-5.4"}
+    if detection_model not in valid_models:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Invalid model: {req.model!r}. Must be one of: "
+                "gemini, kiro-opus-4.7, kiro-sonnet-4.6, kiro-auto, codex-gpt-5.5, codex-gpt-5.4."
+            ),
+        )
+
     # ADR-0003: validate scoring profile against the canonical enum so
     # we fail fast with a clear 400 instead of silently coercing to
     # VTUBER inside the orchestrator.
@@ -327,6 +352,7 @@ async def create_clip_finder_job(req: ClipFinderRequest) -> dict:
         enable_audio_signals=bool(enable_audio),
         enable_chat_signals=bool(enable_chat),
         scoring_profile=scoring_profile.value,
+        model=detection_model,
         created_at=time.time(),
     )
     job_state.cf_jobs[job_id] = job
@@ -558,6 +584,7 @@ async def _run_clip_finder_phase1(job_id: str, gemini_keys: list[str]) -> None:
         )
 
         max_count = getattr(config, "CLIP_FINDER_MAX_CLIPS", 12)
+        log(f"AI backend: {job.model}")
         scored_clips = await cf.find_clips(
             transcript=transcript,
             instructions=job.instructions,
@@ -567,6 +594,7 @@ async def _run_clip_finder_phase1(job_id: str, gemini_keys: list[str]) -> None:
             log_fn=log,
             max_count=max_count if job.mode == "multi-stage" else None,
             scoring_profile=job.scoring_profile,
+            model=job.model,
         )
 
         if not scored_clips:

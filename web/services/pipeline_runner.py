@@ -32,6 +32,7 @@ from models.transcript import (
 )
 
 from processors.timing import apply_natural_caption_style
+from processors.subtitle_effects import normalize_segment_effect, normalize_segment_position
 
 from .job_models import Job, JobStatus, PHASE_LABELS
 from .transcript_sync import sync_segment_words_with_text
@@ -79,6 +80,49 @@ def _persist_job_meta(job: Job, output_dir: Path) -> None:
 
 
 # ─── Phase 1 only ─────────────────────────────────────────────────────────
+
+def _unique_render_output_path(
+    output_dir: Path,
+    stem: str,
+    target_language: str,
+) -> Path:
+    base = output_dir / f"{stem}_subtitled_{target_language}.mp4"
+    if not base.exists():
+        return base
+
+    suffix = 2
+    while True:
+        candidate = (
+            output_dir / f"{stem}_subtitled_{target_language}_r{suffix}.mp4"
+        )
+        if not candidate.exists():
+            return candidate
+        suffix += 1
+
+
+def _apply_render_caption_style(
+    segments: list[TranscriptSegment],
+    *,
+    job: Job,
+    has_user_transcript: bool,
+) -> list[TranscriptSegment]:
+    if not getattr(job, "natural_caption", True):
+        return segments
+    return apply_natural_caption_style(
+        segments,
+        split_long_segments=not has_user_transcript,
+    )
+
+
+def _normalize_segment_visuals(segment: TranscriptSegment) -> TranscriptSegment:
+    segment.effect = normalize_segment_effect(segment.effect)
+    segment.pos_x, segment.pos_y, segment.pos_override = normalize_segment_position(
+        segment.pos_x,
+        segment.pos_y,
+        segment.pos_override,
+    )
+    return segment
+
 
 async def run_transcription_only(
     job: Job,
@@ -172,10 +216,17 @@ async def run_transcription_only(
             or getattr(config, "TRANSLATOR_BACKEND", "gemini")
             or "gemini"
         ).lower()
-        backend_label = "Claude (9router)" if backend == "claude" else "Gemini"
+        # Normalise to a canonical label for log output.
+        _BACKEND_LABELS = {
+            "claude": "Claude (9router)",
+            "codex-gpt-5.5": "Codex GPT-5.5 (9router)",
+            "codex-gpt-5.4": "Codex GPT-5.4 (9router)",
+        }
+        backend_label = _BACKEND_LABELS.get(backend, "Gemini")
+        _is_9router = backend in {"claude", "codex-gpt-5.5", "codex-gpt-5.4"}
         backend_ready = (
             (backend == "gemini" and bool(config.GEMINI_API_KEYS))
-            or (backend == "claude" and bool(getattr(config, "NINEROUTER_API_KEY", "")))
+            or (_is_9router and bool(getattr(config, "NINEROUTER_API_KEY", "")))
         )
         if target_language and backend_ready:
             log(f"Auto-translating to '{target_language}' via {backend_label}...")
@@ -217,8 +268,8 @@ async def run_transcription_only(
                 )
         elif backend == "gemini" and not config.GEMINI_API_KEYS:
             log("⚠ No GEMINI_API_KEYS configured — skipping auto-translate")
-        elif backend == "claude" and not getattr(config, "NINEROUTER_API_KEY", ""):
-            log("⚠ NINEROUTER_API_KEY not set — skipping auto-translate (Claude backend)")
+        elif _is_9router and not getattr(config, "NINEROUTER_API_KEY", ""):
+            log(f"⚠ NINEROUTER_API_KEY not set — skipping auto-translate ({backend_label} backend)")
 
         # Persist canonical transcript JSON.
         transcript_output_dir = output_dir / "phase1_transcription"
@@ -348,7 +399,11 @@ async def run_render_pipeline(
             segments: list[TranscriptSegment] = []
             for seg_dict in user_transcript:
                 if isinstance(seg_dict, dict):
-                    segments.append(TranscriptSegment.from_dict(seg_dict))
+                    segments.append(
+                        _normalize_segment_visuals(
+                            TranscriptSegment.from_dict(seg_dict),
+                        ),
+                    )
 
             # Sync word-level text with segment text.  Without this the
             # Pycaps word-pop renderer would show the pre-edit text.
@@ -374,7 +429,7 @@ async def run_render_pipeline(
                     raw = json.load(f)
 
                 segments = [
-                    TranscriptSegment.from_dict(seg)
+                    _normalize_segment_visuals(TranscriptSegment.from_dict(seg))
                     for seg in raw.get("segments", [])
                 ]
                 log(f"✓ Dimuat {len(segments)} segmen dari cache")
@@ -423,15 +478,11 @@ async def run_render_pipeline(
             segment_level_only=skip_recheck,
         )
 
-        # Natural Caption Style — drop trailing ``.`` / ``,`` and split
-        # long segments into 2-3 sub-segments so short-form viewers
-        # don't get a wall of text at the bottom of the screen. Runs
-        # AFTER sanitize so the per-word timestamps used as cut anchors
-        # are already monotonic. Toggleable per-Job (default True).
-        if getattr(job, "natural_caption", True):
-            translated_segments = apply_natural_caption_style(
-                translated_segments,
-            )
+        translated_segments = _apply_render_caption_style(
+            translated_segments,
+            job=job,
+            has_user_transcript=skip_recheck,
+        )
 
         # Phase 3 — Subtitle Rendering
         set_phase(3)
@@ -455,7 +506,9 @@ async def run_render_pipeline(
         stem = video_path.stem
         final_output = await pipeline.muxer.mux(
             video_path=subtitled_video,
-            output_path=output_dir / f"{stem}_subtitled_{target_language}.mp4",
+            output_path=_unique_render_output_path(
+                output_dir, stem, target_language,
+            ),
         )
 
         job.status = JobStatus.COMPLETED

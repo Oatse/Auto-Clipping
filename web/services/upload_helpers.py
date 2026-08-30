@@ -76,8 +76,9 @@ async def save_upload_streaming(
 
     The defaults pull from ``config.UPLOAD_CHUNK_BYTES`` and
     ``config.MAX_UPLOAD_BYTES`` so a single ``.env`` change tunes
-    every upload route at once. Pass explicit values when a specific
-    workspace needs tighter caps (e.g. an embed-only API surface).
+    every upload route at once. Pass ``max_bytes=0`` to disable the
+    size cap for a specific caller and let downstream services decide
+    whether the file is too large.
 
     Raises ``UploadTooLargeError`` once the running total would exceed
     ``max_bytes``. The partially-written file is left in place — see
@@ -87,9 +88,10 @@ async def save_upload_streaming(
         chunk_bytes
         or getattr(config, "UPLOAD_CHUNK_BYTES", 1024 * 1024)
     )
-    max_size: int = (
-        max_bytes
-        or getattr(config, "MAX_UPLOAD_BYTES", 4 * 1024 * 1024 * 1024)
+    max_size = (
+        getattr(config, "MAX_UPLOAD_BYTES", 4 * 1024 * 1024 * 1024)
+        if max_bytes is None
+        else max_bytes
     )
 
     written = 0
@@ -100,7 +102,7 @@ async def save_upload_streaming(
                 if not chunk:
                     break
                 written += len(chunk)
-                if written > max_size:
+                if max_size > 0 and written > max_size:
                     raise UploadTooLargeError(
                         f"Upload exceeds limit of {max_size} bytes "
                         f"(received at least {written}). "

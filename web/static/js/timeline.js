@@ -283,8 +283,8 @@ export function setupTimeline() {
       const ds = S.subtitleDragState;
       const dx = e.clientX - ds.startX;
       const dy = e.clientY - ds.startY;
-      const newPosX = Math.max(5, Math.min(95, ds.origPosX + (dx / ds.overlayRect.width) * 100));
-      const newPosY = Math.max(5, Math.min(95, ds.origPosY + (dy / ds.overlayRect.height) * 100));
+      const newPosX = Math.max(0, Math.min(100, ds.origPosX + (dx / ds.contentRect.width) * 100));
+      const newPosY = Math.max(0, Math.min(100, ds.origPosY + (dy / ds.contentRect.height) * 100));
       const seg = S.transcriptData[ds.segIdx];
       seg.posX = newPosX;
       seg.pos_x = newPosX;
@@ -294,8 +294,8 @@ export function setupTimeline() {
       seg.pos_override = true;
       const lineEl = subtitleContainer.querySelector(`[data-seg-idx="${ds.segIdx}"]`);
       if (lineEl) {
-        lineEl.style.left = newPosX + '%';
-        lineEl.style.top = newPosY + '%';
+        lineEl.style.left = `${ds.contentRect.left - ds.overlayRect.left + (newPosX / 100) * ds.contentRect.width}px`;
+        lineEl.style.top = `${ds.contentRect.top - ds.overlayRect.top + (newPosY / 100) * ds.contentRect.height}px`;
       }
     }
     // Timeline vertical resize
@@ -325,6 +325,7 @@ export function setupTimeline() {
       document.querySelectorAll('.subtitle-line.dragging').forEach(el => el.classList.remove('dragging'));
       S.setSubtitleDragState(null);
       onStyleChange();
+      scheduleAutoSave();
     }
     if (_tlResizing) {
       _tlResizing = false;
@@ -465,6 +466,11 @@ export function setupTimeline() {
     });
   }
 
+  // Synchronize vertical scroll between track scroll area and labels column
+  timelineScrollArea.addEventListener('scroll', () => {
+    timelineLabelsCol.scrollTop = timelineScrollArea.scrollTop;
+  });
+
   // Split dialog
   setupSplitDialog();
 }
@@ -533,11 +539,13 @@ export function renderTimeline() {
       }
     }
     speakers.forEach(sp => {
-      const spIdx = parseInt((sp.match(/\d+$/) || ['0'])[0], 10);
-      const color = S.getSpeakerColor(sp);
+      const match = sp.match(/\d+$/);
+      const label = match ? `S${parseInt(match[0], 10)}` : sp;
+      const strokeColorEl = document.getElementById('strokeColor');
+      const color = S.getSpeakerStrokeColor(sp) || (strokeColorEl ? strokeColorEl.value : '#000000') || '#000000';
       const labelRow = document.createElement('div');
       labelRow.className = 'timeline-label-row';
-      labelRow.innerHTML = `<span style="color:${color}">S${spIdx}</span>`;
+      labelRow.innerHTML = `<span style="color:${color}">${label}</span>`;
       timelineLabelsCol.appendChild(labelRow);
     });
   }
@@ -641,10 +649,12 @@ export function renderTimeline() {
 
     const left  = (seg.start / S.videoDuration) * trackWidth;
     const width = Math.max(4, ((seg.end - seg.start) / S.videoDuration) * trackWidth);
-    const color = S.getSpeakerColor(sp);
+    const strokeColorEl = document.getElementById('strokeColor');
+    const color = S.getSpeakerStrokeColor(sp) || (strokeColorEl ? strokeColorEl.value : '#000000') || '#000000';
 
     const block = document.createElement('div');
     block.className = 'timeline-segment' + (S.selectedSegIdx === idx ? ' selected' : '');
+    if (seg.effect?.type) block.classList.add('has-segment-effect');
     block.dataset.idx = idx;
     block.style.left   = left + 'px';
     block.style.width  = width + 'px';
@@ -700,9 +710,33 @@ function openSegmentDialog(startTime) {
   newSegStart.value = fmtTime(startTime);
   newSegEnd.value = fmtTime(endTime);
   newSegText.value = '';
+  populateNewSegSpeakerDropdown();
   newSegSpeaker.value = 'SPEAKER_00';
   segmentDialog.classList.remove('hidden');
   newSegText.focus();
+}
+
+function populateNewSegSpeakerDropdown() {
+  const selectEl = document.getElementById('newSegSpeaker');
+  if (!selectEl) return;
+
+  // Collect all unique speakers
+  const speakers = new Set();
+  S.transcriptData.forEach(seg => {
+    if (seg.speaker) speakers.add(seg.speaker);
+  });
+  Object.keys(S.speakerStyles).forEach(sp => {
+    speakers.add(sp);
+  });
+  // Ensure SPEAKER_00 is always there as a baseline
+  speakers.add('SPEAKER_00');
+
+  const sortedSpeakers = Array.from(speakers).sort();
+  selectEl.innerHTML = sortedSpeakers.map(sp => {
+    const match = sp.match(/\d+$/);
+    const label = match ? `S${parseInt(match[0], 10)}` : sp;
+    return `<option value="${sp}">${label} (${sp})</option>`;
+  }).join('');
 }
 
 function closeSegmentDialog() {

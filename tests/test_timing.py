@@ -335,3 +335,114 @@ class TestClusterRedistribution:
         assert len(set(starts)) == len(starts), (
             f"cluster words still share starts: {starts}"
         )
+
+
+# ─── Cluster stride cap + non-monotonic word ordering ────────────────────
+#
+# Regression coverage for the timestamp-breakage seen on jobs
+# ba86a2ed51b2 ("Initial D" segment 232.5→248.1, "来た来た来た" repeats
+# at 2:31): Scribe collapses several CJK kanji onto one anchor and the
+# next real same-speaker word lies many seconds away. Without the
+# stride cap, redistribution invents multi-second word durations and
+# the segment-overlap pass propagates that into the rendered subtitle.
+# Out-of-order word ordering after the translator's recheck pass can
+# also drive the overlap-trim below seg.start, producing words with
+# end < start.
+
+class TestClusterStrideCap:
+    """Cap per-word stride at TimingPolicy.duration_max."""
+
+    def test_distant_anchor_does_not_inflate_stride_beyond_cap(self):
+        """2 cluster words + a distant next-anchor (15 s away) must not
+        produce ~7 s per word — the cap clips them at duration_max.
+        """
+        # Mirrors job ba86a2ed51b2 seg 114 ('Initial D'):
+        # '文' and '字' both anchored at 232.59, next real word at 248.14.
+        segs = [_seg(232.52, 248.14, "SPEAKER_00", [
+            ("D", 232.520, 232.570),
+            ("頭", 232.570, 232.590),
+            ("文", 232.590, 232.590),
+            ("字", 232.590, 232.590),
+            ("井", 248.140, 248.340),
+        ])]
+        policy = TimingPolicy()
+        Sanitizer(policy).sanitize(segs)
+        cluster = segs[0].words[2:4]
+        # Each redistributed cluster word's duration must respect the
+        # normal-word cap. Without the fix, each was ~7.775 s.
+        for w in cluster:
+            dur = w.end - w.start
+            assert dur <= policy.duration_max + 0.05, (
+                f"cluster stride exceeded duration_max cap: word={w.word!r} "
+                f"start={w.start} end={w.end} dur={dur}"
+            )
+
+    def test_close_anchor_still_uses_natural_stride(self):
+        """When the natural even-stride is already within the cap, the
+        cap must NOT tighten it — preserves prior behaviour for the
+        common case (cluster fits comfortably inside the window).
+        """
+        # 3-kanji cluster, next anchor 1.0s away → even stride ≈ 0.33s
+        # That's well below duration_max (1.5s), so it should pass.
+        segs = [_seg(1.0, 2.0, "SPEAKER_00", [
+            ("a", 1.0, 1.0),
+            ("b", 1.0, 1.0),
+            ("c", 1.0, 1.0),
+            ("next", 2.0, 2.5),
+        ])]
+        Sanitizer().sanitize(segs)
+        cluster = segs[0].words[:3]
+        # Cluster fills (1.0, 2.0) ≈ 0.33s strides
+        assert cluster[2].start <= 2.0 + 0.01
+        assert cluster[2].start - cluster[0].start == pytest.approx(
+            0.66, abs=0.05
+        )
+
+    def test_overlap_trim_never_pushes_end_below_start(self):
+        """When two same-speaker words are out-of-order, trimming
+        cur.end to nxt.start would drop below cur.start. The trim must
+        clamp at cur.start (zero-duration anchor) instead of producing
+        negative durations.
+        """
+        # Mirrors job ba86a2ed51b2 segs 111 + 113: 'く' word ends at
+        # 232.400 but the next same-speaker word starts at 232.370.
+        segs = [_seg(232.430, 232.500, "SPEAKER_00", [
+            ("く", 232.430, 232.500),
+        ]), _seg(232.370, 232.450, "SPEAKER_00", [
+            ("井", 232.370, 232.450),
+        ])]
+        Sanitizer().sanitize(segs)
+        # No word should end up with end < start
+        for s in segs:
+            for w in s.words:
+                assert w.end >= w.start, (
+                    f"negative-duration word: {w.word!r} "
+                    f"start={w.start} end={w.end}"
+                )
+
+    def test_segment_overlap_trim_never_creates_negative_word_duration(self):
+        """The segment-level overlap fix trims the last word's end too.
+        It must clamp at the word's own start, not at the new (smaller)
+        seg.end when seg.end < last_word.start.
+        """
+        # Construct the pathological case: cur seg ends well after nxt seg
+        # starts, AND cur's last word starts AFTER nxt's start. Trimming
+        # cur.end below the last word's start would create a negative
+        # word duration.
+        segs = [
+            _seg(0.0, 5.0, "SPEAKER_00", [
+                ("first", 0.0, 0.1),
+                ("second", 4.9, 5.0),  # last word starts at 4.9
+            ]),
+            _seg(2.0, 3.0, "SPEAKER_00", [
+                ("interrupt", 2.0, 3.0),
+            ]),
+        ]
+        Sanitizer().sanitize(segs)
+        # Find first segment by start time after sort
+        first = next(s for s in segs if s.words and s.words[0].word == "first")
+        for w in first.words:
+            assert w.end >= w.start, (
+                f"segment-overlap trim produced negative word duration: "
+                f"{w.word!r} start={w.start} end={w.end}"
+            )

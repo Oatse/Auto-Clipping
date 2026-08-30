@@ -64,6 +64,12 @@ def build_page_router(templates: Jinja2Templates) -> APIRouter:
             request, "pages/all_in.html", {"active": "allin"},
         )
 
+    @router.get("/multi-pov", response_class=HTMLResponse)
+    async def page_multi_pov(request: Request):
+        return templates.TemplateResponse(
+            request, "pages/multi_pov.html", {"active": "multipov"},
+        )
+
     @router.get("/editor", response_class=HTMLResponse)
     @router.get("/editor/{job_id}", response_class=HTMLResponse)
     async def page_editor(request: Request, job_id: str | None = None):
