@@ -43,6 +43,14 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--status", action="store_true",
         help="report what is running and exit without starting anything",
     )
+    parser.add_argument(
+        "--install-panel", action="store_true",
+        help="install the Auto-Clip panel into Premiere, then exit",
+    )
+    parser.add_argument(
+        "--uninstall-panel", action="store_true",
+        help="remove the Auto-Clip panel from Premiere, then exit",
+    )
     return parser.parse_args(argv)
 
 
@@ -57,6 +65,16 @@ def _report_status(opts: LaunchOptions) -> int:
     print(f"  Premiere Pro process        : {'running' if premiere else 'not running'}")
     print(f"  Premiere bridge             : {'reachable' if bridge else 'not reachable'}")
     print(f"  Premiere executable         : {exe or 'not found'}")
+
+    from .panel_install import status as panel_status
+
+    panel = panel_status()
+    print(f"  Auto-Clip panel             : "
+          f"{'installed' if panel.installed else 'not installed'}"
+          f"{'' if panel.debug_mode else '  (debug mode OFF - will not load)'}")
+    if panel.message:
+        print(f"\n  {panel.message}")
+
     if premiere and not bridge:
         print(
             "\n  Premiere is open but not scriptable. Open the bridge panel and "
@@ -67,6 +85,22 @@ def _report_status(opts: LaunchOptions) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv)
+
+    if args.install_panel:
+        from .panel_install import install
+
+        result = install()
+        print("Auto-Clip panel installed.")
+        print(result)
+        print("\nRestart Premiere Pro, then open Window > Extensions > Auto-Clip.")
+        return 0 if result.installed else 1
+
+    if args.uninstall_panel:
+        from .panel_install import uninstall
+
+        print("Panel removed." if uninstall() else "Panel was not installed.")
+        return 0
+
     opts = LaunchOptions(
         app_host=args.host,
         app_port=args.port,

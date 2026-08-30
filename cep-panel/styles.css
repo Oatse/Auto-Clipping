@@ -1,0 +1,263 @@
+/*
+ * Panel styling. Premiere's own dark chrome is the backdrop, so the palette
+ * matches it rather than fighting it — a panel that looks foreign inside the
+ * app reads as broken even when it works.
+ */
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  padding: 0;
+  font: 12px/1.45 "Segoe UI", -apple-system, system-ui, sans-serif;
+  color: #d6d6d6;
+  background: #1e1e1e;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* ── header ─────────────────────────────────────────────────────────── */
+
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid #2f2f2f;
+  background: #232323;
+}
+
+.brand { display: flex; align-items: center; gap: 10px; }
+
+.mark {
+  display: grid;
+  place-items: center;
+  width: 30px; height: 30px;
+  border-radius: 7px;
+  background: linear-gradient(135deg, #7c5cff, #4a8cff);
+  color: #fff;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: .3px;
+}
+
+h1 { margin: 0; font-size: 13px; font-weight: 600; color: #f0f0f0; }
+.sub { margin: 1px 0 0; font-size: 10.5px; color: #8a8a8a; }
+
+.conn { display: flex; align-items: center; gap: 6px; font-size: 10.5px; color: #9a9a9a; }
+
+.dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: #6b6b6b;
+  flex: none;
+}
+.dot.ok   { background: #4ac07a; box-shadow: 0 0 0 3px rgba(74,192,122,.15); }
+.dot.bad  { background: #e2564a; box-shadow: 0 0 0 3px rgba(226,86,74,.15); }
+.dot.busy { background: #e6a944; box-shadow: 0 0 0 3px rgba(230,169,68,.15); }
+
+/* ── layout ─────────────────────────────────────────────────────────── */
+
+main { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+.card {
+  background: #262626;
+  border: 1px solid #333;
+  border-radius: 9px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.row { display: flex; gap: 10px; }
+.row > .field { flex: 1; min-width: 0; }
+
+/* ── fields ─────────────────────────────────────────────────────────── */
+
+.field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.field > span { font-size: 10.5px; color: #9a9a9a; letter-spacing: .2px; }
+.field em { font-style: normal; color: #6f6f6f; }
+.field b { color: #b9a3ff; font-weight: 600; }
+
+input[type="text"], textarea, select {
+  width: 100%;
+  padding: 7px 9px;
+  font: inherit;
+  color: #e8e8e8;
+  background: #1b1b1b;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  outline: none;
+  -webkit-user-select: text;
+  user-select: text;
+}
+textarea { resize: vertical; }
+input[type="text"]:focus, textarea:focus, select:focus {
+  border-color: #6b5cd6;
+  box-shadow: 0 0 0 2px rgba(107,92,214,.18);
+}
+input::placeholder, textarea::placeholder { color: #5f5f5f; }
+
+input[type="range"] {
+  width: 100%;
+  margin: 6px 0 0;
+  accent-color: #7c5cff;
+}
+
+/* ── buttons ────────────────────────────────────────────────────────── */
+
+button {
+  font: inherit;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  padding: 8px 12px;
+}
+
+.primary {
+  background: linear-gradient(180deg, #7159e8, #5f49d6);
+  color: #fff;
+  font-weight: 600;
+  border-color: #5a45cc;
+}
+.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.primary:disabled { opacity: .5; cursor: default; }
+
+.ghost {
+  background: #2e2e2e;
+  color: #cfcfcf;
+  border-color: #3d3d3d;
+}
+.ghost:hover { background: #363636; }
+
+.link {
+  background: none;
+  border: none;
+  color: #8f7fe8;
+  padding: 2px 4px;
+  font-size: 11px;
+}
+.link:hover { color: #a99bf5; text-decoration: underline; }
+
+/* ── status ─────────────────────────────────────────────────────────── */
+
+.statusHead, .resultHead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.statusHead strong, .resultHead strong { font-size: 12px; color: #f0f0f0; }
+
+.bar {
+  height: 4px;
+  border-radius: 3px;
+  background: #333;
+  overflow: hidden;
+}
+.fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #7c5cff, #4a8cff);
+  transition: width .4s ease;
+}
+.fill.indeterminate {
+  width: 35%;
+  animation: slide 1.4s ease-in-out infinite;
+}
+@keyframes slide {
+  0%   { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}
+
+.muted { color: #8a8a8a; margin: 0; font-size: 11px; }
+.small { font-size: 10.5px; }
+
+.log {
+  margin: 0;
+  max-height: 116px;
+  overflow-y: auto;
+  padding: 8px;
+  font: 10.5px/1.5 Consolas, "SF Mono", monospace;
+  color: #9d9d9d;
+  background: #1a1a1a;
+  border: 1px solid #303030;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ── results ────────────────────────────────────────────────────────── */
+
+.moments {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 190px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.moment {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #1f1f1f;
+  border: 1px solid #303030;
+  border-radius: 6px;
+}
+.moment .time {
+  font: 10.5px Consolas, monospace;
+  color: #8f8f8f;
+  white-space: nowrap;
+}
+.moment .title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #dcdcdc;
+  font-size: 11px;
+}
+.moment .score {
+  font-size: 10.5px;
+  font-weight: 600;
+  color: #4ac07a;
+  white-space: nowrap;
+}
+.moment .score.mid { color: #e6a944; }
+
+.actions { display: flex; gap: 8px; }
+.actions .primary { flex: 1; }
+
+/* ── footer + settings ──────────────────────────────────────────────── */
+
+footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px 12px;
+  font-size: 10.5px;
+}
+
+.sheet {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  padding: 14px;
+  background: #262626;
+  border-top: 1px solid #3a3a3a;
+  box-shadow: 0 -8px 24px rgba(0,0,0,.35);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+[hidden] { display: none !important; }

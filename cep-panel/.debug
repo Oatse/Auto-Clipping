@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Enables Chrome DevTools for the panel. With Premiere running and the panel
+  open, visit http://localhost:8090 in a browser to inspect it.
+  Port 8090 avoids clashing with the MCP connector panel on 8088.
+-->
+<ExtensionList>
+  <Extension Id="com.clipautomation.panel.main">
+    <HostList>
+      <Host Name="PPRO" Port="8090"/>
+    </HostList>
+  </Extension>
+</ExtensionList>

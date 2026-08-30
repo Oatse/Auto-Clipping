@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Auto-Clip panel for Adobe Premiere Pro.
+
+  A separate extension from the MCP connector on purpose: that one ships as a
+  signed ZXP and is replaced on every npm update, so editing it in place would
+  break its signature and be overwritten. This panel lives alongside it.
+
+  Node is enabled so the panel can read the job manifest straight off disk;
+  --allow-file-access-from-files lets it load its own local resources.
+-->
+<ExtensionManifest Version="7.0"
+                   ExtensionBundleId="com.clipautomation.panel"
+                   ExtensionBundleVersion="1.0.0"
+                   ExtensionBundleName="Auto-Clip">
+  <ExtensionList>
+    <Extension Id="com.clipautomation.panel.main" Version="1.0.0"/>
+  </ExtensionList>
+  <ExecutionEnvironment>
+    <HostList>
+      <Host Name="PPRO" Version="14.0"/>
+    </HostList>
+    <LocaleList>
+      <Locale Code="All"/>
+    </LocaleList>
+    <RequiredRuntimeList>
+      <RequiredRuntime Name="CSXS" Version="9.0"/>
+    </RequiredRuntimeList>
+  </ExecutionEnvironment>
+  <DispatchInfoList>
+    <Extension Id="com.clipautomation.panel.main">
+      <DispatchInfo>
+        <Resources>
+          <MainPath>./index.html</MainPath>
+          <ScriptPath>./host.jsx</ScriptPath>
+          <CEFCommandLine>
+            <Parameter>--allow-file-access-from-files</Parameter>
+            <Parameter>--enable-nodejs</Parameter>
+          </CEFCommandLine>
+        </Resources>
+        <Lifecycle>
+          <AutoVisible>true</AutoVisible>
+        </Lifecycle>
+        <UI>
+          <Type>Panel</Type>
+          <Menu>Auto-Clip</Menu>
+          <Geometry>
+            <Size>
+              <Height>640</Height>
+              <Width>420</Width>
+            </Size>
+            <MinSize>
+              <Height>420</Height>
+              <Width>340</Width>
+            </MinSize>
+          </Geometry>
+          <Icons/>
+        </UI>
+      </DispatchInfo>
+    </Extension>
+  </DispatchInfoList>
+</ExtensionManifest>
