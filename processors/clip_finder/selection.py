@@ -1,14 +1,15 @@
 """
-processors/clip_finder/selection.py — Top-N selection with diversification.
+processors/clip_finder/selection.py — Picking which scored clips to keep.
 
-After scoring, we usually have more candidates than the user actually
-wants. This module picks the best subset using two constraints:
+Two selection philosophies live here, one per output mode:
 
-  1. Total score (descending) — profile-aware per ADR-0005
-  2. Diversity:
-       - Different hunter tags (avoid five "scream" clips in a row)
-       - Spread across the timeline (avoid all clips from minute 30-35)
-       - Optional total-duration budget for compilation use-case
+  ``select_top_clips``       STANDALONE mode. Picks a fixed-size best
+                             subset balancing score and diversity.
+
+  ``select_above_threshold`` COMPILATION mode. Keeps *every* moment that
+                             clears a quality bar, in chronological order,
+                             because the moments are assembled into one
+                             long video rather than published separately.
 """
 
 from __future__ import annotations
@@ -123,4 +124,76 @@ def select_top_clips(
     return selected
 
 
-__all__ = ["select_top_clips"]
+def select_above_threshold(
+    clips: Sequence[Clip],
+    *,
+    threshold: float = 6.0,
+    max_count: int = 60,
+    overlap_ratio: float = 0.4,
+    profile: ScoringProfile | str | None = None,
+) -> list[Clip]:
+    """Keep every moment scoring at or above ``threshold``, chronologically.
+
+    COMPILATION mode. There is no "best N" here — the moments become
+    building blocks in one long video, so the quality bar decides what
+    survives and the total runtime simply follows.
+
+    Overlap resolution differs from ``deduplicate_clips`` on purpose. That
+    helper keeps whichever clip starts *earliest*, which is the wrong rule
+    once nothing caps the list: two overlapping proposals for the same beat
+    should resolve to the *better* one. Here the higher-scoring clip wins
+    and the weaker overlapper is dropped.
+
+    Parameters
+    ----------
+    threshold : minimum profile-aware total score (0-10) to keep
+    max_count : safety valve so a pathological run cannot emit hundreds of
+        clips; applied by score (best kept) before the chronological sort
+    overlap_ratio : two clips overlapping by more than this fraction of the
+        shorter one are treated as the same moment
+    profile : Scoring Profile to rank by — when omitted, each clip's own
+        ``score_profile`` field is used (ADR-0005)
+    """
+    if not clips:
+        return []
+
+    passing = [c for c in clips if _profile_total(c, profile) >= threshold]
+    if not passing:
+        return []
+
+    # Strongest first, so overlap resolution and the safety cap both keep
+    # the better clip of any competing pair.
+    ranked = sorted(
+        passing, key=lambda c: _profile_sort_key(c, profile), reverse=True
+    )
+
+    kept: list[Clip] = []
+    for clip in ranked:
+        if len(kept) >= max_count:
+            break
+        if any(_same_moment(clip, k, overlap_ratio) for k in kept):
+            continue
+        kept.append(clip)
+
+    kept.sort(key=lambda c: c.start)
+    return kept
+
+
+def _same_moment(a: Clip, b: Clip, overlap_ratio: float) -> bool:
+    """True when two clips cover substantially the same beat.
+
+    Measured against the SHORTER clip so a long block that swallows a tight
+    moment is recognised as the same beat — using each clip's own duration
+    (as ``Clip.overlaps`` does) would miss that case in one direction.
+    """
+    ov_start = max(a.start, b.start)
+    ov_end = min(a.end, b.end)
+    if ov_end <= ov_start:
+        return False
+    shorter = min(a.duration, b.duration)
+    if shorter <= 0:
+        return False
+    return (ov_end - ov_start) / shorter > overlap_ratio
+
+
+__all__ = ["select_top_clips", "select_above_threshold"]

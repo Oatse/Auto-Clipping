@@ -37,6 +37,7 @@ from .heuristics import (
     parse_duration_hints,
 )
 from .hunters import HunterRunner
+from . import scoring
 from .scoring import ClipScorer
 from .scoring_profiles import ScoringProfile
 from .subtitle_source import SubtitleSource
@@ -214,11 +215,21 @@ class ClipFinder:
         scoring_profile: ScoringProfile | str = ScoringProfile.VTUBER,
         cut_strategies: Sequence[CutStrategy | str] = (),
         model: str = "gemini",
+        clip_format: str = scoring.STANDALONE,
+        threshold: float | None = None,
     ) -> list[Clip]:
         """Run clip detection. Returns scored, refined Clip objects.
 
         single-shot   : legacy path — one detection prompt + recheck pass.
         multi-stage   : Hunters → score → boundary refine → diversify select.
+
+        ``clip_format`` picks the output mode. ``STANDALONE`` (default)
+        keeps the historical behaviour: each clip is its own published
+        video, and ``max_count`` selects a diversified top-N.
+        ``COMPILATION`` treats each clip as a building block for one long
+        video — ``format_fit`` scores duration accordingly and selection
+        keeps *every* moment at or above ``threshold`` in chronological
+        order instead of a fixed count.
 
         ``scoring_profile`` re-weights ``ClipScore.total`` per content
         niche (VTuber, podcast, news, gaming, ASMR). Defaults to VTuber
@@ -263,6 +274,8 @@ class ClipFinder:
                 max_count=max_count,
                 profile=profile,
                 strategies=strategies,
+                clip_format=clip_format,
+                threshold=threshold,
                 log_fn=log_fn,
             )
 
@@ -277,10 +290,70 @@ class ClipFinder:
             profile=profile,
             strategies=strategies,
             max_count=max_count,
+            clip_format=clip_format,
+            threshold=threshold,
             log_fn=log_fn,
         )
 
     # ── Detection paths ──────────────────────────────────────────────────
+
+    def _select_final(
+        self,
+        clips: list[Clip],
+        *,
+        clip_format: str,
+        threshold: float | None,
+        max_count: int | None,
+        profile: ScoringProfile,
+        default_max: int | None,
+        log_fn: LogFn | None,
+    ) -> list[Clip]:
+        """Apply the selection policy for the active output mode.
+
+        COMPILATION keeps everything above the quality bar (chronological);
+        STANDALONE keeps a diversified top-N. Shared by both detection
+        paths so the two modes cannot drift apart.
+        """
+        if clip_format == scoring.COMPILATION:
+            import config as _config
+
+            bar = (
+                threshold
+                if threshold is not None
+                else float(getattr(
+                    _config, "CLIP_FINDER_COMPILATION_THRESHOLD", 6.0,
+                ))
+            )
+            safety = int(getattr(_config, "CLIP_FINDER_COMPILATION_MAX", 60))
+            chosen = selection.select_above_threshold(
+                clips, threshold=bar, max_count=safety, profile=profile,
+            )
+            if log_fn:
+                total = sum(c.duration for c in chosen)
+                log_fn(
+                    f"Compilation: {len(chosen)} of {len(clips)} moment(s) "
+                    f"scored >= {bar:.1f} — {total / 60:.1f} min of material"
+                )
+                if not chosen and clips:
+                    best = max(
+                        (c.score.total_for(profile) for c in clips), default=0.0
+                    )
+                    log_fn(
+                        f"WARNING: nothing cleared the {bar:.1f} bar "
+                        f"(best was {best:.2f}). Lower "
+                        "CLIP_FINDER_COMPILATION_THRESHOLD, or check that "
+                        "chat signals were extracted."
+                    )
+            return chosen
+
+        if max_count is None and default_max is None:
+            return clips
+        chosen = selection.select_top_clips(
+            clips, max_count=max_count or default_max or 12, profile=profile,
+        )
+        if log_fn:
+            log_fn(f"Selected {len(chosen)} of {len(clips)} clip(s)")
+        return chosen
 
     async def _find_single_shot(
         self,
@@ -295,6 +368,8 @@ class ClipFinder:
         profile: ScoringProfile = ScoringProfile.VTUBER,
         strategies: Sequence[CutStrategy] = (),
         max_count: int | None = None,
+        clip_format: str = scoring.STANDALONE,
+        threshold: float | None = None,
         log_fn: LogFn | None = None,
     ) -> list[Clip]:
         detector = ClipDetector(client)
@@ -337,6 +412,7 @@ class ClipFinder:
             min_clip=min_clip,
             max_clip=max_clip,
             profile=profile.value,
+            clip_format=clip_format,
             log_fn=log_fn,
         )
 
@@ -359,21 +435,20 @@ class ClipFinder:
         # ADR-0005: stamp score_profile BEFORE any selection / sort.
         clips = self._apply_scoring_profile(clips, profile)
 
-        # Optional diversified selection. Single-shot historically
-        # returned every detected clip; we preserve that default by
-        # only running selection when ``max_count`` is explicitly set.
-        # See ADR-0005 — bug #2 in the May-28 audit.
-        if max_count is not None:
-            clips = selection.select_top_clips(
-                clips,
-                max_count=max_count,
-                profile=profile,
-            )
-            if log_fn:
-                log_fn(
-                    f"Single-shot diversified to {len(clips)} clip(s) "
-                    f"(max_count={max_count})"
-                )
+        # Selection policy per output mode. Single-shot historically
+        # returned every detected clip in STANDALONE, so ``default_max``
+        # stays None here and top-N only runs when ``max_count`` is set
+        # explicitly (ADR-0005 — bug #2 in the May-28 audit). COMPILATION
+        # always applies the quality bar.
+        clips = self._select_final(
+            clips,
+            clip_format=clip_format,
+            threshold=threshold,
+            max_count=max_count,
+            profile=profile,
+            default_max=None,
+            log_fn=log_fn,
+        )
 
         return sorted(clips, key=lambda c: c.start)
 
@@ -390,6 +465,8 @@ class ClipFinder:
         max_count: int | None,
         profile: ScoringProfile = ScoringProfile.VTUBER,
         strategies: Sequence[CutStrategy] = (),
+        clip_format: str = scoring.STANDALONE,
+        threshold: float | None = None,
         log_fn: LogFn | None = None,
     ) -> list[Clip]:
         if log_fn:
@@ -418,6 +495,8 @@ class ClipFinder:
                 video_duration=video_duration,
                 profile=profile,
                 strategies=strategies,
+                clip_format=clip_format,
+                threshold=threshold,
                 log_fn=log_fn,
             )
 
@@ -455,6 +534,7 @@ class ClipFinder:
             min_clip=min_clip,
             max_clip=max_clip,
             profile=profile.value,
+            clip_format=clip_format,
             log_fn=log_fn,
         )
 
@@ -482,18 +562,17 @@ class ClipFinder:
         # so select_top_clips ranks under the Job's chosen profile.
         clips = self._apply_scoring_profile(clips, profile)
 
-        # Diversified selection
-        chosen = selection.select_top_clips(
+        # Selection policy per output mode. Multi-stage has always applied
+        # a default cap of 12 in STANDALONE, so that stays the default_max.
+        return self._select_final(
             clips,
-            max_count=max_count or 12,
+            clip_format=clip_format,
+            threshold=threshold,
+            max_count=max_count,
             profile=profile,
+            default_max=12,
+            log_fn=log_fn,
         )
-        if log_fn:
-            log_fn(
-                f"Multi-stage selected {len(chosen)} of {len(clips)} clip(s) "
-                f"after diversification"
-            )
-        return chosen
 
     # ── Public: download ─────────────────────────────────────────────────
 

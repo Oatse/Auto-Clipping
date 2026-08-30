@@ -33,6 +33,41 @@ from .transcript import Segment, condense_for_prompt
 LogFn = Callable[[str], None]
 
 
+# ── Channel format tiers ─────────────────────────────────────────────────────
+#
+# ``format_fit`` scores a candidate's DURATION against what the channel
+# actually publishes. It is mode-aware because "good length" means two
+# completely different things depending on what the clip becomes:
+#
+#   STANDALONE  — the clip IS the published video. The channel's primary
+#                 product is long-form (3-10 min), with Shorts (15-60 s)
+#                 as an engagement booster.
+#
+#   COMPILATION — the clip is a BUILDING BLOCK assembled with others into
+#                 one long video (the @TriticumClip pattern). Here a
+#                 90-second moment is ideal, not "too short". Scoring it
+#                 against the standalone 3-10 min tier wrongly suppressed
+#                 good moments below the selection threshold — see the
+#                 compilation plan, Step 3.
+#
+# Weight stays small (see scoring_profiles), so this nudges ranking rather
+# than deciding it. Defined above ClipScorer because the class uses
+# ``STANDALONE`` as a default argument, evaluated at class-definition time.
+
+STANDALONE = "standalone"
+COMPILATION = "compilation"
+
+# Standalone tiers.
+_LONG_MIN, _LONG_MAX = 180.0, 600.0     # primary: 3-10 min
+_SHORT_MIN, _SHORT_MAX = 15.0, 60.0     # booster: 15-60 s
+
+# Compilation tiers. A usable building block runs ~15-150 s: long enough to
+# carry setup -> payoff, short enough that the compilation keeps moving.
+_COMP_IDEAL_MIN, _COMP_IDEAL_MAX = 15.0, 150.0
+_COMP_FLOOR = 10.0        # below this the moment cannot be complete
+_COMP_LONG_TAIL = 240.0   # beyond this it is probably two moments or filler
+
+
 class ClipScorer:
     """Combines deterministic features + LLM rubric into ClipScore."""
 
@@ -49,20 +84,26 @@ class ClipScorer:
         min_clip: float = 15.0,
         max_clip: float = 120.0,
         profile: str = "vtuber",
+        clip_format: str = STANDALONE,
         log_fn: LogFn | None = None,
     ) -> list[Clip]:
         """Return Clip instances with a populated `score` field.
 
         ``profile`` is the Job's Scoring Profile. It already re-weights
         the total downstream; passing it here also lets the rubric prompt
-        adopt the matching editorial persona, so an ASMR job is not rated
-        by a VTuber-clip editor.
+        adopt the matching editorial persona.
+
+        ``clip_format`` selects how ``format_fit`` reads a candidate's
+        duration — ``COMPILATION`` treats it as a building block, while
+        ``STANDALONE`` treats it as the published video. See ``_format_fit``.
         """
         if not candidates:
             return []
 
         det_scores = [
-            self._deterministic_features(c, signals, min_clip, max_clip)
+            self._deterministic_features(
+                c, signals, min_clip, max_clip, clip_format,
+            )
             for c in candidates
         ]
         llm_scores = await self._llm_rubric(
@@ -124,6 +165,7 @@ class ClipScorer:
         signals: Sequence[SignalEvent],
         min_clip: float,
         max_clip: float,
+        clip_format: str = STANDALONE,
     ) -> dict[str, float]:
         peaks = [
             s for s in signals
@@ -214,7 +256,7 @@ class ClipScorer:
             "duration_fit": round(duration_fit, 2),
             "coincidence_bonus": round(coincidence_bonus, 2),
             "clip_intent_score": round(clip_intent_score, 2),
-            "format_fit": round(_format_fit(dur), 2),
+            "format_fit": round(_format_fit(dur, clip_format), 2),
         }
 
     # ── Stage 2: LLM rubric ──────────────────────────────────────────────
@@ -364,18 +406,38 @@ def _coerce(value, default: float) -> float:
     return max(0.0, min(10.0, v))
 
 
-# ── VTuber-refocus Step 4: channel format tiers ──────────────────────────────
-# This channel publishes long-form (3-10 min) as its primary product and uses
-# Shorts (15-60 s) as an engagement booster. ``_format_fit`` rewards a clip's
-# duration for landing in either real tier and mildly penalises the awkward
-# middle and the over-long tail. Weight is small (see scoring_profiles), so
-# this only nudges ranking toward the channel's bread-and-butter length.
-_LONG_MIN, _LONG_MAX = 180.0, 600.0     # primary: 3-10 min
-_SHORT_MIN, _SHORT_MAX = 15.0, 60.0     # booster: 15-60 s
+def _format_fit(duration: float, clip_format: str = STANDALONE) -> float:
+    """Return 0-10 for how well ``duration`` fits the target format."""
+    if clip_format == COMPILATION:
+        return _format_fit_compilation(duration)
+    return _format_fit_standalone(duration)
 
 
-def _format_fit(duration: float) -> float:
-    """Return 0-10 for how well ``duration`` fits the channel's tiers."""
+def _format_fit_compilation(duration: float) -> float:
+    """Building-block scoring: reward a usable moment length.
+
+    Only the extremes are punished — a fragment too short to contain a
+    beat, and a block so long it is really two moments (or padding).
+    """
+    if _COMP_IDEAL_MIN <= duration <= _COMP_IDEAL_MAX:
+        return 10.0
+    if duration < _COMP_IDEAL_MIN:
+        if duration < _COMP_FLOOR:
+            # 0 s -> 0, 10 s -> 4. A sub-10 s fragment is rarely a moment.
+            return max(0.0, duration / _COMP_FLOOR * 4.0)
+        # 10 s -> 4, 15 s -> 10: ramp quickly into the usable band.
+        span = _COMP_IDEAL_MIN - _COMP_FLOOR
+        return 4.0 + (duration - _COMP_FLOOR) / span * 6.0
+    if duration <= _COMP_LONG_TAIL:
+        # 150 s -> 10, 240 s -> 5: still usable, just long.
+        span = _COMP_LONG_TAIL - _COMP_IDEAL_MAX
+        return 10.0 - (duration - _COMP_IDEAL_MAX) / span * 5.0
+    # Past 240 s decay to 0 by ~10 min.
+    return max(0.0, 5.0 - (duration - _COMP_LONG_TAIL) / 72.0)
+
+
+def _format_fit_standalone(duration: float) -> float:
+    """Published-video scoring: long-form primary, Shorts as booster."""
     if _LONG_MIN <= duration <= _LONG_MAX:
         return 10.0
     if _SHORT_MIN <= duration <= _SHORT_MAX:
@@ -389,4 +451,4 @@ def _format_fit(duration: float) -> float:
     return max(0.0, duration / _SHORT_MIN * 5.0)
 
 
-__all__ = ["ClipScorer"]
+__all__ = ["ClipScorer", "STANDALONE", "COMPILATION"]

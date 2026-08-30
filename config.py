@@ -215,6 +215,20 @@ CLIP_FINDER_KIRO_AUTO_MODEL: str = os.getenv(
     "kr/auto",
 )
 
+# ─── Compilation mode ────────────────────────────────────────────────────────
+# COMPILATION extracts every moment clearing a quality bar (rather than a
+# fixed top-N) and hands them to Premiere as one timeline. 6.0 sits well
+# above the "forgettable filler" band (~3.8) while keeping everything that
+# scored as genuinely compilation-worthy on real VODs. Lower to ~5.5 when
+# chat signals are unavailable, since totals compress without them.
+CLIP_FINDER_COMPILATION_THRESHOLD: float = float(
+    os.getenv("CLIP_FINDER_COMPILATION_THRESHOLD", "6.0")
+)
+# Safety valve — a pathological run must not emit hundreds of clips.
+CLIP_FINDER_COMPILATION_MAX: int = int(
+    os.getenv("CLIP_FINDER_COMPILATION_MAX", "60")
+)
+
 # Claude via 9router direct (NON-Kiro; ``cc/`` prefix). Distinct from the
 # Kiro Pro ``kr/`` route above — this is the plain 9router Claude endpoint.
 CLIP_FINDER_CLAUDE_MODEL: str = os.getenv(
