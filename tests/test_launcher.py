@@ -7,6 +7,7 @@ process — ``_spawn`` and the probes are patched.
 
 from __future__ import annotations
 
+import json
 import time
 from pathlib import Path
 
@@ -15,7 +16,13 @@ import pytest
 from launcher import bridge as bridge_mod
 from launcher import components as comp
 from launcher import orchestrator as orch
-from launcher.bridge import BridgeConfig, bridge_alive, ensure_bridge
+from launcher.bridge import (
+    HEARTBEAT_NAME,
+    BridgeConfig,
+    bridge_alive,
+    bridge_state,
+    ensure_bridge,
+)
 from launcher.components import (
     ComponentStatus,
     State,
@@ -137,22 +144,48 @@ class TestEnsureProcess:
 # ─── Bridge probe ────────────────────────────────────────────────────────────
 
 class TestBridgeAlive:
-    def test_fresh_heartbeat_means_alive(self, tmp_path):
-        (tmp_path / "heartbeat.json").write_text("{}")
+    """Contract verified against premiere-pro-mcp 1.14.4 MCPBridgeCEP/main.js:
+    bridge-heartbeat.json, rewritten every 1000 ms, body
+    {"protocolVersion": 1, "state": "running" | "waiting"}."""
+
+    def _beat(self, tmp_path: Path, state: str = "running") -> Path:
+        hb = tmp_path / HEARTBEAT_NAME
+        hb.write_text(json.dumps({"protocolVersion": 1, "state": state}))
+        return hb
+
+    def test_running_heartbeat_means_alive(self, tmp_path):
+        self._beat(tmp_path, "running")
         assert bridge_alive(BridgeConfig(directory=tmp_path)) is True
 
+    def test_waiting_panel_is_not_ready(self, tmp_path):
+        # Panel loaded but bridge not started — a different failure from
+        # "no panel at all", and not something we can send commands to.
+        self._beat(tmp_path, "waiting")
+        assert bridge_alive(BridgeConfig(directory=tmp_path)) is False
+        assert bridge_state(BridgeConfig(directory=tmp_path)) == "waiting"
+
+    def test_waiting_counts_when_not_requiring_running(self, tmp_path):
+        self._beat(tmp_path, "waiting")
+        cfg = BridgeConfig(directory=tmp_path, require_running=False)
+        assert bridge_alive(cfg) is True
+
     def test_stale_heartbeat_is_not_alive(self, tmp_path):
-        # The file outlives Premiere; only freshness proves the panel is there.
-        hb = tmp_path / "heartbeat.json"
-        hb.write_text("{}")
+        # The connector deliberately leaves its last heartbeat behind on
+        # shutdown, so existence alone would report a closed Premiere as ready.
+        hb = self._beat(tmp_path, "running")
         old = time.time() - 600
         import os
 
         os.utime(hb, (old, old))
         assert bridge_alive(BridgeConfig(directory=tmp_path)) is False
+        assert bridge_state(BridgeConfig(directory=tmp_path)) == "offline"
 
     def test_missing_directory_is_not_alive(self, tmp_path):
         assert bridge_alive(BridgeConfig(directory=tmp_path / "nope")) is False
+
+    def test_malformed_heartbeat_is_not_alive(self, tmp_path):
+        (tmp_path / HEARTBEAT_NAME).write_text("{ not json")
+        assert bridge_alive(BridgeConfig(directory=tmp_path)) is False
 
     def test_http_probe_can_prove_liveness(self, tmp_path, monkeypatch):
         monkeypatch.setattr(bridge_mod, "http_alive", lambda url, timeout=1.5: True)
@@ -164,7 +197,13 @@ class TestBridgeAlive:
             timeout=0.2, config=BridgeConfig(directory=tmp_path / "nope"),
         )
         assert status.state is State.UNAVAILABLE
-        assert "workspace" in status.detail       # tells the user how to fix it
+        assert "Extensions" in status.detail       # tells the user how to fix it
+
+    def test_waiting_panel_gets_specific_guidance(self, tmp_path):
+        self._beat(tmp_path, "waiting")
+        status = ensure_bridge(timeout=0.2, config=BridgeConfig(directory=tmp_path))
+        assert status.state is State.UNAVAILABLE
+        assert "not started" in status.detail
 
 
 # ─── Orchestration ───────────────────────────────────────────────────────────
