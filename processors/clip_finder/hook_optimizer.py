@@ -314,10 +314,18 @@ def _clone_with_start(clip: Clip, new_start: float) -> Clip:
     """Shallow copy of ``clip`` with a different ``start``.
 
     Mirrors the ``boundary._copy`` strategy so we don't accidentally
-    share mutable lists with the caller.
+    share mutable lists with the caller. The hook shift moves ``start``
+    forward, so the start-relative punchline offset is re-anchored (and
+    ``score_profile`` preserved) rather than silently dropped.
     """
+    new_start_r = round(new_start, 3)
+    punchline = clip.punchline_offset
+    if punchline is not None:
+        absolute = clip.start + punchline
+        duration = max(0.0, clip.end - new_start_r)
+        punchline = round(max(0.0, min(duration, absolute - new_start_r)), 3)
     return Clip(
-        start=round(new_start, 3),
+        start=new_start_r,
         end=clip.end,
         title=clip.title,
         reason=clip.reason,
@@ -329,6 +337,8 @@ def _clone_with_start(clip: Clip, new_start: float) -> Clip:
         file_idx=clip.file_idx,
         filename=clip.filename,
         signals=list(clip.signals),
+        score_profile=clip.score_profile,
+        punchline_offset=punchline,
     )
 
 

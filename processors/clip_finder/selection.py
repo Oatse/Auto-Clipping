@@ -34,6 +34,23 @@ def _profile_total(clip: Clip, profile: ScoringProfile | str | None) -> float:
     return clip.score.total_for(profile)
 
 
+def _profile_sort_key(clip: Clip, profile: ScoringProfile | str | None):
+    """Ranking key: clamped total first, raw pre-clamp total as tie-break.
+
+    Several outstanding clips can all saturate the display total at 10.0.
+    Without a tie-breaker the diversity selector — not quality — decides
+    which of them wins the top slots. The raw pre-clamp sum keeps them in
+    genuine quality order while the user still sees the clamped 10.0
+    (VTuber-refocus Step 0).
+    """
+    if profile is None:
+        profile = getattr(clip, "score_profile", None) or ScoringProfile.VTUBER
+    return (
+        clip.score.total_for(profile),
+        clip.score.total_for(profile, clamp=False),
+    )
+
+
 def select_top_clips(
     clips: Sequence[Clip],
     *,
@@ -59,7 +76,9 @@ def select_top_clips(
     if not clips:
         return []
 
-    sorted_clips = sorted(clips, key=lambda c: -_profile_total(c, profile))
+    sorted_clips = sorted(
+        clips, key=lambda c: _profile_sort_key(c, profile), reverse=True
+    )
     if not sorted_clips:
         return []
 

@@ -70,6 +70,13 @@ def refine_boundaries(
                 clone.dead_air_timestamps = _silences_inside(
                     new_start, new_end, silences
                 )
+                # The punchline offset is stored relative to ``start``; the
+                # snap just moved ``start``, so re-anchor it (or it points at
+                # the wrong beat). See May-28 audit "#7" + VTuber-refocus
+                # Step 0.
+                clone.punchline_offset = _shift_punchline(
+                    clip.punchline_offset, clip.start, new_start, new_end
+                )
                 out.append(clone)
 
     if hook_optimizer_enabled and transcript:
@@ -140,7 +147,33 @@ def _copy(clip: Clip) -> Clip:
         file_idx=clip.file_idx,
         filename=clip.filename,
         signals=list(clip.signals),
+        # Preserve fields the scorer already stamped — dropping these here
+        # silently reverted punchline + profile after boundary refinement.
+        score_profile=clip.score_profile,
+        punchline_offset=clip.punchline_offset,
     )
+
+
+def _shift_punchline(
+    offset: float | None,
+    old_start: float,
+    new_start: float,
+    new_end: float,
+) -> float | None:
+    """Re-anchor a start-relative punchline offset after ``start`` moved.
+
+    The offset is stored as "seconds from clip start". When boundary
+    refinement moves the start, the absolute punchline time is unchanged
+    but the offset must be recomputed against the new start. Clamped into
+    ``[0, duration]`` so a shift that swallowed the punchline never points
+    off the end. ``None`` (no opinion) is preserved as-is.
+    """
+    if offset is None:
+        return None
+    absolute = old_start + offset
+    new_offset = absolute - new_start
+    duration = max(0.0, new_end - new_start)
+    return round(max(0.0, min(duration, new_offset)), 3)
 
 
 __all__ = ["refine_boundaries"]

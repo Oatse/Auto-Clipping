@@ -226,7 +226,16 @@ class ClipScorer:
     ) -> list[dict[str, float]]:
         if not self._client:
             # No client available — neutral 5/10 across the board so total
-            # score still functions on deterministic features.
+            # score still functions on deterministic features. This is a
+            # DEGRADED path: ranking collapses to deterministic features
+            # only, so make it loud rather than silent (VTuber-refocus
+            # Step 0).
+            if log_fn:
+                log_fn(
+                    "WARNING: no LLM client for scoring — every clip gets a "
+                    "neutral 5.0 rubric. Ranking is driven by deterministic "
+                    "signals ONLY and is unreliable."
+                )
             return [
                 {
                     "retention_hook": 5.0,
@@ -270,8 +279,14 @@ class ClipScorer:
             return [self._neutral_score() for _ in candidates]
 
         ratings = self._parse_rubric(text, expected=len(candidates))
+        valid = sum(1 for r in ratings if r)
         if log_fn:
-            log_fn(f"Scorer returned {sum(1 for r in ratings if r)} valid rating(s)")
+            log_fn(f"Scorer returned {valid} valid rating(s)")
+            if valid == 0:
+                log_fn(
+                    "WARNING: scorer parsed ZERO valid ratings — every clip "
+                    "falls back to neutral 5.0. Ranking is unreliable this run."
+                )
         return [r or self._neutral_score() for r in ratings]
 
     @staticmethod

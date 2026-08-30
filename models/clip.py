@@ -190,13 +190,19 @@ class ClipScore:
         """
         return self.total_for("vtuber")
 
-    def total_for(self, profile: Any) -> float:
+    def total_for(self, profile: Any, *, clamp: bool = True) -> float:
         """Weighted overall score for a given Scoring Profile (0-10).
 
         See ``processors.clip_finder.scoring_profiles`` for the weight
         tables. The math is identical to the legacy property: LLM rubric
         weights summed + deterministic contributors normalised, capped
         at 10.0. Only the *weights* change per profile.
+
+        ``clamp`` (default True) caps the result at 10.0 for display. Pass
+        ``clamp=False`` to get the raw pre-clamp sum — used purely as a
+        tie-breaker so several genuinely-excellent clips that all saturate
+        at 10.0 stay orderable against each other instead of tying (VTuber
+        -refocus Step 0). The clamped value stays the one shown to users.
 
         We import lazily to avoid a circular dependency: ``models`` is
         imported by ``processors.clip_finder`` modules, so the reverse
@@ -238,7 +244,8 @@ class ClipScore:
             + self.clip_intent_score * getattr(w, "clip_intent_w", 0.0)
         )
 
-        return round(min(10.0, llm_total + det_total), 2)
+        raw = llm_total + det_total
+        return round(raw if not clamp else min(10.0, raw), 2)
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
