@@ -215,6 +215,13 @@ CLIP_FINDER_KIRO_AUTO_MODEL: str = os.getenv(
     "kr/auto",
 )
 
+# Claude via 9router direct (NON-Kiro; ``cc/`` prefix). Distinct from the
+# Kiro Pro ``kr/`` route above — this is the plain 9router Claude endpoint.
+CLIP_FINDER_CLAUDE_MODEL: str = os.getenv(
+    "CLIP_FINDER_CLAUDE_MODEL",
+    "cc/claude-opus-4-6",
+)
+
 # Codex (9router) model ids. Two flavours: gpt-5.5 (latest) and gpt-5.4.
 # Override in .env if the 9router endpoint prefix changes.
 CLIP_FINDER_CODEX_GPT55_MODEL: str = os.getenv(

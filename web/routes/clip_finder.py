@@ -307,13 +307,13 @@ async def create_clip_finder_job(req: ClipFinderRequest) -> dict:
     # silently coerced to Gemini deep inside the orchestrator.
     raw_model = (req.model or getattr(config, "CLIP_FINDER_MODEL", "gemini") or "gemini")
     detection_model = raw_model.strip().lower()
-    valid_models = {"gemini", "kiro-opus-4.7", "kiro-sonnet-4.6", "kiro-auto", "codex-gpt-5.5", "codex-gpt-5.4"}
+    valid_models = {"gemini", "claude-opus-4.6", "kiro-opus-4.7", "kiro-sonnet-4.6", "kiro-auto", "codex-gpt-5.5", "codex-gpt-5.4"}
     if detection_model not in valid_models:
         raise HTTPException(
             status_code=400,
             detail=(
                 f"Invalid model: {req.model!r}. Must be one of: "
-                "gemini, kiro-opus-4.7, kiro-sonnet-4.6, kiro-auto, codex-gpt-5.5, codex-gpt-5.4."
+                "gemini, claude-opus-4.6, kiro-opus-4.7, kiro-sonnet-4.6, kiro-auto, codex-gpt-5.5, codex-gpt-5.4."
             ),
         )
 

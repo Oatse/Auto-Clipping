@@ -141,6 +141,7 @@ export function setupClipFinder() {
   if (cfModelEl) {
     const hintMap = {
       'gemini': 'Gemini 3.5 Flash via Google. Fastest and cheapest — the default.',
+      'claude-opus-4.6': 'Claude Opus 4.6 via 9router (direct, non-Kiro). Strongest judgment on borderline moments; slower and pricier than Gemini.',
       'kiro-opus-4.7': 'Claude Opus 4.7 thinking-agentic via 9router (Kiro Pro). Slower per call but reasons harder about borderline moments.',
       'kiro-sonnet-4.6': 'Claude Sonnet 4.6 thinking-agentic via 9router (Kiro Pro). Balanced — closer to Gemini speed with stronger reasoning than Flash.',
       'kiro-auto': "Kiro's auto-routed model via 9router. Lets Kiro pick the best fit for the prompt size.",

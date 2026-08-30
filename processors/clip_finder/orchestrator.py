@@ -544,6 +544,17 @@ class ClipFinder:
                 log_fn(f"LLM backend: Kiro Auto ({kiro_model})")
             return NineRouterClient(model=kiro_model)
 
+        if normalised in (
+            "claude-opus-4.6", "claude-opus-4-6", "claude-opus", "claude",
+            "cc/claude-opus-4-6",
+        ):
+            claude_model = getattr(
+                _config, "CLIP_FINDER_CLAUDE_MODEL", "cc/claude-opus-4-6",
+            )
+            if log_fn:
+                log_fn(f"LLM backend: Claude via 9router ({claude_model})")
+            return NineRouterClient(model=claude_model)
+
         if normalised in ("codex-gpt-5.5", "gpt-5.5", "cx/gpt-5.5", "codex-55"):
             cx_model = getattr(
                 _config, "CLIP_FINDER_CODEX_GPT55_MODEL", "cx/gpt-5.5",
