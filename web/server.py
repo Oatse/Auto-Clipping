@@ -56,6 +56,7 @@ from web.routes.multi_pov import (
     router as multi_pov_router,
     register_restore_hook as _register_multi_pov_restore,
 )
+from web.routes.compilation import router as compilation_router
 
 
 # ─── App Setup ────────────────────────────────────────────────────────────────
@@ -95,6 +96,10 @@ _register_all_in_restore(app)
 
 app.include_router(multi_pov_router)
 _register_multi_pov_restore(app)
+
+# Compilation / Premiere handoff. No restore hook: a run produces files on
+# disk (master + timeline) rather than resumable in-memory state.
+app.include_router(compilation_router)
 
 
 # ─── Templates + page router ──────────────────────────────────────────────────

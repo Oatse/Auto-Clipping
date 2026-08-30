@@ -46,8 +46,12 @@ UPLOADS_DIR: Path = OUTPUT_ROOT / "uploads"
 CLIP_FINDER_DIR: Path = OUTPUT_ROOT / "clip_finder"
 ALL_IN_DIR: Path = OUTPUT_ROOT / "all_in"
 MULTI_POV_DIR: Path = OUTPUT_ROOT / "multi_pov"
+COMPILATION_DIR: Path = OUTPUT_ROOT / "compilation"
 
-for _d in (OUTPUT_ROOT, UPLOADS_DIR, CLIP_FINDER_DIR, ALL_IN_DIR, MULTI_POV_DIR):
+for _d in (
+    OUTPUT_ROOT, UPLOADS_DIR, CLIP_FINDER_DIR, ALL_IN_DIR,
+    MULTI_POV_DIR, COMPILATION_DIR,
+):
     _d.mkdir(parents=True, exist_ok=True)
 
 
@@ -70,6 +74,16 @@ job_tasks: dict[str, asyncio.Task] = {}
 
 cf_jobs: dict[str, Any] = {}
 cf_tasks: dict[str, asyncio.Task] = {}
+
+
+# ─── Compilation / Premiere handoff ──────────────────────────────────────────
+#
+# Job model: ``web.routes.compilation.CompilationJob``. Extracts every
+# moment above a quality bar from one VOD and emits a Premiere timeline
+# (master + FCPXML) instead of publishing individual clips.
+
+comp_jobs: dict[str, Any] = {}
+comp_tasks: dict[str, asyncio.Task] = {}
 
 
 # ─── Short Maker Workspace (Workspace · 03) ──────────────────────────────────
@@ -137,10 +151,13 @@ __all__ = [
     "CLIP_FINDER_DIR",
     "ALL_IN_DIR",
     "MULTI_POV_DIR",
+    "COMPILATION_DIR",
     "jobs",
     "job_tasks",
     "cf_jobs",
     "cf_tasks",
+    "comp_jobs",
+    "comp_tasks",
     "short_jobs",
     "short_tasks",
     "all_in_jobs",
