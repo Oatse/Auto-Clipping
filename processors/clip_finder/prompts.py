@@ -256,42 +256,26 @@ def build_hunter_prompt(
 # ─── Scoring prompt (Tier-3 stage 2) ─────────────────────────────────────────
 
 
-# Persona line per Scoring Profile. The rater's frame of reference is
-# what makes the difference between "technically a good short" and "a
-# clip this audience actually watches", so it is set explicitly rather
-# than left to the model's generic priors.
-_RATER_PERSONA: dict[str, str] = {
-    "vtuber": (
-        "You are a senior editor for a VTuber clip channel serving an "
-        "English-speaking audience (mostly men 18-24, anime-literate, mobile "
-        "viewers who have seen thousands of stream highlights and are bored by "
-        "generic ones). They come for personality, not events: the line they "
-        "will quote in the comments, the moment the talent's real self slips "
-        "past the persona, the banter and chemistry between talents in a "
-        "collab — interaction beats are the single most-clipped category. A "
-        "moment can be loud, dramatic, and completely worthless to them. The "
-        "clip must land even for a viewer who has never watched this streamer "
-        "before, which means it also has to survive being read as an English "
-        "subtitle."
-    ),
-    "gaming": (
-        "You are an editor for a gaming highlights channel. Your audience "
-        "wants plays and reactions with a clear setup and payoff, and can "
-        "tell a genuinely impressive moment from a merely noisy one."
-    ),
-    "podcast": (
-        "You are an editor cutting a long-form podcast into shareable "
-        "segments. Your audience wants one self-contained idea per clip."
-    ),
-    "news": (
-        "You are a news producer cutting broadcast segments. Your audience "
-        "wants the substance up front and full context inside the clip."
-    ),
-    "asmr": (
-        "You are an editor for an ASMR channel. Your audience wants "
-        "sustained, consistent, comfortable sections — not peaks."
-    ),
-}
+# The rater's frame of reference is what makes the difference between
+# "technically a good short" and "a clip this audience actually watches".
+# VTuber-refocus Step 4: single VTuber persona (the niche personas were
+# retired with the multi-profile system). Kept as a dict keyed by profile
+# so ``build_scoring_prompt`` needs no signature change; any key resolves
+# to the VTuber persona.
+_VTUBER_PERSONA = (
+    "You are a senior editor for a VTuber clip channel serving an "
+    "English-speaking audience (mostly men 18-24, anime-literate, mobile "
+    "viewers who have seen thousands of stream highlights and are bored by "
+    "generic ones). They come for personality, not events: the line they "
+    "will quote in the comments, the moment the talent's real self slips "
+    "past the persona, the banter and chemistry between talents in a "
+    "collab — interaction beats are the single most-clipped category. A "
+    "moment can be loud, dramatic, and completely worthless to them. The "
+    "clip must land even for a viewer who has never watched this streamer "
+    "before, which means it also has to survive being read as an English "
+    "subtitle."
+)
+_RATER_PERSONA: dict[str, str] = {"vtuber": _VTUBER_PERSONA}
 
 _CALIBRATION = """SCORING CALIBRATION — read before scoring anything.
 Use the WHOLE 0-10 range. Anchors:
@@ -367,7 +351,7 @@ def build_scoring_prompt(
 
     return (
         f"{persona}\n\n"
-        "For EACH candidate clip below, score eight qualitative dimensions "
+        "For EACH candidate clip below, score ten qualitative dimensions "
         "on a 0-10 scale and return a JSON array.\n\n"
         f"{_CALIBRATION}\n\n"
         "DIMENSIONS:\n"
@@ -393,6 +377,17 @@ def build_scoring_prompt(
         "different is this moment? If three candidates are all 'screams at a "
         "jumpscare', the best one keeps its score and the others drop to 2-3. "
         "Repetition is the main reason a compilation feels boring.\n"
+        "- interaction_dynamic (0-10): For a COLLAB or any multi-person beat, "
+        "how good is the chemistry — banter, roasts, teasing, a reaction that "
+        "only works because of who they are bouncing off? This is the single "
+        "most-clipped VTuber category. A solo moment with no one to play off "
+        "scores low here (that is fine — its value lives in other dimensions); "
+        "a flat two-person exchange with no spark also scores low.\n"
+        "- en_translatability (0-10): Will this still land for an English "
+        "viewer reading a subtitle? A visual/tonal reaction or a universal gag "
+        "translates cleanly (high). A moment whose entire payoff is a "
+        "Japanese pun, honorific joke, or wordplay that dies in translation "
+        "scores low no matter how funny it was live.\n"
         f"{signals_note}"
         f"\nUSER INTENT: {instructions or '(none)'}\n\n"
         f"TRANSCRIPT (for context):\n{transcript_text}\n\n"
@@ -407,6 +402,8 @@ def build_scoring_prompt(
         '- "quotability": number 0-10\n'
         '- "character_moment": number 0-10\n'
         '- "novelty": number 0-10\n'
+        '- "interaction_dynamic": number 0-10\n'
+        '- "en_translatability": number 0-10\n'
         '- "punchline_seconds_from_start": number — seconds from the '
         "candidate start to the payoff beat (the word/phrase the viewer "
         "is here for). Use null when the candidate has no clear single "

@@ -80,11 +80,14 @@ class ClipScorer:
                 quotability=llm.get("quotability", 0.0),
                 character_moment=llm.get("character_moment", 0.0),
                 novelty=llm.get("novelty", 0.0),
+                interaction_dynamic=llm.get("interaction_dynamic", 0.0),
+                en_translatability=llm.get("en_translatability", 0.0),
                 audio_peak_db=det["audio_peak_db"],
                 chat_spike_ratio=det["chat_spike_ratio"],
                 duration_fit=det["duration_fit"],
                 coincidence_bonus=det.get("coincidence_bonus", 0.0),
                 clip_intent_score=det.get("clip_intent_score", 0.0),
+                format_fit=det.get("format_fit", 0.0),
             )
             overlapping_signals = self._signals_in_range(cand, signals)
             clip = Clip.from_candidate(cand, score=score)
@@ -211,6 +214,7 @@ class ClipScorer:
             "duration_fit": round(duration_fit, 2),
             "coincidence_bonus": round(coincidence_bonus, 2),
             "clip_intent_score": round(clip_intent_score, 2),
+            "format_fit": round(_format_fit(dur), 2),
         }
 
     # ── Stage 2: LLM rubric ──────────────────────────────────────────────
@@ -246,6 +250,8 @@ class ClipScorer:
                     "quotability": 5.0,
                     "character_moment": 5.0,
                     "novelty": 5.0,
+                    "interaction_dynamic": 5.0,
+                    "en_translatability": 5.0,
                 }
                 for _ in candidates
             ]
@@ -300,6 +306,8 @@ class ClipScorer:
             "quotability": 5.0,
             "character_moment": 5.0,
             "novelty": 5.0,
+            "interaction_dynamic": 5.0,
+            "en_translatability": 5.0,
         }
 
     @staticmethod
@@ -341,6 +349,8 @@ class ClipScorer:
                 "quotability": _coerce(obj.get("quotability"), 5.0),
                 "character_moment": _coerce(obj.get("character_moment"), 5.0),
                 "novelty": _coerce(obj.get("novelty"), 5.0),
+                "interaction_dynamic": _coerce(obj.get("interaction_dynamic"), 5.0),
+                "en_translatability": _coerce(obj.get("en_translatability"), 5.0),
                 "punchline_seconds_from_start": punchline_val,
             }
         return out
@@ -352,6 +362,31 @@ def _coerce(value, default: float) -> float:
     except (TypeError, ValueError):
         return default
     return max(0.0, min(10.0, v))
+
+
+# ── VTuber-refocus Step 4: channel format tiers ──────────────────────────────
+# This channel publishes long-form (3-10 min) as its primary product and uses
+# Shorts (15-60 s) as an engagement booster. ``_format_fit`` rewards a clip's
+# duration for landing in either real tier and mildly penalises the awkward
+# middle and the over-long tail. Weight is small (see scoring_profiles), so
+# this only nudges ranking toward the channel's bread-and-butter length.
+_LONG_MIN, _LONG_MAX = 180.0, 600.0     # primary: 3-10 min
+_SHORT_MIN, _SHORT_MAX = 15.0, 60.0     # booster: 15-60 s
+
+
+def _format_fit(duration: float) -> float:
+    """Return 0-10 for how well ``duration`` fits the channel's tiers."""
+    if _LONG_MIN <= duration <= _LONG_MAX:
+        return 10.0
+    if _SHORT_MIN <= duration <= _SHORT_MAX:
+        return 7.0                       # good booster, secondary to long-form
+    if _SHORT_MAX < duration < _LONG_MIN:
+        return 5.0                       # awkward middle — neither tier
+    if duration > _LONG_MAX:
+        # decays past 10 min, floor at 0 by ~30 min.
+        return max(0.0, 10.0 - (duration - _LONG_MAX) / 120.0)
+    # shorter than a Short.
+    return max(0.0, duration / _SHORT_MIN * 5.0)
 
 
 __all__ = ["ClipScorer"]

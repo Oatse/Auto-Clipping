@@ -187,6 +187,17 @@ class ClipScore:
     # inside this range (SignalKind.CHAT_CLIP_INTENT).
     clip_intent_score: float = 0.0
 
+    # ── VTuber-refocus Step 4 dimensions ─────────────────────────────────
+    # LLM: quality of talent×talent chemistry/banter (collab is the single
+    # largest clip category) and whether the moment still lands once
+    # rendered as an English subtitle (49% of the audience reads EN).
+    interaction_dynamic: float = 0.0  # (LLM)
+    en_translatability: float = 0.0   # (LLM)
+    # Deterministic: 0-10, how well the clip duration fits the channel's
+    # primary publishing tier (long-form), with partial credit for the
+    # Shorts booster tier. Populated by the scorer.
+    format_fit: float = 0.0
+
     @property
     def total(self) -> float:
         """Weighted overall score, 0-10. VTuber profile (legacy default).
@@ -232,6 +243,10 @@ class ClipScore:
             + self.quotability * getattr(w, "quotability", 0.0)
             + self.character_moment * getattr(w, "character_moment", 0.0)
             + self.novelty * getattr(w, "novelty", 0.0)
+            # VTuber-refocus Step 4 LLM dimensions. ``getattr`` defaults keep
+            # older ProfileWeights / pickled scores evaluating cleanly.
+            + self.interaction_dynamic * getattr(w, "interaction_dynamic", 0.0)
+            + self.en_translatability * getattr(w, "en_translatability", 0.0)
         )
 
         # Deterministic contributors. ``audio_peak_db`` already encodes
@@ -250,6 +265,7 @@ class ClipScore:
             + self.duration_fit * w.duration_fit_w
             + self.coincidence_bonus * coincidence_w
             + self.clip_intent_score * getattr(w, "clip_intent_w", 0.0)
+            + self.format_fit * getattr(w, "format_fit_w", 0.0)
         )
 
         raw = llm_total + det_total
@@ -278,6 +294,9 @@ class ClipScore:
             character_moment=float(data.get("character_moment", 0.0)),
             novelty=float(data.get("novelty", 0.0)),
             clip_intent_score=float(data.get("clip_intent_score", 0.0)),
+            interaction_dynamic=float(data.get("interaction_dynamic", 0.0)),
+            en_translatability=float(data.get("en_translatability", 0.0)),
+            format_fit=float(data.get("format_fit", 0.0)),
         )
 
 

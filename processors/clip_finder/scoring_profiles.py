@@ -27,22 +27,23 @@ from typing import Any
 
 
 class ScoringProfile(str, Enum):
-    """Named scoring profile selected per Job.
+    """Scoring profile selected per Job.
 
-    Stored on ``Job.scoring_profile`` (or ``AllInJob.scoring_profile``)
-    so re-runs are reproducible.  Defaults to ``VTUBER`` everywhere so
-    pre-existing callers see no behaviour change.
+    VTuber-refocus Step 4: the app is VTuber-only, so this enum now holds
+    a single value. It is deliberately kept as an enum (rather than
+    deleted) so persisted jobs and the ``score_profile`` field keep
+    deserialising, and any legacy value (``podcast``/``news``/…) coerces
+    to ``VTUBER`` instead of raising.
     """
 
     VTUBER = "vtuber"
-    PODCAST = "podcast"
-    NEWS = "news"
-    GAMING = "gaming"
-    ASMR = "asmr"
 
     @classmethod
     def coerce(cls, value: Any) -> "ScoringProfile":
-        """Best-effort string → enum coercion that never raises."""
+        """Best-effort string → enum coercion that never raises.
+
+        Any unrecognised or legacy niche name collapses to ``VTUBER``.
+        """
         if isinstance(value, ScoringProfile):
             return value
         try:
@@ -92,6 +93,24 @@ class ProfileWeights:
     # chat replay, hence off by default for podcast / news / ASMR.
     clip_intent_w: float = 0.0
 
+    # ── VTuber-refocus Step 4 dimensions ─────────────────────────────────
+    #
+    # LLM rubric:
+    #   interaction_dynamic — quality of talent×talent chemistry/banter.
+    #     Research: collab/interaction is the single largest clip category.
+    #   en_translatability  — does the moment still land once rendered as
+    #     an English subtitle. 49% of the audience reads EN; a JP-only pun
+    #     that does not translate is a weak clip regardless of how funny it
+    #     was live.
+    # Deterministic:
+    #   format_fit_w — how well the clip's duration fits the channel's
+    #     primary publishing tier (long-form for this channel), with
+    #     partial credit for the Shorts tier used as an engagement booster.
+    # All default 0.0 so older ProfileWeights still construct.
+    interaction_dynamic: float = 0.0
+    en_translatability: float = 0.0
+    format_fit_w: float = 0.0
+
 
 # ─── Profile tables ──────────────────────────────────────────────────────────
 #
@@ -119,72 +138,31 @@ class ProfileWeights:
 
 PROFILES: dict[ScoringProfile, ProfileWeights] = {
     ScoringProfile.VTUBER: ProfileWeights(
-        # Rebalanced away from the generic-shorts rubric. The old table
-        # put 0.25 on retention_hook and nothing on quotability, so a
-        # loud-but-forgettable opening outranked the line the community
-        # would actually turn into a meme. The generic dimensions still
-        # matter — they just no longer decide the ranking alone.
-        retention_hook=0.14,
-        emotional_intensity=0.11,
-        completeness=0.07,
-        replayability=0.06,
-        shorts_friendly=0.04,
-        quotability=0.14,            # the line/noise that gets repeated
-        character_moment=0.12,       # the mask slipping is the product
-        novelty=0.07,                # punish ten variations of one moment
-        audio_norm_w=0.03,
+        # Single VTuber-only table (Step 4). Editorial policy, research-
+        # backed: chat nomination and interaction/personality decide the
+        # ranking; loudness is deliberately weak. The generic-shorts
+        # dimensions are supporting roles, not deciders. Exact values are
+        # tuned against the eval harness in Step 10 — these are the
+        # research-informed starting point.
+        #
+        # LLM rubric (sum ≈ 0.79):
+        retention_hook=0.10,
+        emotional_intensity=0.10,
+        completeness=0.06,
+        replayability=0.05,
+        shorts_friendly=0.03,
+        quotability=0.13,            # the line/noise that gets repeated
+        character_moment=0.11,       # the mask slipping is the product
+        novelty=0.06,                # punish ten variations of one moment
+        interaction_dynamic=0.10,    # collab chemistry — largest clip category
+        en_translatability=0.05,     # must land as an English subtitle
+        # Deterministic multipliers (applied on top of the LLM total):
+        audio_norm_w=0.03,           # loud is not good on its own
         chat_norm_w=0.04,
-        duration_fit_w=0.06,
+        duration_fit_w=0.05,
         coincidence_bonus_w=0.08,    # audio peak + chat spike = jackpot
         clip_intent_w=0.12,          # chat asking for a clip beats any heuristic
-    ),
-    ScoringProfile.PODCAST: ProfileWeights(
-        retention_hook=0.20,
-        emotional_intensity=0.10,
-        completeness=0.25,
-        replayability=0.20,
-        shorts_friendly=0.05,
-        audio_norm_w=0.02,
-        chat_norm_w=0.0,
-        duration_fit_w=0.18,
-        coincidence_bonus_w=0.0,     # podcasts rarely have live chat
-    ),
-    ScoringProfile.NEWS: ProfileWeights(
-        retention_hook=0.30,
-        emotional_intensity=0.05,
-        completeness=0.30,
-        replayability=0.05,
-        shorts_friendly=0.10,
-        audio_norm_w=0.02,
-        chat_norm_w=0.0,
-        duration_fit_w=0.18,
-        coincidence_bonus_w=0.0,
-    ),
-    ScoringProfile.GAMING: ProfileWeights(
-        retention_hook=0.17,
-        emotional_intensity=0.12,
-        completeness=0.15,
-        replayability=0.08,
-        shorts_friendly=0.07,
-        quotability=0.08,            # lighter than VTuber — play > persona
-        character_moment=0.06,
-        novelty=0.05,
-        audio_norm_w=0.06,
-        chat_norm_w=0.05,
-        duration_fit_w=0.10,
-        coincidence_bonus_w=0.07,    # crowd reaction matters in gaming clips
-        clip_intent_w=0.06,
-    ),
-    ScoringProfile.ASMR: ProfileWeights(
-        retention_hook=0.15,
-        emotional_intensity=0.10,
-        completeness=0.20,
-        replayability=0.25,
-        shorts_friendly=0.10,
-        audio_norm_w=0.0,            # peaks are anti-signal in ASMR
-        chat_norm_w=0.0,
-        duration_fit_w=0.20,
-        coincidence_bonus_w=0.0,     # ASMR clips are about consistency, not spikes
+        format_fit_w=0.04,           # bias toward the channel's primary tier
     ),
 }
 
@@ -200,14 +178,13 @@ def weights_for(profile: ScoringProfile | str) -> ProfileWeights:
 
 
 def list_profile_names() -> list[str]:
-    """Profile enum values in display order — used by the UI segmented control."""
-    return [p.value for p in (
-        ScoringProfile.VTUBER,
-        ScoringProfile.PODCAST,
-        ScoringProfile.NEWS,
-        ScoringProfile.GAMING,
-        ScoringProfile.ASMR,
-    )]
+    """Profile enum values in display order.
+
+    VTuber-refocus Step 4: a single VTuber profile now. Kept as a list so
+    any caller iterating it (and the UI, until Step 5 removes the
+    selector) still works.
+    """
+    return [ScoringProfile.VTUBER.value]
 
 
 __all__ = [
