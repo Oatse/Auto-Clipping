@@ -31,15 +31,13 @@ body {
 .brand { display: flex; align-items: center; gap: 10px; }
 
 .mark {
-  display: grid;
-  place-items: center;
   width: 30px; height: 30px;
-  border-radius: 7px;
-  background: linear-gradient(135deg, #7c5cff, #4a8cff);
-  color: #fff;
-  font-weight: 700;
-  font-size: 12px;
-  letter-spacing: .3px;
+  border-radius: 7px;          /* unchanged from the previous mark */
+  object-fit: cover;
+  flex: none;
+  /* The artwork's own background is near-white, so a hairline keeps the
+     rounded plate from bleeding into Premiere's dark chrome. */
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .12);
 }
 
 h1 { margin: 0; font-size: 13px; font-weight: 600; color: #f0f0f0; }
