@@ -34,7 +34,6 @@ from .nine_router_client import NineRouterClient
 from .heuristics import (
     fmt_duration,
     fmt_time,
-    is_vtuber_mode,
     parse_duration_hints,
 )
 from .hunters import HunterRunner

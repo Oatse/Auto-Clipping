@@ -26,12 +26,20 @@ from typing import Any
 
 
 class HighlightType(str, Enum):
-    """VTuber-mode highlight category. Mirrors prompt schema in detector."""
+    """VTuber highlight category. Mirrors prompt schema in the detector.
+
+    ``COLLAB_DYNAMIC`` and ``EMOTIONAL`` were added in VTuber-refocus
+    Step 2 to cover the two clip categories research flags as highest
+    volume/value: talent×talent interaction (the single largest clip
+    category) and heartfelt/vulnerable moments.
+    """
 
     KARMA_ARC = "karma_arc"
     GENUINE_REACTION = "genuine_reaction"
     CLUTCH_PLAY = "clutch_play"
     CHAOTIC_PLEA = "chaotic_plea"
+    COLLAB_DYNAMIC = "collab_dynamic"
+    EMOTIONAL = "emotional"
     OTHER = "other"
     UNSPECIFIED = ""
 

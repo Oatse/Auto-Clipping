@@ -67,10 +67,15 @@ def build_detection_prompt(
     video_duration: float,
     min_clip: float,
     max_clip: float,
-    is_vtuber_mode: bool,
     signals: Sequence[SignalEvent] | None = None,
 ) -> str:
-    """Build the main clip-detection prompt."""
+    """Build the main clip-detection prompt.
+
+    VTuber-refocus Step 1: the app is VTuber-only, so the VTuber schema
+    (highlight_type + dead_air) and clip-craft rules (buildup / full
+    cycle / dead air) are always emitted — no more ``is_vtuber_mode``
+    gate that left generic runs without them.
+    """
     transcript_text = render_transcript(transcript)
     signals_text = render_signals(signals or [])
 
@@ -80,37 +85,34 @@ def build_detection_prompt(
         "moments, and anything a viewer would want to clip and share."
     )
 
-    schema_extra = ""
-    rules_extra = ""
-    if is_vtuber_mode:
-        schema_extra = (
-            '- "highlight_type": category — one of: '
-            '"karma_arc" (overconfidence → fail), '
-            '"genuine_reaction" (non-scripted scare/laughter/rant), '
-            '"clutch_play" (epic play or epic fail), '
-            '"chaotic_plea" (screaming/begging/panic), '
-            '"other"\n'
-            '- "dead_air_timestamps": list of seconds where silence longer '
-            "than 5 seconds occurs INSIDE this clip's range. Empty list [] if none.\n"
-        )
-        rules_extra = (
-            "- BUILDUP: Each clip MUST start 15-45 seconds before the peak moment "
-            "(the 'calm before the storm'). Include narrative hooks.\n"
-            "- FULL CYCLE: Each clip MUST include the Aftermath — the speaker's "
-            "reaction AFTER the peak event. Never cut mid-climax.\n"
-            "- DEAD AIR: Flag silence runs > 5 seconds in dead_air_timestamps.\n"
-            "- HIGHLIGHT TYPE: Tag each clip with its highlight_type.\n"
-        )
+    schema_extra = (
+        '- "highlight_type": category — one of: '
+        '"karma_arc" (overconfidence → fail), '
+        '"genuine_reaction" (non-scripted scare/laughter/rant), '
+        '"clutch_play" (epic play or epic fail), '
+        '"chaotic_plea" (screaming/begging/panic), '
+        '"collab_dynamic" (banter/chemistry between talents), '
+        '"emotional" (touching / heartfelt / vulnerable), '
+        '"other"\n'
+        '- "dead_air_timestamps": list of seconds where silence longer '
+        "than 5 seconds occurs INSIDE this clip's range. Empty list [] if none.\n"
+    )
+    rules_extra = (
+        "- BUILDUP: Each clip MUST start 15-45 seconds before the peak moment "
+        "(the 'calm before the storm'). Include narrative hooks.\n"
+        "- FULL CYCLE: Each clip MUST include the Aftermath — the speaker's "
+        "reaction AFTER the peak event. Never cut mid-climax.\n"
+        "- DEAD AIR: Flag silence runs > 5 seconds in dead_air_timestamps.\n"
+        "- HIGHLIGHT TYPE: Tag each clip with its highlight_type.\n"
+    )
 
     example = (
         f'[{{"start": 82.0, "end": {82.0 + min_clip}, "title": "Epic moment", '
-        '"reason": "Player makes an incredible play"'
-        + (', "highlight_type": "clutch_play", "dead_air_timestamps": []' if is_vtuber_mode else "")
-        + "}, "
+        '"reason": "Player makes an incredible play", '
+        '"highlight_type": "clutch_play", "dead_air_timestamps": []}, '
         f'{{"start": 350.0, "end": {350.0 + min_clip}, "title": "Funny reaction", '
-        '"reason": "Hilarious reaction to jumpscare"'
-        + (', "highlight_type": "genuine_reaction", "dead_air_timestamps": [420.5]' if is_vtuber_mode else "")
-        + "}]"
+        '"reason": "Hilarious reaction to jumpscare", '
+        '"highlight_type": "genuine_reaction", "dead_air_timestamps": [420.5]}]'
     )
 
     return (
@@ -155,7 +157,6 @@ def build_recheck_prompt(
     video_duration: float,
     min_clip: float,
     max_clip: float,
-    is_vtuber_mode: bool,
 ) -> str:
     """Rescue overlooked moments from discarded transcript regions."""
     discarded_text = render_transcript(discarded)
@@ -166,9 +167,9 @@ def build_recheck_prompt(
 
     schema_extra = (
         '- "highlight_type": "karma_arc" | "genuine_reaction" | "clutch_play" | '
-        '"chaotic_plea" | "other"\n'
+        '"chaotic_plea" | "collab_dynamic" | "emotional" | "other"\n'
         '- "dead_air_timestamps": list of silence seconds inside the clip\n'
-    ) if is_vtuber_mode else ""
+    )
 
     return (
         "You are a video clip rescue AI. Re-examine PREVIOUSLY DISCARDED "

@@ -25,7 +25,6 @@ from .clip_selection import (
     parse_candidates_json,
 )
 from .gemini_client import GeminiClient
-from .heuristics import is_vtuber_mode
 from .transcript import Segment, condense_for_prompt, extract_discarded
 from models.clip import SignalEvent
 
@@ -62,7 +61,6 @@ class ClipDetector:
             video_duration=video_duration,
             min_clip=min_clip,
             max_clip=max_clip,
-            is_vtuber_mode=is_vtuber_mode(instructions),
             signals=signals,
         )
 
@@ -126,7 +124,6 @@ class ClipDetector:
             video_duration=video_duration,
             min_clip=min_clip,
             max_clip=max_clip,
-            is_vtuber_mode=is_vtuber_mode(instructions),
         )
 
         try:

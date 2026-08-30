@@ -102,9 +102,15 @@ _VTUBER_KEYWORDS = (
 def is_vtuber_mode(instructions: str) -> bool:
     """True if instructions request VTuber-style structured output.
 
+    .. deprecated:: VTuber-refocus Step 1
+        The app is now VTuber-only, so detection always emits the VTuber
+        schema (``highlight_type`` + ``dead_air_timestamps``) regardless
+        of instructions. This gate is no longer consulted by the
+        pipeline; it is retained only for backward compatibility. Do not
+        add new call sites.
+
     Triggered by keywords from the VTuber Highlights preset or related
-    streamer/highlight terminology. When True, the prompt schema gains
-    `highlight_type` and `dead_air_timestamps` fields.
+    streamer/highlight terminology.
     """
     if not instructions:
         return False
