@@ -167,6 +167,82 @@ class TestLifecycle:
 
 # ─── Timeline download ───────────────────────────────────────────────────────
 
+class TestSubtitleEndpoint:
+    """Subtitling is a polled job, not a held-open request: exporting audio
+    and transcribing takes minutes and would time out the HTTP call."""
+
+    def _stub_loop(self, monkeypatch, tmp_path, ok=True, errors=None):
+        async def fake_loop(**kwargs):
+            fake_loop.kwargs = kwargs
+            srt = tmp_path / "timeline.srt"
+            srt.write_text("1\n00:00:00,000 --> 00:00:01,000\nhi\n", encoding="utf-8")
+
+            class R:
+                pass
+
+            r = R()
+            r.srt = srt if ok else None
+            r.segments = [object(), object()]
+            r.imported = ok
+            r.errors = errors or []
+            r.ok = ok
+            return r
+
+        import processors.premiere.subtitle_loop as loop_mod
+
+        monkeypatch.setattr(loop_mod, "subtitle_timeline", fake_loop)
+        return fake_loop
+
+    def _wait(self, client, job_id):
+        import time as _t
+
+        for _ in range(60):
+            body = client.get(f"/api/compilation/subtitle/{job_id}").json()
+            if body["status"] != "running":
+                return body
+            _t.sleep(0.05)
+        raise AssertionError("subtitle job never finished")
+
+    def test_returns_a_job_immediately(self, client, monkeypatch, tmp_path):
+        self._stub_loop(monkeypatch, tmp_path)
+        r = client.post("/api/compilation/subtitle", json={})
+        assert r.status_code == 200
+        assert r.json()["job_id"]
+
+    def test_completed_job_reports_captions(self, client, monkeypatch, tmp_path):
+        self._stub_loop(monkeypatch, tmp_path)
+        job_id = client.post("/api/compilation/subtitle", json={}).json()["job_id"]
+        body = self._wait(client, job_id)
+        assert body["status"] == "completed"
+        assert body["segment_count"] == 2
+        assert body["imported"] is True
+        assert body["srt_path"].endswith("timeline.srt")
+
+    def test_translation_defaults_to_english(self, client, monkeypatch, tmp_path):
+        spy = self._stub_loop(monkeypatch, tmp_path)
+        job_id = client.post("/api/compilation/subtitle", json={}).json()["job_id"]
+        self._wait(client, job_id)
+        assert spy.kwargs["translate_to"] == "en"
+
+    def test_translation_can_be_disabled(self, client, monkeypatch, tmp_path):
+        spy = self._stub_loop(monkeypatch, tmp_path)
+        job_id = client.post(
+            "/api/compilation/subtitle", json={"translate_to": ""},
+        ).json()["job_id"]
+        self._wait(client, job_id)
+        assert spy.kwargs["translate_to"] is None
+
+    def test_failure_is_reported_on_the_job(self, client, monkeypatch, tmp_path):
+        self._stub_loop(monkeypatch, tmp_path, ok=False, errors=["no sequence"])
+        job_id = client.post("/api/compilation/subtitle", json={}).json()["job_id"]
+        body = self._wait(client, job_id)
+        assert body["status"] == "failed"
+        assert "no sequence" in body["errors"]
+
+    def test_unknown_subtitle_job_is_404(self, client):
+        assert client.get("/api/compilation/subtitle/nope").status_code == 404
+
+
 class TestTimelineDownload:
     def test_downloads_generated_timeline(self, client, monkeypatch, tmp_path):
         _stub_build(monkeypatch, _Result(tmp_path))

@@ -85,6 +85,12 @@ cf_tasks: dict[str, asyncio.Task] = {}
 comp_jobs: dict[str, Any] = {}
 comp_tasks: dict[str, asyncio.Task] = {}
 
+# Subtitle passes over an open Premiere timeline. Separate from ``comp_jobs``
+# because a timeline can be subtitled without ever having been produced by a
+# compilation run — any open sequence will do.
+subtitle_jobs: dict[str, Any] = {}
+subtitle_tasks: dict[str, asyncio.Task] = {}
+
 
 # ─── Short Maker Workspace (Workspace · 03) ──────────────────────────────────
 #
@@ -158,6 +164,8 @@ __all__ = [
     "cf_tasks",
     "comp_jobs",
     "comp_tasks",
+    "subtitle_jobs",
+    "subtitle_tasks",
     "short_jobs",
     "short_tasks",
     "all_in_jobs",

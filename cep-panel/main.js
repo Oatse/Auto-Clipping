@@ -57,7 +57,7 @@
     cancel: $("cancel"),
     resultCard: $("resultCard"), resultTitle: $("resultTitle"),
     resultMeta: $("resultMeta"), moments: $("moments"),
-    importBtn: $("import"), revealBtn: $("reveal"),
+    importBtn: $("import"), revealBtn: $("reveal"), subtitle: $("subtitle"),
     appUrl: $("appUrl"), settings: $("settings"),
     settingsSheet: $("settingsSheet"), appHost: $("appHost"),
     saveSettings: $("saveSettings")
@@ -364,6 +364,78 @@
     });
   }
 
+  /**
+   * Subtitle whatever sequence is open, which is deliberately independent of
+   * having just run a compilation: the point is to caption the finished edit,
+   * whenever that happens.
+   */
+  function subtitleTimeline() {
+    els.subtitle.disabled = true;
+    els.statusCard.hidden = false;
+    els.log.textContent = "";
+    state.logLines = 0;
+    els.bar.className = "fill indeterminate";
+    els.statusPhase.textContent = "Subtitling…";
+    els.statusDetail.textContent =
+      "Exporting the timeline audio, then transcribing it. This can take a " +
+      "few minutes on a long sequence.";
+
+    var payload = {
+      job_id: state.result ? state.result.id : null,
+      translate_to: "en"
+    };
+
+    request("POST", "/api/compilation/subtitle", payload, function (err, body) {
+      if (err || !body || !body.job_id) {
+        els.subtitle.disabled = false;
+        els.statusPhase.textContent = "Subtitling failed";
+        els.statusDetail.textContent =
+          (body && body.detail) || (err && err.message) || "no response";
+        return;
+      }
+      pollSubtitle(body.job_id);
+    });
+  }
+
+  /* Exporting audio and transcribing takes minutes, so the run is a job we
+     poll rather than a request we hold open. */
+  function pollSubtitle(subtitleJobId) {
+    request("GET", "/api/compilation/subtitle/" + subtitleJobId, null,
+      function (err, job) {
+        if (err || !job) {
+          els.subtitle.disabled = false;
+          els.statusPhase.textContent = "Subtitling failed";
+          els.statusDetail.textContent = (err && err.message) || "lost contact";
+          return;
+        }
+
+        els.statusPhase.textContent = job.phase_label || job.status;
+        appendLog(job.logs);
+
+        if (job.status === "running") {
+          setTimeout(function () { pollSubtitle(subtitleJobId); }, POLL_MS);
+          return;
+        }
+
+        els.subtitle.disabled = false;
+        els.bar.className = "fill";
+        els.bar.style.width = "100%";
+
+        if (job.status !== "completed") {
+          els.statusPhase.textContent = "Subtitling failed";
+          els.statusDetail.textContent =
+            (job.errors || []).join("; ") || "the run produced no captions";
+          return;
+        }
+        els.statusPhase.textContent = "Captions ready";
+        els.statusDetail.textContent =
+          job.segment_count + " caption(s)" +
+          (job.imported
+            ? " imported into the project — drag them onto a caption track."
+            : " written to " + job.srt_path);
+      });
+  }
+
   function revealFiles() {
     if (!state.result || !state.result.fcpxml_path) return;
     var folder = state.result.fcpxml_path.replace(/[\\/][^\\/]+$/, "");
@@ -412,6 +484,7 @@
   els.start.addEventListener("click", startJob);
   els.importBtn.addEventListener("click", importTimeline);
   els.revealBtn.addEventListener("click", revealFiles);
+  els.subtitle.addEventListener("click", subtitleTimeline);
   els.cancel.addEventListener("click", function () { els.statusCard.hidden = true; });
   els.settings.addEventListener("click", function () {
     els.settingsSheet.hidden = !els.settingsSheet.hidden;

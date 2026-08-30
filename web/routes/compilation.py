@@ -79,6 +79,36 @@ class CompilationJob(BaseModel):
     logs: list[str] = []
 
 
+class SubtitleRequest(BaseModel):
+    """Subtitle the open Premiere timeline."""
+
+    # Optional: only used to file the captions next to their compilation.
+    job_id: str | None = None
+    language: str = ""            # "" lets the engine detect it
+    speaker_detection: bool = True
+    num_speakers: int | None = None
+    import_back: bool = True
+    # A JP stream captioned for an EN audience is the normal case here, so
+    # translation defaults on. Set to "" to keep the source language.
+    translate_to: str = "en"
+    translator_backend: str = ""
+
+
+class SubtitleJob(BaseModel):
+    """State of one subtitle pass over the open timeline."""
+
+    id: str
+    source_job_id: str | None = None
+    status: str = "running"        # running | completed | failed
+    phase_label: str = "Starting"
+    created_at: float = 0.0
+    srt_path: str | None = None
+    segment_count: int = 0
+    imported: bool = False
+    errors: list[str] = []
+    logs: list[str] = []
+
+
 class CompilationRequest(BaseModel):
     url: str
     instructions: str = ""
@@ -175,6 +205,95 @@ async def download_fcpxml(job_id: str) -> FileResponse:
     return FileResponse(
         path, media_type="application/xml", filename=path.name,
     )
+
+
+@router.post("/api/compilation/subtitle")
+async def start_subtitle_job(req: SubtitleRequest) -> dict:
+    """Subtitle the sequence currently open in Premiere.
+
+    Runs against the edited timeline rather than the source VOD: only Premiere
+    knows what the finished cut says, and transcribing just the finished cut
+    keeps the speech-to-text bill proportional to what actually airs.
+
+    Returns immediately with a job id. The work takes minutes — exporting the
+    audio alone is slow on a long sequence — so holding the HTTP request open
+    would simply time out.
+    """
+    job_id = uuid.uuid4().hex[:12]
+    job = SubtitleJob(
+        id=job_id,
+        source_job_id=req.job_id,
+        status="running",
+        phase_label="Exporting timeline audio",
+        created_at=time.time(),
+    )
+    job_state.subtitle_jobs[job_id] = job
+
+    task = asyncio.create_task(_run_subtitle(job_id, req))
+    job_state.track_task(job_state.subtitle_tasks, job_id, task)
+    return {"job_id": job_id, "status": job.status}
+
+
+@router.get("/api/compilation/subtitle/{job_id}")
+async def get_subtitle_job(job_id: str) -> dict:
+    job = job_state.subtitle_jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+    return job.model_dump()
+
+
+async def _run_subtitle(job_id: str, req: SubtitleRequest) -> None:
+    """Drive one subtitle pass, recording progress on the job."""
+    from processors.premiere.subtitle_loop import subtitle_timeline
+
+    job = job_state.subtitle_jobs.get(job_id)
+    if job is None:
+        return
+
+    def log(message: str) -> None:
+        job.logs.append(message)
+        job.phase_label = message
+        logger.info(f"[subtitle:{job_id}] {message}")
+
+    try:
+        result = await subtitle_timeline(
+            output_dir=_subtitle_output_dir(req.job_id),
+            language=req.language or None,
+            speaker_detection=req.speaker_detection,
+            num_speakers=req.num_speakers,
+            import_back=req.import_back,
+            translate_to=req.translate_to or None,
+            translator_backend=req.translator_backend or None,
+            log_fn=log,
+        )
+        job.srt_path = _absolute(result.srt)
+        job.segment_count = len(result.segments)
+        job.imported = result.imported
+        job.errors = list(result.errors)
+        job.status = "completed" if result.ok else "failed"
+        job.phase_label = (
+            f"{job.segment_count} captions ready"
+            if result.ok else "Failed"
+        )
+    except asyncio.CancelledError:
+        job.status = "failed"
+        job.phase_label = "Cancelled"
+        raise
+    except Exception as exc:  # noqa: BLE001 — never kill the server
+        logger.exception(f"[subtitle:{job_id}] crashed")
+        job.status = "failed"
+        job.phase_label = "Failed"
+        job.errors = [str(exc)]
+
+
+def _subtitle_output_dir(job_id: str | None) -> Path:
+    """Keep captions beside their compilation when we know which one it is."""
+    if job_id:
+        job = job_state.comp_jobs.get(job_id)
+        if job is not None and job.fcpxml_path:
+            return Path(job.fcpxml_path).parent
+        return job_state.COMPILATION_DIR / job_id
+    return job_state.COMPILATION_DIR / "timeline_subtitles"
 
 
 @router.get("/api/compilation/jobs/{job_id}/log")
