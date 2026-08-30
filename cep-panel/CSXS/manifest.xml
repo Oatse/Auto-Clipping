@@ -6,8 +6,12 @@
   signed ZXP and is replaced on every npm update, so editing it in place would
   break its signature and be overwritten. This panel lives alongside it.
 
-  Node is enabled so the panel can read the job manifest straight off disk;
-  --allow-file-access-from-files lets it load its own local resources.
+  Node is enabled so the panel can read the job manifest straight off disk,
+  and file access is relaxed so it can load its own local resources.
+
+  NOTE: never write a double hyphen inside an XML comment. It is illegal, and
+  CEP responds by rejecting the entire manifest with only a line number in
+  CEP11-PPRO.log, so the panel silently fails to appear.
 -->
 <ExtensionManifest Version="7.0"
                    ExtensionBundleId="com.clipautomation.panel"

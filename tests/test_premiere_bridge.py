@@ -208,6 +208,37 @@ class TestPanelInstall:
                          "host.jsx", "styles.css", "CSInterface.js"):
             assert (source / required).is_file(), f"missing {required}"
 
+    def test_shipped_manifest_is_valid_xml(self):
+        # Regression: a "--" inside an XML comment is illegal, and CEP
+        # responded by rejecting the whole extension so the panel silently
+        # never appeared in Window > Extensions.
+        panel_install.validate_manifest(
+            panel_install.source_dir() / "CSXS" / "manifest.xml"
+        )
+
+    def test_double_hyphen_comment_is_rejected(self, tmp_path):
+        bad = tmp_path / "manifest.xml"
+        bad.write_text(
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            "<!-- flag: --enable-nodejs -->\n"
+            "<ExtensionManifest/>\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError) as excinfo:
+            panel_install.validate_manifest(bad)
+        assert "hyphen" in str(excinfo.value).lower()
+
+    def test_install_refuses_an_invalid_manifest(self, tmp_path, monkeypatch):
+        source = tmp_path / "panel"
+        (source / "CSXS").mkdir(parents=True)
+        (source / "CSXS" / "manifest.xml").write_text("<broken", encoding="utf-8")
+        monkeypatch.setattr(panel_install, "source_dir", lambda root=None: source)
+        monkeypatch.setattr(
+            panel_install, "extensions_dir", lambda: tmp_path / "extensions",
+        )
+        with pytest.raises(ValueError):
+            panel_install.install()
+
     def test_install_and_uninstall(self, tmp_path, monkeypatch):
         fake_ext = tmp_path / "extensions"
         monkeypatch.setattr(panel_install, "extensions_dir", lambda: fake_ext)
