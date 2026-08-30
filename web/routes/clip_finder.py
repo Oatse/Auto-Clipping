@@ -317,18 +317,11 @@ async def create_clip_finder_job(req: ClipFinderRequest) -> dict:
             ),
         )
 
-    # ADR-0003: validate scoring profile against the canonical enum so
-    # we fail fast with a clear 400 instead of silently coercing to
-    # VTUBER inside the orchestrator.
+    # VTuber-refocus Step 5: the app is VTuber-only. Any value (including a
+    # legacy niche from an old client, or an empty field) collapses to
+    # VTUBER via coerce rather than 400-ing.
     from processors.clip_finder.scoring_profiles import ScoringProfile
-    try:
-        scoring_profile = ScoringProfile(req.scoring_profile.lower())
-    except (ValueError, AttributeError):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid scoring_profile: {req.scoring_profile!r}. "
-                   "Must be one of: vtuber, podcast, news, gaming, asmr.",
-        )
+    scoring_profile = ScoringProfile.coerce(req.scoring_profile)
 
     enable_audio = (
         req.enable_audio_signals

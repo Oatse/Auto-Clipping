@@ -214,14 +214,8 @@ async def create_all_in_job(req: AllInRequest):
             status_code=400, detail=f"Invalid enum value: {exc}",
         )
 
-    # ADR-0003 enums — validated separately for clearer error messages.
-    try:
-        scoring_profile = ScoringProfileChoice(req.scoring_profile)
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid scoring_profile: {req.scoring_profile}",
-        )
+    # VTuber-refocus Step 5: VTuber-only — coerce any/legacy value to VTUBER.
+    scoring_profile = ScoringProfileChoice.coerce(req.scoring_profile)
     try:
         cut_strategies = [
             CutStrategyChoice(s) for s in (req.cut_strategies or [])

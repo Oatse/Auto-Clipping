@@ -264,15 +264,9 @@ async def create_multi_pov_job(req: MultiPOVRequest) -> dict:
             detail=f"Invalid model: {req.model!r}. Must be one of: {', '.join(sorted(valid_models))}.",
         )
 
+    # VTuber-refocus Step 5: VTuber-only — coerce any/legacy value to VTUBER.
     from processors.clip_finder.scoring_profiles import ScoringProfile
-    try:
-        scoring_profile = ScoringProfile(req.scoring_profile.lower())
-    except (ValueError, AttributeError):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid scoring_profile: {req.scoring_profile!r}. "
-                   "Must be one of: vtuber, podcast, news, gaming, asmr.",
-        )
+    scoring_profile = ScoringProfile.coerce(req.scoring_profile)
 
     enable_audio = (
         req.enable_audio_signals

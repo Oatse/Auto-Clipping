@@ -89,11 +89,18 @@ class DetectionMode(str, Enum):
 # in unit tests. The runner converts to the canonical enum at the seam.
 
 class ScoringProfileChoice(str, Enum):
+    # VTuber-refocus Step 5: VTuber-only. Kept as an enum so persisted
+    # AllIn jobs still deserialise; any legacy niche coerces to VTUBER.
     VTUBER = "vtuber"
-    PODCAST = "podcast"
-    NEWS = "news"
-    GAMING = "gaming"
-    ASMR = "asmr"
+
+    @classmethod
+    def coerce(cls, value: object) -> "ScoringProfileChoice":
+        if isinstance(value, ScoringProfileChoice):
+            return value
+        try:
+            return cls(str(value).lower())
+        except (ValueError, AttributeError):
+            return cls.VTUBER
 
 
 # ─── Cut strategy (ADR-0003) ──────────────────────────────────────────────────
