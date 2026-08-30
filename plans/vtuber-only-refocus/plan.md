@@ -1,10 +1,27 @@
 # VTuber-Only Refocus — Rencana Matang (v2, Research-Backed)
 
-**Branch (usulan):** `refactor/vtuber-only-clip-judgment`
-**Status dokumen:** Rencana review — **belum menyentuh kode.**
+**Branch:** `refactor/vtuber-only-clip-judgment`
 **Fokus:** Cara program menilai sebuah moment layak diklip, ditajamkan untuk niche VTuber, dan dihubungkan ke bentuk editan + kepatuhan legal agar layak jadi **core sebuah channel** (bukan sekadar tool).
 
 > v2 ini menggantikan v1. v1 hanya menajamkan penilaian teknis. v2 menambahkan fondasi riset (persona audiens, taksonomi moment, bentuk editan, batas legal, risiko monetisasi) dan menutup celah yang ditemukan saat grill.
+
+## Implementation Status
+
+Fase 1 — **inti penentuan moment (SELESAI, teruji, ter-commit di branch di atas):**
+- [x] Step 0 — Bug fix penilaian: punchline re-anchor lintas boundary, scorer-fallback jadi loud, tie-break cap-10. `986e752`
+- [x] Step 1 — VTuber mode selalu aktif (gate `is_vtuber_mode` dibuang). `0f968e8`
+- [x] Step 2 — Prompt deteksi VTuber-native (collab-first, chat = suara audiens). `b768cb7`
+- [x] Step 3 — Chat driver primer + persona EN-market + warning sadar-chat. `56a6927`
+- [x] Step 4 — 5 profil → 1 VTuber + dimensi baru: `interaction_dynamic`, `en_translatability`, `format_fit`. `977dba4`
+- [x] Step 5 — Bersihkan routes/UI dari multi-niche (coerce, bukan 400). `727ea9e`
+- [x] Step 10a — Regression test invariants penilaian (`tests/test_judgment_invariants.py`).
+
+Fase 2 — **surface produk (BELUM; masing-masing subsistem sendiri):**
+- [ ] Step 6 — Novelty lintas-video (butuh publish-history store yang belum ada).
+- [ ] Step 7 — Judgment → bentuk editan (format tier → render, emotional beat → telop, EN sub).
+- [ ] Step 8 — Anti-slop human-refine gate (**keputusan: WAJIB review**) + lapisan orisinalitas.
+- [ ] Step 9 — Compliance Hololive baked-in (deskripsi patuh, blokir members-only).
+- [ ] Step 10b — Eval precision@k atas dataset VOD berlabel (butuh data nyata).
 
 ---
 
