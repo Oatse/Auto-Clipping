@@ -136,9 +136,25 @@ class ClipFinder:
                     url, output_dir / "chat", log_fn=log_fn
                 )
                 events.extend(chat_events)
+                # VTuber-refocus Step 3: chat is the primary clip-worthiness
+                # driver for VTuber content. A VOD with zero chat signal is a
+                # materially weaker basis for judgment (no audience vote), so
+                # surface it loudly instead of proceeding as if nothing is
+                # missing.
+                if not chat_events and log_fn:
+                    log_fn(
+                        "WARNING: chat enabled but yielded ZERO chat signals. "
+                        "Clip judgment loses its strongest evidence (audience "
+                        "reaction / clip requests) and leans on transcript + "
+                        "audio only — treat rankings with lower confidence."
+                    )
             except Exception as exc:
                 if log_fn:
-                    log_fn(f"ChatSignals (non-fatal): {exc}")
+                    log_fn(
+                        f"WARNING: ChatSignals failed ({exc}). Proceeding without "
+                        "the primary VTuber clip signal — rankings are lower "
+                        "confidence this run."
+                    )
 
         if enable_audio:
             try:
