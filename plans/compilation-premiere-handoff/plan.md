@@ -1,7 +1,42 @@
 # Compilation Output + Premiere Handoff — Rencana Matang
 
-**Branch (usulan):** `feat/compilation-premiere-handoff`
-**Status:** Rencana terkunci. Sudah dikerjakan: **D8 model wiring** (`cc/claude-opus-4-6`, commit `dd275e9`). Sisa backbone belum dimulai.
+**Branch:** `feat/compilation-premiere-handoff`
+**Status:** Backbone SELESAI & teruji (460 test hijau). Sisa: integrasi bridge MCP (butuh premiere-pro-mcp terpasang).
+
+## Implementation Status
+
+Selesai, ter-commit & ter-push:
+- [x] **Step 1** — `format_fit` sadar-mode (COMPILATION vs STANDALONE). `b5a8cce`
+- [x] **Step 2** — Seleksi ambang + dedup skor-aware (overlap → yang skornya lebih tinggi). `b5a8cce`
+- [x] **Step 3** — `MasterSource` (master video + audio-only) + `probe_media` (fps rasional eksak). `c660f37`
+- [x] **Step 4** — Generator FCPXML frame-akurat (NTSC-aware, pathurl relink-able). `c660f37`
+- [x] **Step 5a** — Pipeline paralel (analisis ‖ download master). `299aa3e`
+- [x] **Step 5b** — Route + workspace HTTP `/api/compilation/*`. `2152e0c`
+- [x] **Step 7** — Launcher + single-instance guard idempotent. `7d40b9c`
+- [x] **Step 9** — Kalibrasi ambang di VOD nyata (data di bawah).
+- [x] **BONUS** — Fix app tidak bisa boot sama sekali (Starlette 1.0 hapus `add_event_handler`). `8258930`
+
+Belum (butuh `premiere-pro-mcp` terpasang lebih dulu):
+- [ ] **Step 6** — Bridge MCP: `create_project` + `import_fcp_xml` one-click.
+- [ ] **Step 4b** — Loop subtitle all-in Premiere (export audio → ElevenLabs → caption balik).
+- [ ] **Step 8** — Auto-connect projek Premiere dari "Start Analyze".
+
+## Hasil kalibrasi ambang (VOD nyata, Hololive 113 menit)
+
+Run nyata `N5EHBv7ndeM` mode COMPILATION, tanpa chat signals:
+- Detector 7 + recheck 6 = **13 kandidat** → **12 momen lolos ≥6.0** = **18.6 menit material**.
+- **`format_fit` = 10.0 di semua momen** (sebelum fix: 5.0) → konfirmasi Step 1 bekerja.
+- Sebaran tipe sehat: collab_dynamic, genuine_reaction, clutch_play, karma_arc, chaotic_plea. Kronologis, menyebar 4:34–113:15.
+
+| Ambang | Momen | Durasi |
+|---|---|---|
+| 5.0 / 5.5 / 6.0 | 12 | 18.6 min |
+| 6.5 | 9 | 13.5 min |
+| 7.0 | 6 | 9.6 min |
+
+**Kesimpulan:** **6.0 dikonfirmasi bagus** (18.6 menit, pas untuk long-form). Naikkan ke **6.5** kalau mau lebih ketat (13.5 min).
+
+**Catatan jujur:** di 5.0–6.0 hasilnya sama (12 momen) — artinya yang membatasi bukan ambangnya, tapi **jumlah kandidat yang diusulkan detector (13)**. Untuk compilation lebih kaya, gunakan `mode="multi-stage"` (Hunters) dan/atau aktifkan chat signals.
 **Konteks:** Kelanjutan dari refocus VTuber (branch `refactor/vtuber-only-clip-judgment`, judgment sudah tajam & teruji). Ini mengubah **lapisan output**: dari "top-8 clips" menjadi "ekstrak banyak momen di atas ambang → serahkan ke Premiere sebagai timeline siap-poles" (gaya @TriticumClip: long-form compilation kurasi).
 
 ## Keputusan (dikonfirmasi user)
