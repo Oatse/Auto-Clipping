@@ -80,9 +80,15 @@ def build_detection_prompt(
     signals_text = render_signals(signals or [])
 
     effective_instructions = instructions.strip() if instructions else (
-        "Find ALL interesting, notable, funny, exciting, or important moments in "
-        "this video. Include highlights, key points, memorable quotes, dramatic "
-        "moments, and anything a viewer would want to clip and share."
+        "Find the moments a VTuber clip channel would actually cut and post. "
+        "Prioritise, in order: (1) collab/interaction beats — banter, chemistry, "
+        "roasts, or reactions BETWEEN talents (the single most-clipped category); "
+        "(2) the mask slipping — the talent's real personality breaking through the "
+        "persona, unguarded opinions, breaking character, unhinged tangents; "
+        "(3) genuine uncontrolled reactions — screams, laughter, panic, rage; "
+        "(4) quotable lines / noises the community will repeat or meme; "
+        "(5) heartfelt or vulnerable moments. A moment can be loud and dramatic and "
+        "still be worthless — cut for personality and payoff, not volume."
     )
 
     schema_extra = (
@@ -116,8 +122,10 @@ def build_detection_prompt(
     )
 
     return (
-        "You are a video clip finder AI. Given a transcript with timestamps "
-        "(in seconds) and instructions, return a JSON array of clip ranges.\n\n"
+        "You are a specialist clip finder for a VTuber clip channel serving an "
+        "English-speaking audience. Given a stream transcript with timestamps (in "
+        "seconds) plus live-chat/audio signals, return a JSON array of the ranges "
+        "worth clipping.\n\n"
         "IMPORTANT: Timestamps are in SECONDS. [82.0s - 102.0s] = 1m22s to 1m42s.\n\n"
         f"TOTAL VIDEO DURATION: {round(video_duration, 1)} seconds "
         f"({fmt_time(video_duration)})\n\n"
@@ -140,6 +148,10 @@ def build_detection_prompt(
         "- Find as many DISTINCT matching clips as possible\n"
         "- Treat MULTIMODAL SIGNALS as strong hints — moments where audio peaks "
         "AND chat spikes overlap are almost always clip-worthy.\n"
+        "- CHAT IS THE AUDIENCE VOTING: a chat spike, and especially chat asking "
+        "for a clip ('clip it', '切り抜き', 'clip that'), means the viewers "
+        "nominated the moment themselves — the strongest evidence available. Read "
+        "the quoted chat to understand WHY they reacted, don't just count volume.\n"
         f"{rules_extra}"
         "\nExample response:\n"
         f"{example}"
