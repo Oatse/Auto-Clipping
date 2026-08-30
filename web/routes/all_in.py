@@ -133,7 +133,9 @@ def register_restore_hook(app: FastAPI) -> None:
     Called by ``web/server.py`` during app construction so this router
     doesn't need to own the FastAPI instance.
     """
-    app.add_event_handler("startup", _restore_all_in_jobs)
+    from web.services.startup import register_startup
+
+    register_startup(app, _restore_all_in_jobs)
 
 
 # ─── Request schema ──────────────────────────────────────────────────────────

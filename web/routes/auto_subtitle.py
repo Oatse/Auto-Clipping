@@ -205,7 +205,9 @@ async def _restore_jobs_from_disk() -> None:
 
 def register_restore_hook(app: FastAPI) -> None:
     """Wire the startup restore hook into ``app``."""
-    app.add_event_handler("startup", _restore_jobs_from_disk)
+    from web.services.startup import register_startup
+
+    register_startup(app, _restore_jobs_from_disk)
 
 
 # ─── /api/jobs (list / get / delete) ─────────────────────────────────────────

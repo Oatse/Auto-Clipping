@@ -219,7 +219,9 @@ async def _restore_clip_finder_jobs() -> None:
 
 def register_restore_hook(app: FastAPI) -> None:
     """Wire the startup restore hook into ``app``."""
-    app.add_event_handler("startup", _restore_clip_finder_jobs)
+    from web.services.startup import register_startup
+
+    register_startup(app, _restore_clip_finder_jobs)
 
 
 # ─── /api/clip-finder/available-clips ────────────────────────────────────────
