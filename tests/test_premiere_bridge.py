@@ -16,6 +16,7 @@ import json
 import os
 import threading
 import time
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -242,6 +243,7 @@ class TestPanelInstall:
     def test_install_and_uninstall(self, tmp_path, monkeypatch):
         fake_ext = tmp_path / "extensions"
         monkeypatch.setattr(panel_install, "extensions_dir", lambda: fake_ext)
+        monkeypatch.setattr(panel_install, "find_signing_tool", lambda: None)
 
         result = panel_install.install()
         assert result.installed
@@ -252,9 +254,61 @@ class TestPanelInstall:
         assert not (fake_ext / panel_install.PANEL_ID).exists()
         assert panel_install.uninstall() is False
 
+    def test_config_points_the_panel_back_at_the_project(self, tmp_path, monkeypatch):
+        # The panel lives in the CEP extensions folder, so it cannot find the
+        # project on its own — the installer has to tell it.
+        fake_ext = tmp_path / "extensions"
+        monkeypatch.setattr(panel_install, "extensions_dir", lambda: fake_ext)
+        monkeypatch.setattr(panel_install, "find_signing_tool", lambda: None)
+
+        panel_install.install(app_host="http://127.0.0.1:9999")
+        config = json.loads(
+            (fake_ext / panel_install.PANEL_ID / "panel-config.json")
+            .read_text(encoding="utf-8")
+        )
+        assert config["appHost"] == "http://127.0.0.1:9999"
+        assert (Path(config["projectRoot"]) / "run_web.py").is_file()
+        assert config["python"]
+
+    def test_unsigned_install_says_premiere_will_reject_it(self, tmp_path, monkeypatch):
+        # Silently installing something Premiere refuses to load is the worst
+        # outcome; the installer must name it.
+        fake_ext = tmp_path / "extensions"
+        monkeypatch.setattr(panel_install, "extensions_dir", lambda: fake_ext)
+        monkeypatch.setattr(panel_install, "find_signing_tool", lambda: None)
+
+        result = panel_install.install()
+        assert "WITHOUT a signature" in result.message
+
+    def test_signed_install_unpacks_the_zxp(self, tmp_path, monkeypatch):
+        fake_ext = tmp_path / "extensions"
+        monkeypatch.setattr(panel_install, "extensions_dir", lambda: fake_ext)
+        monkeypatch.setattr(
+            panel_install, "find_signing_tool", lambda: Path("fake-signer"),
+        )
+
+        def fake_sign(signer, staging, package):
+            # Stand in for ZXPSignCmd: zip the staging dir and add the
+            # signature file CEP looks for.
+            with zipfile.ZipFile(package, "w") as archive:
+                for item in staging.rglob("*"):
+                    if item.is_file():
+                        archive.write(item, item.relative_to(staging))
+                archive.writestr("META-INF/signatures.xml", "<signature/>")
+
+        monkeypatch.setattr(panel_install, "_sign", fake_sign)
+
+        result = panel_install.install()
+        assert result.installed
+        installed = fake_ext / panel_install.PANEL_ID
+        assert (installed / "META-INF" / "signatures.xml").is_file()
+        assert (installed / "main.js").is_file()
+        assert (installed / "panel-config.json").is_file()
+
     def test_reinstall_replaces_cleanly(self, tmp_path, monkeypatch):
         fake_ext = tmp_path / "extensions"
         monkeypatch.setattr(panel_install, "extensions_dir", lambda: fake_ext)
+        monkeypatch.setattr(panel_install, "find_signing_tool", lambda: None)
 
         panel_install.install()
         stray = fake_ext / panel_install.PANEL_ID / "stale.js"
@@ -266,6 +320,7 @@ class TestPanelInstall:
         fake_ext = tmp_path / "extensions"
         monkeypatch.setattr(panel_install, "extensions_dir", lambda: fake_ext)
         monkeypatch.setattr(panel_install, "debug_mode_enabled", lambda: False)
+        monkeypatch.setattr(panel_install, "find_signing_tool", lambda: None)
 
         panel_install.install()
         result = panel_install.status()

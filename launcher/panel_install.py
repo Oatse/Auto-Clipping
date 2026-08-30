@@ -15,15 +15,24 @@ decision to make knowingly, not a side effect of installing a panel.
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import subprocess
 import sys
+import tempfile
 import xml.etree.ElementTree as ET
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
 PANEL_ID = "ClipAutomationPanel"
 SOURCE_DIRNAME = "cep-panel"
+
+# Password for the local self-signed development certificate. This protects
+# nothing of value — the certificate exists only so Premiere will load a panel
+# built on this machine, and Adobe requires one.
+CERT_PASSWORD = "autoclip-dev"
 
 
 @dataclass
@@ -119,9 +128,27 @@ def validate_manifest(manifest_path: Path) -> None:
         raise ValueError(f"{manifest_path} is not valid XML: {exc}.{hint}") from exc
 
 
-def install(project_root: Path | None = None, *, force: bool = True) -> PanelStatus:
-    """Copy the panel into the extensions folder, replacing any previous copy."""
-    source = source_dir(project_root)
+def install(
+    project_root: Path | None = None,
+    *,
+    force: bool = True,
+    app_host: str = "http://127.0.0.1:7860",
+    python: str | None = None,
+) -> PanelStatus:
+    """Sign the panel and install it into the extensions folder.
+
+    Signing is not optional. ``PlayerDebugMode`` alone is no longer enough on
+    current Premiere: an unsigned extension is rejected with
+    ``Signature verification failed`` in CEP11-PPRO.log and simply never
+    appears. (premiere-pro-mcp ships a signed ZXP for the same reason.) So the
+    panel is self-signed at install time, the same way.
+
+    A ``panel-config.json`` is written into the bundle first, because the
+    installer is the only party that knows where the project lives — the panel
+    ends up in the CEP extensions folder, far from it.
+    """
+    root = project_root or Path(__file__).resolve().parent.parent
+    source = source_dir(root)
     manifest = source / "CSXS" / "manifest.xml"
     if not manifest.is_file():
         raise FileNotFoundError(f"panel source not found at {source}")
@@ -131,12 +158,95 @@ def install(project_root: Path | None = None, *, force: bool = True) -> PanelSta
     destination.parent.mkdir(parents=True, exist_ok=True)
     if destination.exists():
         if not force:
-            return status(project_root)
+            return status(root)
         shutil.rmtree(destination)
 
-    # copy2 keeps timestamps; dotfiles like .debug are included by copytree.
-    shutil.copytree(source, destination)
-    return status(project_root)
+    with tempfile.TemporaryDirectory(prefix="autoclip-panel-") as tmp:
+        staging = Path(tmp) / "panel"
+        shutil.copytree(source, staging)
+        (staging / "panel-config.json").write_text(
+            json.dumps(
+                {
+                    "projectRoot": str(root),
+                    "appHost": app_host,
+                    "python": python or sys.executable or "python",
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        signer = find_signing_tool()
+        if signer is None:
+            # Install unsigned rather than nothing, but be explicit that
+            # Premiere will refuse to load it.
+            shutil.copytree(staging, destination)
+            result = status(root)
+            result.message = (
+                "Installed WITHOUT a signature: ZXPSignCmd was not found, and "
+                "current Premiere rejects unsigned extensions. Put "
+                "ZXPSignCmd.exe next to the project or set ZXPSIGNCMD, then "
+                "reinstall."
+            )
+            return result
+
+        package = Path(tmp) / f"{PANEL_ID}.zxp"
+        _sign(signer, staging, package)
+        _extract(package, destination)
+
+    return status(root)
+
+
+def find_signing_tool() -> Path | None:
+    """Locate ZXPSignCmd: env var, project root, or PATH."""
+    from_env = os.getenv("ZXPSIGNCMD")
+    if from_env and Path(from_env).is_file():
+        return Path(from_env)
+
+    root = Path(__file__).resolve().parent.parent
+    for candidate in (root / "tools" / "ZXPSignCmd.exe", root / "ZXPSignCmd.exe"):
+        if candidate.is_file():
+            return candidate
+
+    found = shutil.which("ZXPSignCmd") or shutil.which("ZXPSignCmd.exe")
+    return Path(found) if found else None
+
+
+def _sign(signer: Path, staging: Path, package: Path) -> None:
+    """Self-sign ``staging`` into ``package``, creating a cert if needed."""
+    cert = _certificate_path()
+    if not cert.is_file():
+        cert.parent.mkdir(parents=True, exist_ok=True)
+        _run(
+            [
+                str(signer), "-selfSignedCert", "ID", "Jakarta",
+                "Auto-Clip", "Auto-Clip Panel", CERT_PASSWORD, str(cert),
+            ],
+            "could not create the signing certificate",
+        )
+    _run(
+        [str(signer), "-sign", str(staging), str(package), str(cert), CERT_PASSWORD],
+        "could not sign the panel",
+    )
+
+
+def _run(command: list[str], failure: str) -> None:
+    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        detail = (result.stdout or result.stderr or "").strip()[:400]
+        raise RuntimeError(f"{failure}: {detail}")
+
+
+def _extract(package: Path, destination: Path) -> None:
+    """A ZXP is a zip; unpacking it keeps META-INF/signatures.xml in place."""
+    with zipfile.ZipFile(package) as archive:
+        archive.extractall(destination)
+
+
+def _certificate_path() -> Path:
+    """Keep the dev certificate out of the repo — it is a private key."""
+    base = Path(os.getenv("LOCALAPPDATA") or Path.home()) / "AutoClip"
+    return base / "autoclip-panel.p12"
 
 
 def uninstall() -> bool:

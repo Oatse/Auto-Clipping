@@ -22,6 +22,16 @@ __pycache__/
 # Credentials & Sensitive files
 cookies.txt
 .env
+# Self-signed certificate for the Premiere panel — a private key, and
+# regenerated automatically on install.
+*.p12
+
+# Adobe's CEP signing tool. A 5 MB third-party binary, fetched on demand
+# rather than vendored — see cep-panel/README.md.
+tools/ZXPSignCmd.exe
+tools/ZXPSignCmd
+# OpenSSL entropy file dropped by ZXPSignCmd while generating the certificate.
+.rnd
 
 # Windows specific
 thumbs.db

@@ -20,11 +20,28 @@
 
   var state = {
     appHost: "http://127.0.0.1:7860",
+    projectRoot: "",
+    python: "python",
     jobId: null,
     polling: null,
     result: null,
-    logLines: 0
+    logLines: 0,
+    starting: false
   };
+
+  /* Node is available because the manifest enables it. Guarded so a CEP build
+     without Node degrades to "server offline" instead of a blank panel. */
+  var node = (function () {
+    try {
+      return {
+        fs: require("fs"),
+        path: require("path"),
+        child: require("child_process")
+      };
+    } catch (e) {
+      return null;
+    }
+  })();
 
   // ── element lookup ──────────────────────────────────────────────────
   function $(id) { return document.getElementById(id); }
@@ -115,17 +132,82 @@
 
   // ── connection ──────────────────────────────────────────────────────
 
-  function checkConnection() {
+  function checkConnection(onOffline) {
     request("GET", "/api/compilation/jobs", null, function (err) {
       if (err) {
         setConn("bad", "server offline");
         els.start.disabled = true;
-        els.statusDetail.textContent = "";
+        if (onOffline) onOffline();
         return;
       }
       setConn("ok", "connected");
       els.start.disabled = false;
+      state.starting = false;
     });
+  }
+
+  /**
+   * Start the Auto-Clip server ourselves when it is not running.
+   *
+   * The panel only appears inside an open project, so the natural moment to
+   * bring the server up is when the panel opens — otherwise the first thing a
+   * user sees is an error telling them to go run something in a terminal.
+   *
+   * Detached and unref'd on purpose: the server must outlive the panel, so
+   * closing the panel or Premiere does not kill a running job.
+   */
+  function startServer() {
+    if (state.starting) return;
+    if (!node || !state.projectRoot) {
+      setConn("bad", "server offline");
+      els.statusDetail.textContent =
+        "Start it with start-workspace.bat in the Auto-Clip folder.";
+      return;
+    }
+
+    state.starting = true;
+    setConn("busy", "starting server…");
+
+    try {
+      var child = node.child.spawn(
+        state.python,
+        ["run_web.py", "--host", "127.0.0.1", "--port", String(portOf(state.appHost))],
+        { cwd: state.projectRoot, detached: true, stdio: "ignore", windowsHide: true }
+      );
+      child.unref();
+    } catch (e) {
+      state.starting = false;
+      setConn("bad", "could not start server");
+      els.statusDetail.textContent = String(e);
+      return;
+    }
+
+    // Poll rather than guess: uvicorn takes a moment, and a fixed delay would
+    // either feel slow or report failure too early.
+    var attempts = 0;
+    var timer = setInterval(function () {
+      attempts++;
+      request("GET", "/api/compilation/jobs", null, function (err) {
+        if (!err) {
+          clearInterval(timer);
+          state.starting = false;
+          setConn("ok", "connected");
+          els.start.disabled = false;
+        } else if (attempts >= 30) {           // ~30s
+          clearInterval(timer);
+          state.starting = false;
+          setConn("bad", "server did not start");
+          els.statusDetail.textContent =
+            "Check the Auto-Clip folder setting, or start it manually with " +
+            "start-workspace.bat.";
+        }
+      });
+    }, 1000);
+  }
+
+  function portOf(host) {
+    var match = /:(\d+)/.exec(host);
+    return match ? match[1] : "7860";
   }
 
   // ── running a job ───────────────────────────────────────────────────
@@ -265,7 +347,23 @@
 
   // ── settings ────────────────────────────────────────────────────────
 
+  /**
+   * Config written by the installer, which is the only party that knows where
+   * the Auto-Clip project lives — the panel itself is installed into the CEP
+   * extensions folder, far away from it. A user override in localStorage wins.
+   */
   function loadSettings() {
+    if (node) {
+      try {
+        var configPath = node.path.join(__dirname, "panel-config.json");
+        var config = JSON.parse(node.fs.readFileSync(configPath, "utf-8"));
+        state.projectRoot = config.projectRoot || "";
+        state.python = config.python || "python";
+        if (config.appHost) state.appHost = config.appHost;
+      } catch (e) {
+        // No config: the panel still works against an already-running server.
+      }
+    }
     try {
       var saved = window.localStorage.getItem(STORAGE_KEY);
       if (saved) state.appHost = saved;
@@ -300,6 +398,10 @@
   });
 
   loadSettings();
-  checkConnection();
-  setInterval(function () { if (!state.jobId) checkConnection(); }, 10000);
+  // Opening the panel is the moment to bring the server up, so the first
+  // thing a user sees is a working panel rather than an error.
+  checkConnection(startServer);
+  setInterval(function () {
+    if (!state.jobId && !state.starting) checkConnection();
+  }, 10000);
 })();
