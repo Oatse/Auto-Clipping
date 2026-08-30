@@ -188,8 +188,19 @@ def ensure_process(
 
 
 def _spawn(command: Sequence[str], cwd: Path | None) -> None:
-    """Start a detached child that outlives the launcher."""
-    kwargs: dict = {"cwd": str(cwd) if cwd else None}
+    """Start a detached child that outlives the launcher.
+
+    stdio goes to DEVNULL, which is not optional: a DETACHED_PROCESS child
+    inherits no console, so the first ``print`` from a server that assumes one
+    fails and the process dies seconds after starting — looking exactly like
+    "the app never came up".
+    """
+    kwargs: dict = {
+        "cwd": str(cwd) if cwd else None,
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
     if sys.platform == "win32":
         # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP so closing the
         # launcher console does not take the service down with it.

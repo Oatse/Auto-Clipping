@@ -132,12 +132,39 @@
 
   // ── connection ──────────────────────────────────────────────────────
 
+  /**
+   * Three distinct outcomes, because they need three different fixes:
+   *   no answer  -> nothing is listening; we can start it ourselves.
+   *   404        -> something IS listening but has no compilation route, i.e.
+   *                 an older server still running. Starting another would not
+   *                 help and would collide on the port; it must be restarted.
+   *   200        -> ready.
+   * Treating 404 as "connected" is what let the panel report success and then
+   * fail the first job with a bare "Not Found".
+   */
   function checkConnection(onOffline) {
-    request("GET", "/api/compilation/jobs", null, function (err) {
+    request("GET", "/api/compilation/jobs", null, function (err, body, status) {
       if (err) {
         setConn("bad", "server offline");
         els.start.disabled = true;
         if (onOffline) onOffline();
+        return;
+      }
+      if (status === 404) {
+        setConn("bad", "server outdated");
+        els.start.disabled = true;
+        state.starting = false;
+        els.statusCard.hidden = false;
+        els.statusPhase.textContent = "Server needs restarting";
+        els.statusDetail.textContent =
+          "The Auto-Clip server is running an older build without the " +
+          "compilation endpoints. Stop it and start it again, then reopen " +
+          "this panel.";
+        return;
+      }
+      if (status >= 400) {
+        setConn("bad", "server error " + status);
+        els.start.disabled = true;
         return;
       }
       setConn("ok", "connected");

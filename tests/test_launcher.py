@@ -95,6 +95,23 @@ class TestEnsureHttpService:
         assert status.state is State.UNAVAILABLE
         assert not status.ok
 
+    def test_detached_child_gets_null_stdio(self, monkeypatch):
+        # Regression: a DETACHED_PROCESS child inherits no console, so the
+        # first print from a server assuming one kills it seconds after
+        # launch — indistinguishable from "the app never came up".
+        captured = {}
+
+        class FakePopen:
+            def __init__(self, command, **kwargs):
+                captured.update(kwargs)
+
+        monkeypatch.setattr(comp.subprocess, "Popen", FakePopen)
+        comp._spawn(["python", "run_web.py"], None)
+
+        assert captured["stdout"] == comp.subprocess.DEVNULL
+        assert captured["stderr"] == comp.subprocess.DEVNULL
+        assert captured["stdin"] == comp.subprocess.DEVNULL
+
     def test_reports_unavailable_when_spawn_raises(self, monkeypatch):
         monkeypatch.setattr(comp, "http_alive", lambda url, timeout=2.0: False)
 
