@@ -1,7 +1,7 @@
 # Compilation Output + Premiere Handoff — Rencana Matang
 
 **Branch:** `feat/compilation-premiere-handoff`
-**Status:** Backbone SELESAI & teruji (460 test hijau). Sisa: integrasi bridge MCP (butuh premiere-pro-mcp terpasang).
+**Status:** ✅ **SELESAI SEMUA** — 526 test hijau, terverifikasi end-to-end di Premiere Pro 2023 yang berjalan.
 
 ## Implementation Status
 
@@ -19,8 +19,15 @@ Selesai, ter-commit & ter-push:
 - [x] **Step 6** — Bridge Premiere: `premiere-pro-mcp` terpasang, `bridge_client.py` (Python→Premiere, teruji live), import one-click dari panel. `085148e` `994a356`
 - [x] **Panel Auto-Clip** — UI penuh di dalam Premiere (URL, model, ambang, progress, daftar momen, tombol Import), signed + auto-start server. `da8de88`
 
-Belum:
-- [ ] **Step 4b** — Loop subtitle all-in Premiere. **Butuh export audio dari timeline Premiere**, dan itu memerlukan preset `.epr` / Adobe Media Encoder (`exportAsMediaDirect(path, presetPath, workAreaType)`). Ini satu-satunya bagian yang belum punya jalur teknis terverifikasi.
+- [x] **Step 4b** — Loop subtitle all-in Premiere: export audio timeline → ElevenLabs → translate EN → SRT → balik ke Premiere. `6e99958`
+
+**SEMUA STEP SELESAI.** Terverifikasi live di Premiere 2023: `exportAsMediaDirect` dengan preset bawaan `Waveform Audio 48kHz 16-bit.epr` merender timeline 13.4 menit ke WAV dalam **15 detik**, dan satu pass nyata menghasilkan **247 cue UTF-8 valid**.
+
+Keputusan penting di Step 4b:
+- Transkripsi jalan pada **hasil edit**, bukan VOD sumber — hanya Premiere yang tahu isi potongan final, dan tagihan ElevenLabs jadi proporsional dengan yang benar-benar tayang. Karena audio-nya *adalah* timeline, timing tidak perlu dipetakan ulang.
+- **Translate ke EN default aktif** (pakai `TranslatorProcessor` yang sudah ada). Kalau translate gagal, caption bahasa sumber tetap disimpan — transkripsi sudah terbayar.
+- Endpoint = **job yang di-poll**, bukan request ditahan. Versi pertama sinkron dan setiap run nyata pasti timeout.
+- Audio hasil export dihapus default (~150 MB/run).
 - [x] ~~Step 8 — Auto-connect projek~~ — **TIDAK PERLU LAGI.** Panel hanya berjalan di dalam projek yang sudah terbuka, dan `importFiles` memasukkan timeline ke projek itu. Rencana "bikin projek baru otomatis" jadi mubazir.
 
 ## Temuan penting dari uji nyata (Premiere 2023)
