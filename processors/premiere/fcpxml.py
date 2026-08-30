@@ -22,12 +22,15 @@ from __future__ import annotations
 import xml.etree.ElementTree as ET
 from fractions import Fraction
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import TYPE_CHECKING, Sequence
 from xml.dom import minidom
 
 from models.clip import Clip
 
 from .source import MediaInfo
+
+if TYPE_CHECKING:  # pragma: no cover — import only for type checkers
+    from .clip_extract import ExtractedClip
 
 _DOCTYPE = "<!DOCTYPE xmeml>"
 
@@ -75,6 +78,71 @@ def path_to_url(path: Path) -> str:
 
 
 # ─── Timeline construction ───────────────────────────────────────────────────
+
+
+def build_fcpxml_from_extracted(
+    extracted: Sequence["ExtractedClip"],
+    master: MediaInfo,
+    *,
+    sequence_name: str = "Clip Finder Compilation",
+    source_url: str = "",
+) -> str:
+    """Timeline over per-moment media files rather than the master.
+
+    Each moment is its own short file with handles either side, so Premiere
+    seeks inside a small clip instead of an 80-minute one — the difference
+    between a timeline that scrubs and one that stalls. The in/out points are
+    offset by each clip's handle, so trimming outward still has material.
+    """
+    xmeml = ET.Element("xmeml", {"version": "4"})
+    sequence = ET.SubElement(xmeml, "sequence", {"id": "sequence-1"})
+    ET.SubElement(sequence, "name").text = sequence_name
+
+    spans = [
+        max(0, seconds_to_frames(item.clip.duration, master.fps))
+        for item in extracted
+    ]
+    ET.SubElement(sequence, "duration").text = str(sum(spans))
+    _rate_element(sequence, master)
+    if source_url:
+        ET.SubElement(sequence, "comments").text = f"Source: {source_url}"
+
+    media = ET.SubElement(sequence, "media")
+    video = ET.SubElement(media, "video")
+    _video_format(video, master)
+    video_track = ET.SubElement(video, "track")
+    audio = ET.SubElement(media, "audio")
+    audio_track = ET.SubElement(audio, "track")
+
+    timeline_frame = 0
+    for index, (item, span) in enumerate(zip(extracted, spans), start=1):
+        if span <= 0:
+            continue
+        in_frame = seconds_to_frames(item.handle_start, master.fps)
+        out_frame = in_frame + span
+        file_id = f"file-moment-{index}"
+
+        for media_type, track in (("video", video_track), ("audio", audio_track)):
+            _clipitem(
+                track,
+                clip=item.clip,
+                index=index,
+                master=master,
+                timeline_start=timeline_frame,
+                in_frame=in_frame,
+                out_frame=out_frame,
+                media_type=media_type,
+                # Each moment is a different file, so every one must be
+                # described — unlike the single-master timeline, where the
+                # file is defined once and referenced by id.
+                define_file=(media_type == "video"),
+                file_id=file_id,
+                file_path=item.path,
+                file_duration=item.duration,
+            )
+        timeline_frame += span
+
+    return _serialise(xmeml)
 
 
 def build_fcpxml(
@@ -184,6 +252,9 @@ def _clipitem(
     out_frame: int,
     media_type: str,
     define_file: bool,
+    file_id: str = "file-master",
+    file_path: Path | None = None,
+    file_duration: float | None = None,
 ) -> None:
     """Append one clipitem (video or audio) to ``track``."""
     item_id = f"clipitem-{media_type}-{index}"
@@ -196,14 +267,17 @@ def _clipitem(
     ET.SubElement(item, "in").text = str(in_frame)
     ET.SubElement(item, "out").text = str(out_frame)
 
-    file_el = ET.SubElement(item, "file", {"id": "file-master"})
+    media_file = file_path or master.path
+    media_seconds = file_duration if file_duration is not None else master.duration
+
+    file_el = ET.SubElement(item, "file", {"id": file_id})
     if define_file:
-        ET.SubElement(file_el, "name").text = master.path.name
-        ET.SubElement(file_el, "pathurl").text = path_to_url(master.path)
+        ET.SubElement(file_el, "name").text = media_file.name
+        ET.SubElement(file_el, "pathurl").text = path_to_url(media_file)
         _rate_element(file_el, master)
-        if master.duration > 0:
+        if media_seconds and media_seconds > 0:
             ET.SubElement(file_el, "duration").text = str(
-                seconds_to_frames(master.duration, master.fps)
+                seconds_to_frames(media_seconds, master.fps)
             )
         file_media = ET.SubElement(file_el, "media")
         fmv = ET.SubElement(file_media, "video")

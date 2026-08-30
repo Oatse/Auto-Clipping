@@ -92,6 +92,10 @@ class SubtitleRequest(BaseModel):
     # translation defaults on. Set to "" to keep the source language.
     translate_to: str = "en"
     translator_backend: str = ""
+    # Same defaults as the auto-subtitle workspace, so captions produced here
+    # read identically to the ones produced there.
+    spicy_filter: bool = True
+    natural_caption: bool = True
 
 
 class SubtitleJob(BaseModel):
@@ -264,6 +268,8 @@ async def _run_subtitle(job_id: str, req: SubtitleRequest) -> None:
             import_back=req.import_back,
             translate_to=req.translate_to or None,
             translator_backend=req.translator_backend or None,
+            spicy_filter=req.spicy_filter,
+            natural_caption=req.natural_caption,
             log_fn=log,
         )
         job.srt_path = _absolute(result.srt)

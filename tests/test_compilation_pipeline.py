@@ -152,6 +152,85 @@ class TestBuildCompilation:
 
 # ─── Concurrency ─────────────────────────────────────────────────────────────
 
+class TestClipExtraction:
+    """Cutting moments out of the master is what makes the timeline editable;
+    referencing an 80-minute long-GOP file is why scrubbing stalls."""
+
+    def _patch_extract(self, monkeypatch, tmp_path, *, succeed_count=None):
+        calls: dict = {}
+
+        async def fake_extract(*, master, clips, output_dir, **kwargs):
+            calls["clips"] = list(clips)
+            calls["kwargs"] = kwargs
+            from processors.premiere.clip_extract import ExtractedClip
+
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            made = []
+            wanted = len(clips) if succeed_count is None else succeed_count
+            for i, clip in enumerate(clips[:wanted], start=1):
+                path = Path(output_dir) / f"moment_{i:03d}.mp4"
+                path.write_bytes(b"x")
+                made.append(
+                    ExtractedClip(clip=clip, path=path, handle_start=15.0,
+                                  duration=clip.duration + 30.0)
+                )
+            return made
+
+        import processors.premiere.clip_extract as ce
+
+        monkeypatch.setattr(ce, "extract_moments", fake_extract)
+        return calls
+
+    def test_timeline_references_the_extracted_clips(self, tmp_path, monkeypatch):
+        _patch_master(monkeypatch, tmp_path)
+        self._patch_extract(monkeypatch, tmp_path)
+
+        result = asyncio.run(build_compilation(
+            url="u", output_dir=tmp_path, api_keys=["k"], finder=FakeFinder(),
+        ))
+
+        assert len(result.clip_files) == 2
+        xml = result.fcpxml.read_text(encoding="utf-8")
+        assert "moment_001.mp4" in xml
+        assert "master.mp4" not in xml
+
+    def test_handles_are_passed_through(self, tmp_path, monkeypatch):
+        _patch_master(monkeypatch, tmp_path)
+        calls = self._patch_extract(monkeypatch, tmp_path)
+
+        asyncio.run(build_compilation(
+            url="u", output_dir=tmp_path, api_keys=["k"], finder=FakeFinder(),
+            handle_seconds=30.0, clip_quality=25,
+        ))
+        assert calls["kwargs"]["handle_seconds"] == 30.0
+        assert calls["kwargs"]["quality"] == 25
+
+    def test_extraction_can_be_disabled(self, tmp_path, monkeypatch):
+        _patch_master(monkeypatch, tmp_path)
+        calls = self._patch_extract(monkeypatch, tmp_path)
+
+        result = asyncio.run(build_compilation(
+            url="u", output_dir=tmp_path, api_keys=["k"], finder=FakeFinder(),
+            extract_clips=False,
+        ))
+        assert calls == {}                       # never called
+        assert result.clip_files == []
+        assert "master.mp4" in result.fcpxml.read_text(encoding="utf-8")
+
+    def test_partial_failure_falls_back_wholesale(self, tmp_path, monkeypatch):
+        # A half-extracted timeline would reference two kinds of media with
+        # different in/out semantics; falling back keeps it consistent.
+        _patch_master(monkeypatch, tmp_path)
+        self._patch_extract(monkeypatch, tmp_path, succeed_count=1)
+
+        result = asyncio.run(build_compilation(
+            url="u", output_dir=tmp_path, api_keys=["k"], finder=FakeFinder(),
+        ))
+        xml = result.fcpxml.read_text(encoding="utf-8")
+        assert "master.mp4" in xml
+        assert "moment_001.mp4" not in xml
+
+
 class TestParallelism:
     def test_download_and_analysis_overlap(self, tmp_path, monkeypatch):
         # The whole point of the pipeline's shape: a long master download

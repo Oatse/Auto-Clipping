@@ -43,6 +43,8 @@ class CompilationResult:
     fcpxml: Path | None = None
     manifest: Path | None = None
     media: MediaInfo | None = None
+    # Per-moment media files, when the moments were cut out of the master.
+    clip_files: list[Path] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
 
     @property
@@ -69,6 +71,12 @@ async def build_compilation(
     enable_chat: bool = True,
     enable_audio: bool = True,
     download_master: bool = True,
+    # Cutting the moments out of the master is what makes the timeline
+    # editable; referencing the long-GOP master directly is why scrubbing
+    # stalls. Handles keep in/out adjustable after the cut.
+    extract_clips: bool | None = None,
+    handle_seconds: float | None = None,
+    clip_quality: int | None = None,
     finder: ClipFinder | None = None,
     log_fn: LogFn | None = None,
 ) -> CompilationResult:
@@ -161,13 +169,62 @@ async def build_compilation(
 
     result.media = probe_media(master_path, log_fn=log_fn)
     name = project_name.strip() or f"Compilation {time.strftime('%Y-%m-%d %H%M')}"
-    result.fcpxml = write_fcpxml(
-        result.clips,
-        result.media,
-        output_dir / "compilation.xml",
-        sequence_name=name,
-        source_url=url,
+
+    # Cut the moments into their own files before building the timeline.
+    # Referencing an 80-minute long-GOP master at scattered points makes
+    # Premiere decode hundreds of frames per seek; short clips scrub instantly.
+    # Handles keep the in/out points adjustable, and the master stays on disk
+    # for anything bigger than a trim.
+    should_extract = (
+        getattr(_config, "COMPILATION_EXTRACT_CLIPS", True)
+        if extract_clips is None else extract_clips
     )
+    extracted = []
+    if should_extract:
+        from .clip_extract import extract_moments
+
+        extracted = await extract_moments(
+            master=master_path,
+            clips=result.clips,
+            output_dir=output_dir / "clips",
+            fps=result.media.fps_float,
+            handle_seconds=(
+                getattr(_config, "COMPILATION_HANDLE_SECONDS", 15.0)
+                if handle_seconds is None else handle_seconds
+            ),
+            quality=(
+                getattr(_config, "COMPILATION_CLIP_QUALITY", 23)
+                if clip_quality is None else clip_quality
+            ),
+            master_duration=result.media.duration,
+            log_fn=log_fn,
+        )
+        result.clip_files = [item.path for item in extracted]
+
+    if extracted and len(extracted) == len(result.clips):
+        from .fcpxml import build_fcpxml_from_extracted
+
+        xml = build_fcpxml_from_extracted(
+            extracted, result.media, sequence_name=name, source_url=url,
+        )
+        fcpxml_path = output_dir / "compilation.xml"
+        fcpxml_path.write_text(xml, encoding="utf-8")
+        result.fcpxml = fcpxml_path
+    else:
+        # Any clip that failed to extract means falling back wholesale, so the
+        # timeline stays internally consistent rather than half-and-half.
+        if should_extract and extracted:
+            log(
+                "Some moments could not be cut — the timeline will reference "
+                "the master instead (editing may feel heavier)."
+            )
+        result.fcpxml = write_fcpxml(
+            result.clips,
+            result.media,
+            output_dir / "compilation.xml",
+            sequence_name=name,
+            source_url=url,
+        )
     result.manifest = _write_manifest(result, output_dir, url=url, name=name)
     log(f"Compilation: timeline written to {result.fcpxml.name} — import it in Premiere")
     return result

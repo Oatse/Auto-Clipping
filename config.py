@@ -229,6 +229,24 @@ CLIP_FINDER_COMPILATION_MAX: int = int(
     os.getenv("CLIP_FINDER_COMPILATION_MAX", "60")
 )
 
+# Cut each moment into its own short file before building the timeline.
+# A YouTube master is long-GOP (keyframe roughly every 6 s), so referencing an
+# 80-minute file at scattered points makes Premiere decode hundreds of frames
+# per seek and the timeline stalls. Short clips with a 1-second GOP scrub
+# instantly. Costs disk and a few minutes of encoding; set false to reference
+# the master directly instead.
+COMPILATION_EXTRACT_CLIPS: bool = (
+    os.getenv("COMPILATION_EXTRACT_CLIPS", "true").lower() == "true"
+)
+# Padding either side of each moment, so in/out stay adjustable after the cut.
+COMPILATION_HANDLE_SECONDS: float = float(
+    os.getenv("COMPILATION_HANDLE_SECONDS", "15")
+)
+# CQ/CRF for the editing intermediate. Higher = smaller and softer.
+COMPILATION_CLIP_QUALITY: int = int(
+    os.getenv("COMPILATION_CLIP_QUALITY", "23")
+)
+
 # Claude via 9router direct (NON-Kiro; ``cc/`` prefix). Distinct from the
 # Kiro Pro ``kr/`` route above — this is the plain 9router Claude endpoint.
 CLIP_FINDER_CLAUDE_MODEL: str = os.getenv(

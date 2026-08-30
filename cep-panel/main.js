@@ -58,6 +58,7 @@
     resultCard: $("resultCard"), resultTitle: $("resultTitle"),
     resultMeta: $("resultMeta"), moments: $("moments"),
     importBtn: $("import"), revealBtn: $("reveal"), subtitle: $("subtitle"),
+    subSource: $("subSource"), subTarget: $("subTarget"),
     appUrl: $("appUrl"), settings: $("settings"),
     settingsSheet: $("settingsSheet"), appHost: $("appHost"),
     saveSettings: $("saveSettings")
@@ -119,6 +120,30 @@
   function setConn(kind, text) {
     els.connDot.className = "dot " + kind;
     els.connText.textContent = text;
+  }
+
+  /**
+   * Reset the status card before starting anything.
+   *
+   * Without this a failure message outlives the action that produced it — an
+   * old "Import failed" sat above a fresh, successful result, which reads as
+   * the new run having failed.
+   */
+  function beginStatus(phase, detail) {
+    els.statusCard.hidden = false;
+    els.statusPhase.textContent = phase;
+    els.statusDetail.textContent = detail || "";
+    els.log.textContent = "";
+    state.logLines = 0;
+    els.bar.className = "fill indeterminate";
+    els.bar.style.width = "";
+  }
+
+  function endStatus(phase, detail) {
+    els.bar.className = "fill";
+    els.bar.style.width = "100%";
+    els.statusPhase.textContent = phase;
+    els.statusDetail.textContent = detail || "";
   }
 
   function appendLog(lines) {
@@ -245,13 +270,11 @@
 
     els.start.disabled = true;
     els.resultCard.hidden = true;
-    els.statusCard.hidden = false;
-    els.log.textContent = "";
-    state.logLines = 0;
     state.result = null;
-    els.bar.className = "fill indeterminate";
-    els.statusPhase.textContent = "Starting…";
-    els.statusDetail.textContent = "Analysing the stream and downloading the master in parallel.";
+    beginStatus(
+      "Starting…",
+      "Analysing the stream and downloading the master in parallel."
+    );
 
     var payload = {
       url: url,
@@ -346,21 +369,19 @@
   function importTimeline() {
     if (!state.result || !state.result.fcpxml_path) return;
     els.importBtn.disabled = true;
-    els.statusCard.hidden = false;
-    els.statusPhase.textContent = "Importing…";
-    els.statusDetail.textContent = "Building the sequence in Premiere.";
+    beginStatus("Importing…", "Building the sequence in Premiere.");
 
     host('acImportFcpXml("' + esc(state.result.fcpxml_path) + '")', function (err) {
       els.importBtn.disabled = false;
       if (err) {
-        els.statusPhase.textContent = "Import failed";
-        els.statusDetail.textContent = err.message;
+        endStatus("Import failed", err.message);
         return;
       }
-      els.statusPhase.textContent = "Imported";
-      els.statusDetail.textContent =
-        "The sequence is in your project. The master stays whole, so every " +
-        "clip can still be re-trimmed.";
+      endStatus(
+        "Imported",
+        "The sequence is in your project. Each moment is its own clip with " +
+        "spare footage either side, so you can still trim outward."
+      );
     });
   }
 
@@ -371,18 +392,18 @@
    */
   function subtitleTimeline() {
     els.subtitle.disabled = true;
-    els.statusCard.hidden = false;
-    els.log.textContent = "";
-    state.logLines = 0;
-    els.bar.className = "fill indeterminate";
-    els.statusPhase.textContent = "Subtitling…";
-    els.statusDetail.textContent =
-      "Exporting the timeline audio, then transcribing it. This can take a " +
-      "few minutes on a long sequence.";
+    var target = els.subTarget.options[els.subTarget.selectedIndex].text;
+    beginStatus(
+      "Subtitling…",
+      "Exporting the timeline audio, then transcribing" +
+      (els.subTarget.value ? " and translating to " + target : "") +
+      ". This can take a few minutes on a long sequence."
+    );
 
     var payload = {
       job_id: state.result ? state.result.id : null,
-      translate_to: "en"
+      language: els.subSource.value,      // "" lets the engine detect it
+      translate_to: els.subTarget.value   // "" keeps the spoken language
     };
 
     request("POST", "/api/compilation/subtitle", payload, function (err, body) {
@@ -418,21 +439,21 @@
         }
 
         els.subtitle.disabled = false;
-        els.bar.className = "fill";
-        els.bar.style.width = "100%";
 
         if (job.status !== "completed") {
-          els.statusPhase.textContent = "Subtitling failed";
-          els.statusDetail.textContent =
-            (job.errors || []).join("; ") || "the run produced no captions";
+          endStatus(
+            "Subtitling failed",
+            (job.errors || []).join("; ") || "the run produced no captions"
+          );
           return;
         }
-        els.statusPhase.textContent = "Captions ready";
-        els.statusDetail.textContent =
+        endStatus(
+          "Captions ready",
           job.segment_count + " caption(s)" +
           (job.imported
             ? " imported into the project — drag them onto a caption track."
-            : " written to " + job.srt_path);
+            : " written to " + job.srt_path)
+        );
       });
   }
 
@@ -466,9 +487,22 @@
     try {
       var saved = window.localStorage.getItem(STORAGE_KEY);
       if (saved) state.appHost = saved;
+      // Language choices are per-channel and rarely change, so remembering
+      // them saves re-picking on every run.
+      var src = window.localStorage.getItem(STORAGE_KEY + ".source");
+      var tgt = window.localStorage.getItem(STORAGE_KEY + ".target");
+      if (src !== null) els.subSource.value = src;
+      if (tgt !== null) els.subTarget.value = tgt;
     } catch (e) {}
     els.appHost.value = state.appHost;
     els.appUrl.textContent = state.appHost;
+  }
+
+  function rememberLanguages() {
+    try {
+      window.localStorage.setItem(STORAGE_KEY + ".source", els.subSource.value);
+      window.localStorage.setItem(STORAGE_KEY + ".target", els.subTarget.value);
+    } catch (e) {}
   }
 
   function saveSettings() {
@@ -485,6 +519,8 @@
   els.importBtn.addEventListener("click", importTimeline);
   els.revealBtn.addEventListener("click", revealFiles);
   els.subtitle.addEventListener("click", subtitleTimeline);
+  els.subSource.addEventListener("change", rememberLanguages);
+  els.subTarget.addEventListener("change", rememberLanguages);
   els.cancel.addEventListener("click", function () { els.statusCard.hidden = true; });
   els.settings.addEventListener("click", function () {
     els.settingsSheet.hidden = !els.settingsSheet.hidden;

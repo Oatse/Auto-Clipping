@@ -111,6 +111,30 @@
         Transcribes the sequence you have open, so it matches your finished cut
         &mdash; and only bills for what actually airs.
       </p>
+      <div class="row">
+        <label class="field">
+          <span>Spoken language</span>
+          <select id="subSource">
+            <option value="" selected>Detect automatically</option>
+            <option value="jpn">Japanese</option>
+            <option value="eng">English</option>
+            <option value="ind">Indonesian</option>
+            <option value="kor">Korean</option>
+            <option value="zho">Chinese</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Caption language</span>
+          <select id="subTarget">
+            <option value="en" selected>English</option>
+            <option value="id">Indonesian</option>
+            <option value="ja">Japanese</option>
+            <option value="ko">Korean</option>
+            <option value="zh">Chinese</option>
+            <option value="">Keep original</option>
+          </select>
+        </label>
+      </div>
       <button id="subtitle" class="ghost">Subtitle open timeline</button>
     </section>
   </main>

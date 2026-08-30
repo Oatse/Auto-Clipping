@@ -213,16 +213,23 @@ async def subtitle_timeline(
     import_back: bool = True,
     translate_to: str | None = None,
     translator_backend: str | None = None,
+    spicy_filter: bool = True,
+    natural_caption: bool = True,
     engine=None,
     translator=None,
     log_fn: LogFn | None = None,
 ) -> SubtitleResult:
     """Export the open sequence's audio, transcribe it, and return captions.
 
-    ``translate_to`` runs the existing translator over the transcript before
-    the SRT is written — a Japanese stream captioned for an English audience
-    is the normal case here, not an extra. Timing is preserved; only the text
-    changes.
+    Text processing deliberately mirrors the auto-subtitle pipeline rather
+    than inventing its own: translate with word-level regrouping, then apply
+    the natural caption style. That combination is the tuned one, and captions
+    built any other way come out visibly more ragged — arbitrary recogniser
+    chunks, trailing micro-punctuation, and segments that overstay on screen.
+
+    ``translate_to`` captions a Japanese stream for an English audience, which
+    is the normal case here rather than an extra. Timing survives; only the
+    text changes.
 
     Failures are reported on the result rather than raised, so a run that
     transcribes successfully but cannot import still hands back the SRT.
@@ -280,15 +287,39 @@ async def subtitle_timeline(
                 translator = TranslatorProcessor(
                     target_language=translate_to,
                     backend=translator_backend,
+                    spicy_filter=spicy_filter,
                 )
-            translated, _ = await translator.translate(result.segments, output_dir)
+            # regroup=True is what makes the captions read well: it re-cuts
+            # them on word-level timings from the transcript instead of
+            # keeping the recogniser's arbitrary chunks. This mirrors the
+            # auto-subtitle pipeline exactly (web/services/pipeline_runner),
+            # which is the tuned path — captions produced any other way come
+            # out noticeably more ragged.
+            translated, _ = await translator.translate(
+                segments=result.segments,
+                output_dir=output_dir,
+                regroup=True,
+            )
             result.segments = list(translated)
-            log(f"Translated to {translate_to}")
+            log(f"Translated to {translate_to} with word-level regrouping")
         except Exception as exc:  # noqa: BLE001
             # Keep the source-language captions rather than losing the whole
             # run: they are still usable, and the transcription is already paid
             # for.
             result.errors.append(f"translation failed, keeping source text: {exc}")
+
+    if natural_caption:
+        # Second half of the tuned recipe: drop trailing micro-punctuation and
+        # split over-long segments so no caption hangs on screen too long.
+        # Idempotent, so running it after a failed translation is safe.
+        try:
+            from processors.timing import apply_natural_caption_style
+
+            before = len(result.segments)
+            result.segments = list(apply_natural_caption_style(result.segments))
+            log(f"Caption styling: {before} → {len(result.segments)} segment(s)")
+        except Exception as exc:  # noqa: BLE001
+            result.errors.append(f"caption styling skipped: {exc}")
 
     result.srt = write_srt(result.segments, output_dir / "timeline.srt")
 
