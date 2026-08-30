@@ -174,12 +174,46 @@ class TestOperations:
         script = self._capture(tmp_path, lambda b: b.ping())
         assert "app.version" in script
 
-    def test_import_uses_openFCPXML(self, tmp_path):
+    def test_import_goes_into_the_open_project(self, tmp_path):
+        # importFiles, not openFCPXML: openFCPXML needs a destination project
+        # path and creates a SEPARATE project, which is not what someone with
+        # their project already open wants.
         script = self._capture(
             tmp_path, lambda b: b.import_fcpxml(Path("D:/out/compilation.xml")),
         )
+        assert "importFiles" in script
+        assert "app.openFCPXML" not in script
+        assert "compilation.xml" in script
+
+    def test_import_checks_the_file_exists_first(self, tmp_path):
+        script = self._capture(
+            tmp_path, lambda b: b.import_fcpxml(Path("D:/out/compilation.xml")),
+        )
+        assert "new File(" in script
+        assert "exists" in script
+
+    def test_import_path_is_absolute(self, tmp_path):
+        # Premiere has its own working directory; a relative path resolves to
+        # nothing there.
+        script = self._capture(
+            tmp_path, lambda b: b.import_fcpxml(Path("relative/compilation.xml")),
+        )
+        assert "relative/compilation.xml" not in script.replace("\\\\", "/") or \
+            str(Path("relative/compilation.xml").resolve()).replace("\\", "/") \
+            in script.replace("\\\\", "/")
+
+    def test_open_as_project_uses_both_openFCPXML_params(self, tmp_path):
+        # The signature openFCPXML actually requires; one argument fails with
+        # "Not Enough Parameters".
+        script = self._capture(
+            tmp_path,
+            lambda b: b.open_fcpxml_as_project(
+                Path("D:/out/compilation.xml"), Path("D:/out/new.prproj"),
+            ),
+        )
         assert "app.openFCPXML" in script
         assert "compilation.xml" in script
+        assert "new.prproj" in script
 
     def test_new_project_uses_newProject(self, tmp_path):
         script = self._capture(

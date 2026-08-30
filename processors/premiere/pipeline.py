@@ -78,6 +78,11 @@ async def build_compilation(
     ``errors`` rather than raised, so a partial run (moments found but the
     master download failed) still hands back the moment list.
     """
+    # Resolve up front so every path this run reports is absolute. Premiere
+    # runs with its own working directory, so a relative path reaches it as
+    # "output/compilation/..." and resolves to nothing — the import and the
+    # reveal-folder action both fail with a confusing "not found".
+    output_dir = Path(output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
     result = CompilationResult()
 

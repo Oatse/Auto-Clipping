@@ -256,17 +256,49 @@ class PremiereBridge:
         )
 
     def import_fcpxml(self, path: Path) -> BridgeResponse:
-        """Import an FCP7 XML timeline into the current project.
+        """Import an FCP7 XML timeline into the project already open.
 
-        ``app.openFCPXML`` is the documented entry point; the same call the
-        connector's own import_fcp_xml tool uses.
+        Uses ``importFiles`` rather than ``app.openFCPXML``. openFCPXML takes
+        (xmlPath, destinationProjectPath): with one argument it fails with
+        "Not Enough Parameters", and used correctly it creates a SEPARATE
+        project — not what someone with their project open wants. See
+        :meth:`open_fcpxml_as_project` when a new project IS the goal.
+
+        The path is resolved because Premiere has its own working directory,
+        so a relative path silently resolves to nothing.
         """
         target = _escape(str(Path(path).resolve()))
         return self.execute(
-            f'app.openFCPXML("{target}");'
-            f"return '{{\"success\":true,\"data\":{{\"imported\":true,"
-            f"\"path\":\"{target}\"}}}}';",
+            f'var f = new File("{target}");'
+            "if (!f.exists) { return '{\"success\":false,\"error\":\"Timeline "
+            "file not found\"}'; }"
+            "var p = app.project;"
+            "if (!p) { return '{\"success\":false,\"error\":\"No project open\"}'; }"
+            "var before = p.sequences.numSequences;"
+            f'var okc = p.importFiles(["{target}"], true, p.rootItem, false);'
+            "var added = p.sequences.numSequences - before;"
+            "if (!okc) { return '{\"success\":false,\"error\":\"Premiere refused "
+            "the import\"}'; }"
+            "return '{\"success\":true,\"data\":{\"imported\":true,"
+            "\"sequencesAdded\":' + added + '}}';",
             timeout=max(self.timeout, 120.0),   # importing can be slow
+        )
+
+    def open_fcpxml_as_project(
+        self, xml_path: Path, project_path: Path
+    ) -> BridgeResponse:
+        """Create a NEW project from an FCP7 XML timeline.
+
+        The two-argument form openFCPXML actually requires. Use this only when
+        a separate project is wanted; :meth:`import_fcpxml` is the usual call.
+        """
+        xml = _escape(str(Path(xml_path).resolve()))
+        project = _escape(str(Path(project_path).resolve()))
+        return self.execute(
+            f'app.openFCPXML("{xml}", "{project}");'
+            "return '{\"success\":true,\"data\":{\"created\":true,"
+            f"\"project\":\"{project}\"}}}}';",
+            timeout=max(self.timeout, 120.0),
         )
 
 

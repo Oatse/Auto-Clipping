@@ -237,9 +237,12 @@ async def _run_compilation(job_id: str) -> None:
         job.moments = [c.to_dict() for c in result.clips]
         job.moment_count = len(result.clips)
         job.total_seconds = round(result.total_seconds, 2)
-        job.master_path = str(result.master) if result.master else None
-        job.fcpxml_path = str(result.fcpxml) if result.fcpxml else None
-        job.manifest_path = str(result.manifest) if result.manifest else None
+        # Absolute, always. These paths are handed to Premiere, which runs with
+        # its own working directory — a relative one resolves to nothing there
+        # and surfaces as a baffling "file not found" at import time.
+        job.master_path = _absolute(result.master)
+        job.fcpxml_path = _absolute(result.fcpxml)
+        job.manifest_path = _absolute(result.manifest)
 
         if result.ok:
             job.status = "completed"
@@ -264,6 +267,13 @@ async def _run_compilation(job_id: str) -> None:
         job.phase_label = "Failed"
         job.error = str(exc)
         log(f"ERROR: {exc}")
+
+
+def _absolute(path: Path | str | None) -> str | None:
+    """Absolute string form of a path, or None."""
+    if not path:
+        return None
+    return str(Path(path).resolve())
 
 
 def _get_job_or_404(job_id: str) -> CompilationJob:

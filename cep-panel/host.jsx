@@ -64,13 +64,46 @@ function acNewProject(path) {
 }
 
 /**
- * Import an FCP7 XML timeline into the current project.
- * app.openFCPXML is the documented entry point for this interchange format.
+ * Import an FCP7 XML timeline into the project that is already open.
+ *
+ * importFiles is used rather than app.openFCPXML deliberately. openFCPXML
+ * takes (xmlPath, destinationProjectPath) — calling it with one argument
+ * fails with "Not Enough Parameters", and calling it properly creates a
+ * SEPARATE project, which is not what someone with their project already
+ * open wants. importFiles brings the sequence into the current one.
+ *
+ * The path must be absolute: Premiere's working directory is its own, so a
+ * relative path silently resolves to nothing.
  */
 function acImportFcpXml(path) {
   try {
-    app.openFCPXML(path);
-    return acJson({ ok: true, imported: true, path: path });
+    var file = new File(path);
+    if (!file.exists) {
+      return acError("Timeline file not found: " + path);
+    }
+    var project = app.project;
+    if (!project) {
+      return acError("Open a project first, then import.");
+    }
+
+    var before = project.sequences.numSequences;
+    var imported = project.importFiles(
+      [path],
+      true,                    // suppressUI: no modal dialog to block the bridge
+      project.rootItem,
+      false                    // not an image sequence
+    );
+    var after = project.sequences.numSequences;
+
+    if (!imported) {
+      return acError("Premiere refused the timeline import.");
+    }
+    return acJson({
+      ok: true,
+      imported: true,
+      sequencesAdded: after - before,
+      path: path
+    });
   } catch (e) {
     return acError(e);
   }
