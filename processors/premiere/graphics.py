@@ -59,10 +59,18 @@ MAX_LANES = 4
 # failure into "batch 7 of 12 failed" instead of a lost session.
 BATCH_SIZE = 20
 
-# Refuse to place more than this without being asked twice. A long timeline
-# can produce several hundred cues, and that is precisely the load that took
-# Premiere down.
-SAFE_LIMIT = 400
+# Hard ceiling on how many graphics this will place.
+#
+# Set from evidence, not caution. Placing 276 captions took Premiere down even
+# when split into 14 batches: every importMGT unpacks the ~800 KB template and
+# adds a project item, so a full timeline means hundreds of megabytes of
+# unpacking and hundreds of items. Batching bought nothing.
+#
+# So this path is for a short section, not a finished compilation. For a whole
+# timeline, import a caption track and use Premiere's own
+# Captions > Upgrade Caption to Graphic, which converts the lot in one native
+# operation instead of importing a template hundreds of times.
+SAFE_LIMIT = 40
 
 
 @dataclass
@@ -244,9 +252,11 @@ def import_as_graphics(
 
     if limit is not None and len(cues) > limit:
         return BridgeResponse.failed(
-            f"{len(cues)} captions is more than this places at once ({limit}). "
-            "That volume of graphics is what makes Premiere unstable — subtitle "
-            "a shorter section, or use the caption-track mode instead."
+            f"{len(cues)} captions is too many to place as graphics (limit "
+            f"{limit}). Importing the template once per caption crashes "
+            "Premiere at this volume, batched or not. Use the caption track "
+            "instead, then Captions > Upgrade Caption to Graphic in Premiere — "
+            "it converts them all in one native operation."
         )
 
     lanes_used = max((c.lane for c in cues), default=0) + 1

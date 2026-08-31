@@ -154,14 +154,15 @@
       <label class="field">
         <span>Bring back as</span>
         <select id="subImportAs">
-          <option value="captions" selected>Caption track &mdash; light, one at a time</option>
-          <option value="graphics">Graphics &mdash; editable, overlaps allowed</option>
+          <option value="captions" selected>Caption track &mdash; recommended</option>
+          <option value="graphics">Graphics &mdash; short sections only</option>
         </select>
         <span class="hint">
-          Graphics are ordinary text clips: restyle or animate them freely, and
-          people talking at once land on separate tracks so both show. They are
-          far heavier on Premiere though &mdash; hundreds of them can destabilise
-          it, so prefer them on shorter timelines.
+          Use the caption track. For editable text, run
+          <strong>Captions &rsaquo; Upgrade Caption to Graphic</strong> in Premiere
+          afterwards &mdash; it converts them all in one go. The Graphics option
+          builds them here instead, which only holds up for a few dozen captions
+          before Premiere gives out.
         </span>
       </label>
       <button id="subtitle" class="ghost">Subtitle open timeline</button>

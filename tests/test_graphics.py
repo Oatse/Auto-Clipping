@@ -157,7 +157,7 @@ class TestImportAsGraphics:
             bridge,
             [_seg(i * 2, i * 2 + 1, f"line {i}") for i in range(50)],
             template=self._template(tmp_path),
-            batch_size=20,
+            batch_size=20, limit=None,
         )
         assert len(bridge.batch_scripts) == 3        # 20 + 20 + 10
 
@@ -192,7 +192,7 @@ class TestImportAsGraphics:
             template=self._template(tmp_path), limit=50,
         )
         assert r.success is False
-        assert "caption-track mode" in r.error
+        assert "Upgrade Caption to Graphic" in r.error
         assert bridge.scripts == []                  # nothing attempted
 
     def test_totals_are_summed_across_batches(self, tmp_path):
