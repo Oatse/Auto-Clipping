@@ -183,6 +183,7 @@ class TestSubtitleEndpoint:
             r = R()
             r.srt = srt if ok else None
             r.segments = [object(), object()]
+            r.speakers = ["SPEAKER_00", "SPEAKER_01"]
             r.imported = ok
             r.errors = errors or []
             r.ok = ok
@@ -215,8 +216,26 @@ class TestSubtitleEndpoint:
         body = self._wait(client, job_id)
         assert body["status"] == "completed"
         assert body["segment_count"] == 2
+        assert body["speaker_count"] == 2
         assert body["imported"] is True
         assert body["srt_path"].endswith("timeline.srt")
+
+    def test_speaker_options_reach_the_pipeline(self, client, monkeypatch, tmp_path):
+        spy = self._stub_loop(monkeypatch, tmp_path)
+        job_id = client.post("/api/compilation/subtitle", json={
+            "speaker_detection": True, "num_speakers": 4,
+        }).json()["job_id"]
+        self._wait(client, job_id)
+        assert spy.kwargs["num_speakers"] == 4
+        assert spy.kwargs["speaker_detection"] is True
+
+    def test_diarisation_can_be_turned_off(self, client, monkeypatch, tmp_path):
+        spy = self._stub_loop(monkeypatch, tmp_path)
+        job_id = client.post("/api/compilation/subtitle", json={
+            "speaker_detection": False,
+        }).json()["job_id"]
+        self._wait(client, job_id)
+        assert spy.kwargs["speaker_detection"] is False
 
     def test_translation_defaults_to_english(self, client, monkeypatch, tmp_path):
         spy = self._stub_loop(monkeypatch, tmp_path)

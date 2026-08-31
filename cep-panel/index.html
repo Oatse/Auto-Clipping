@@ -135,6 +135,22 @@
           </select>
         </label>
       </div>
+      <label class="field">
+        <span>Speakers</span>
+        <select id="subSpeakers">
+          <option value="auto" selected>Detect automatically</option>
+          <option value="2">2 people</option>
+          <option value="3">3 people</option>
+          <option value="4">4 people</option>
+          <option value="5">5 people</option>
+          <option value="6">6 people</option>
+          <option value="off">Don&rsquo;t separate</option>
+        </select>
+        <span class="hint">
+          On a collab, naming the count separates voices far better than auto.
+          Captions are labelled only when more than one is found.
+        </span>
+      </label>
       <button id="subtitle" class="ghost">Subtitle open timeline</button>
     </section>
   </main>

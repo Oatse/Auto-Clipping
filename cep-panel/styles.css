@@ -76,6 +76,7 @@ main { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 
 .field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .field > span { font-size: 10.5px; color: #9a9a9a; letter-spacing: .2px; }
+.field .hint { font-size: 10px; color: #6f6f6f; line-height: 1.4; letter-spacing: 0; }
 .field em { font-style: normal; color: #6f6f6f; }
 .field b { color: #b9a3ff; font-weight: 600; }
 

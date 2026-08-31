@@ -96,6 +96,9 @@ class SubtitleRequest(BaseModel):
     # read identically to the ones produced there.
     spicy_filter: bool = True
     natural_caption: bool = True
+    # Prefix cues with a speaker name. Applied only when diarisation actually
+    # found more than one voice.
+    speaker_labels: bool = True
 
 
 class SubtitleJob(BaseModel):
@@ -108,6 +111,9 @@ class SubtitleJob(BaseModel):
     created_at: float = 0.0
     srt_path: str | None = None
     segment_count: int = 0
+    # How many voices diarisation actually separated — the number that tells
+    # a solo clip apart from a collab it failed to split.
+    speaker_count: int = 0
     imported: bool = False
     errors: list[str] = []
     logs: list[str] = []
@@ -270,10 +276,12 @@ async def _run_subtitle(job_id: str, req: SubtitleRequest) -> None:
             translator_backend=req.translator_backend or None,
             spicy_filter=req.spicy_filter,
             natural_caption=req.natural_caption,
+            speaker_labels=req.speaker_labels,
             log_fn=log,
         )
         job.srt_path = _absolute(result.srt)
         job.segment_count = len(result.segments)
+        job.speaker_count = len(result.speakers)
         job.imported = result.imported
         job.errors = list(result.errors)
         job.status = "completed" if result.ok else "failed"

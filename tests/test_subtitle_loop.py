@@ -26,8 +26,10 @@ from processors.premiere.subtitle_loop import (
 )
 
 
-def _seg(start: float, end: float, text: str) -> TranscriptSegment:
-    return TranscriptSegment(start=start, end=end, text=text, speaker="SPEAKER_00")
+def _seg(
+    start: float, end: float, text: str, speaker: str = "SPEAKER_00",
+) -> TranscriptSegment:
+    return TranscriptSegment(start=start, end=end, text=text, speaker=speaker)
 
 
 class FakeBridge:
@@ -99,6 +101,115 @@ class TestSrt:
         out = write_srt([_seg(0, 1, "x")], tmp_path / "deep" / "t.srt")
         assert out.is_file()
         assert "x" in out.read_text(encoding="utf-8")
+
+
+# ─── Speaker labelling ───────────────────────────────────────────────────────
+
+class TestSpeakerLabels:
+    def test_solo_stream_is_not_labelled(self):
+        # Prefixing every line of a one-person clip with "Speaker 1" is pure
+        # noise, so the decision comes from the data, not the flag.
+        srt = build_srt([_seg(0, 1, "hello"), _seg(1, 2, "again")])
+        assert "Speaker" not in srt
+
+    def test_multiple_speakers_are_labelled(self):
+        srt = build_srt([
+            _seg(0, 1, "hello", "SPEAKER_00"),
+            _seg(1, 2, "hi there", "SPEAKER_01"),
+        ])
+        assert "Speaker 1: hello" in srt
+        assert "Speaker 2: hi there" in srt
+
+    def test_label_only_repeats_on_change(self):
+        # Repeating the name on every cue of one turn wastes caption width.
+        srt = build_srt([
+            _seg(0, 1, "one", "SPEAKER_00"),
+            _seg(1, 2, "two", "SPEAKER_00"),
+            _seg(2, 3, "three", "SPEAKER_01"),
+        ])
+        assert "Speaker 1: one" in srt
+        assert "\ntwo\n" in srt              # same speaker, no repeat
+        assert "Speaker 2: three" in srt
+
+    def test_numbering_follows_first_appearance(self):
+        # Not the diarisation id: SPEAKER_03 speaking first is "Speaker 1".
+        srt = build_srt([
+            _seg(0, 1, "first", "SPEAKER_03"),
+            _seg(1, 2, "second", "SPEAKER_01"),
+        ])
+        assert "Speaker 1: first" in srt
+        assert "Speaker 2: second" in srt
+
+    def test_labels_can_be_disabled(self):
+        srt = build_srt(
+            [_seg(0, 1, "a", "SPEAKER_00"), _seg(1, 2, "b", "SPEAKER_01")],
+            speaker_labels=False,
+        )
+        assert "Speaker" not in srt
+
+    def test_speaker_returning_reuses_its_number(self):
+        srt = build_srt([
+            _seg(0, 1, "a", "SPEAKER_00"),
+            _seg(1, 2, "b", "SPEAKER_01"),
+            _seg(2, 3, "c", "SPEAKER_00"),
+        ])
+        assert srt.count("Speaker 1:") == 2
+        assert srt.count("Speaker 2:") == 1
+
+
+class TestSpeakerReporting:
+    def _run(self, **kwargs):
+        return asyncio.run(subtitle_timeline(**kwargs))
+
+    def _patch_export(self, monkeypatch):
+        monkeypatch.setattr(
+            subtitle_loop, "export_timeline_audio",
+            lambda b, out, **k: (Path(out).write_bytes(b"RIFF"),
+                                 BridgeResponse(success=True))[1],
+        )
+
+    def test_detected_speakers_are_reported(self, tmp_path, monkeypatch):
+        self._patch_export(monkeypatch)
+        result = self._run(
+            output_dir=tmp_path, bridge=FakeBridge(),
+            engine=FakeEngine([
+                _seg(0, 1, "a", "SPEAKER_00"),
+                _seg(1, 2, "b", "SPEAKER_01"),
+            ]),
+        )
+        assert result.speakers == ["SPEAKER_00", "SPEAKER_01"]
+
+    def test_speaker_hint_reaches_the_engine(self, tmp_path, monkeypatch):
+        self._patch_export(monkeypatch)
+        engine = FakeEngine()
+        self._run(
+            output_dir=tmp_path, bridge=FakeBridge(), engine=engine,
+            num_speakers=4, speaker_detection=True,
+        )
+        assert engine.calls[0]["num_speakers"] == 4
+        assert engine.calls[0]["speaker_detection"] is True
+
+    def test_warns_when_collab_collapses_to_one_speaker(self, tmp_path, monkeypatch):
+        # The confusing outcome is unlabelled captions for a multi-person
+        # clip, so say the hint exists rather than staying quiet.
+        self._patch_export(monkeypatch)
+        logs: list[str] = []
+        self._run(
+            output_dir=tmp_path, bridge=FakeBridge(),
+            engine=FakeEngine([_seg(0, 1, "a", "SPEAKER_00")]),
+            log_fn=logs.append,
+        )
+        assert any("speaker count" in line for line in logs)
+
+    def test_no_warning_when_count_was_given(self, tmp_path, monkeypatch):
+        self._patch_export(monkeypatch)
+        logs: list[str] = []
+        self._run(
+            output_dir=tmp_path, bridge=FakeBridge(),
+            engine=FakeEngine([_seg(0, 1, "a", "SPEAKER_00")]),
+            num_speakers=1, log_fn=logs.append,
+        )
+        assert not any("speaker count" in line for line in logs)
 
 
 # ─── Preset discovery ────────────────────────────────────────────────────────

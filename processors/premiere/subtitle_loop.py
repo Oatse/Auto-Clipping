@@ -54,12 +54,24 @@ class SubtitleResult:
     audio: Path | None = None
     srt: Path | None = None
     segments: list[TranscriptSegment] = field(default_factory=list)
+    # Diarisation ids in order of first appearance. Surfaced so the caller can
+    # tell "one person talking" from "diarisation failed to separate them".
+    speakers: list[str] = field(default_factory=list)
     imported: bool = False
     errors: list[str] = field(default_factory=list)
 
     @property
     def ok(self) -> bool:
         return self.srt is not None and not self.errors
+
+
+def _distinct_speakers(segments: Sequence[TranscriptSegment]) -> list[str]:
+    order: list[str] = []
+    for segment in segments:
+        speaker = getattr(segment, "speaker", "") or ""
+        if speaker and speaker not in order:
+            order.append(speaker)
+    return order
 
 
 # ─── Preset discovery ────────────────────────────────────────────────────────
@@ -172,30 +184,77 @@ def format_timestamp(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
-def build_srt(segments: Sequence[TranscriptSegment]) -> str:
+def speaker_label(speaker_id: str, order: Sequence[str]) -> str:
+    """Human label for a diarisation id, numbered by first appearance.
+
+    ``SPEAKER_00`` is what the recogniser emits and what nobody wants to read
+    in a caption. Numbering by order of appearance also keeps the labels
+    stable and low, rather than echoing whatever ids diarisation happened to
+    assign.
+    """
+    try:
+        return f"Speaker {order.index(speaker_id) + 1}"
+    except ValueError:
+        return "Speaker 1"
+
+
+def build_srt(
+    segments: Sequence[TranscriptSegment],
+    *,
+    speaker_labels: bool = True,
+) -> str:
     """Render segments as SRT.
 
     Empty segments are skipped and cues are renumbered, because Premiere shows
     a blank caption for an empty cue rather than ignoring it.
+
+    Speaker labels are added only when more than one speaker was actually
+    detected. Prefixing every line of a solo stream with "Speaker 1" is pure
+    noise, so the decision is made from the data rather than from a flag.
     """
+    order: list[str] = []
+    if speaker_labels:
+        for segment in segments:
+            speaker = getattr(segment, "speaker", "") or ""
+            if speaker and speaker not in order:
+                order.append(speaker)
+    multi_speaker = speaker_labels and len(order) > 1
+
     blocks: list[str] = []
     index = 0
+    previous_speaker: str | None = None
     for segment in segments:
         text = (segment.text or "").strip()
         if not text:
             continue
         index += 1
+
+        if multi_speaker:
+            speaker = getattr(segment, "speaker", "") or ""
+            # Only label when the speaker changes: repeating it on every cue
+            # of a long turn wastes caption width for no information.
+            if speaker != previous_speaker:
+                text = f"{speaker_label(speaker, order)}: {text}"
+                previous_speaker = speaker
+
         start = format_timestamp(segment.start)
         end = format_timestamp(max(segment.end, segment.start))
         blocks.append(f"{index}\n{start} --> {end}\n{text}\n")
     return "\n".join(blocks)
 
 
-def write_srt(segments: Sequence[TranscriptSegment], path: Path) -> Path:
+def write_srt(
+    segments: Sequence[TranscriptSegment],
+    path: Path,
+    *,
+    speaker_labels: bool = True,
+) -> Path:
     """Write segments to ``path`` as SRT and return it."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(build_srt(segments), encoding="utf-8")
+    path.write_text(
+        build_srt(segments, speaker_labels=speaker_labels), encoding="utf-8",
+    )
     return path
 
 
@@ -215,6 +274,7 @@ async def subtitle_timeline(
     translator_backend: str | None = None,
     spicy_filter: bool = True,
     natural_caption: bool = True,
+    speaker_labels: bool = True,
     engine=None,
     translator=None,
     log_fn: LogFn | None = None,
@@ -277,7 +337,20 @@ async def subtitle_timeline(
         return result
 
     result.segments = list(segments)
-    log(f"Transcribed {len(result.segments)} segment(s)")
+    result.speakers = _distinct_speakers(result.segments)
+    log(
+        f"Transcribed {len(result.segments)} segment(s), "
+        f"{len(result.speakers)} speaker(s) detected"
+    )
+    if speaker_detection and len(result.speakers) < 2 and num_speakers is None:
+        # Diarisation frequently collapses a collab to one speaker unless it
+        # is told how many to expect, and silently producing unlabelled
+        # captions for a multi-person stream is the confusing outcome.
+        log(
+            "Only one speaker was separated. If this clip has several people "
+            "talking, set the speaker count instead of leaving it on auto — "
+            "the hint markedly improves separation."
+        )
 
     if translate_to:
         try:
@@ -321,7 +394,14 @@ async def subtitle_timeline(
         except Exception as exc:  # noqa: BLE001
             result.errors.append(f"caption styling skipped: {exc}")
 
-    result.srt = write_srt(result.segments, output_dir / "timeline.srt")
+    # Recompute after regrouping: it splits at speaker changes and assigns each
+    # new segment its majority speaker, so the set can shift.
+    result.speakers = _distinct_speakers(result.segments)
+    result.srt = write_srt(
+        result.segments,
+        output_dir / "timeline.srt",
+        speaker_labels=speaker_labels,
+    )
 
     if import_back:
         imported = import_captions(bridge, result.srt, log_fn=log_fn)

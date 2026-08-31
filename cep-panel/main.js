@@ -59,6 +59,7 @@
     resultMeta: $("resultMeta"), moments: $("moments"),
     importBtn: $("import"), revealBtn: $("reveal"), subtitle: $("subtitle"),
     subSource: $("subSource"), subTarget: $("subTarget"),
+    subSpeakers: $("subSpeakers"),
     appUrl: $("appUrl"), settings: $("settings"),
     settingsSheet: $("settingsSheet"), appHost: $("appHost"),
     saveSettings: $("saveSettings")
@@ -400,10 +401,15 @@
       ". This can take a few minutes on a long sequence."
     );
 
+    // One control covers both switches the API takes: whether to diarise at
+    // all, and how many voices to expect.
+    var speakers = els.subSpeakers.value;
     var payload = {
       job_id: state.result ? state.result.id : null,
       language: els.subSource.value,      // "" lets the engine detect it
-      translate_to: els.subTarget.value   // "" keeps the spoken language
+      translate_to: els.subTarget.value,  // "" keeps the spoken language
+      speaker_detection: speakers !== "off",
+      num_speakers: /^\d+$/.test(speakers) ? parseInt(speakers, 10) : null
     };
 
     request("POST", "/api/compilation/subtitle", payload, function (err, body) {
@@ -447,9 +453,11 @@
           );
           return;
         }
+        var voices = job.speaker_count || 0;
         endStatus(
           "Captions ready",
           job.segment_count + " caption(s)" +
+          (voices > 1 ? " across " + voices + " speakers" : "") +
           (job.imported
             ? " imported into the project — drag them onto a caption track."
             : " written to " + job.srt_path)
@@ -491,8 +499,10 @@
       // them saves re-picking on every run.
       var src = window.localStorage.getItem(STORAGE_KEY + ".source");
       var tgt = window.localStorage.getItem(STORAGE_KEY + ".target");
+      var spk = window.localStorage.getItem(STORAGE_KEY + ".speakers");
       if (src !== null) els.subSource.value = src;
       if (tgt !== null) els.subTarget.value = tgt;
+      if (spk !== null) els.subSpeakers.value = spk;
     } catch (e) {}
     els.appHost.value = state.appHost;
     els.appUrl.textContent = state.appHost;
@@ -502,6 +512,7 @@
     try {
       window.localStorage.setItem(STORAGE_KEY + ".source", els.subSource.value);
       window.localStorage.setItem(STORAGE_KEY + ".target", els.subTarget.value);
+      window.localStorage.setItem(STORAGE_KEY + ".speakers", els.subSpeakers.value);
     } catch (e) {}
   }
 
@@ -521,6 +532,7 @@
   els.subtitle.addEventListener("click", subtitleTimeline);
   els.subSource.addEventListener("change", rememberLanguages);
   els.subTarget.addEventListener("change", rememberLanguages);
+  els.subSpeakers.addEventListener("change", rememberLanguages);
   els.cancel.addEventListener("click", function () { els.statusCard.hidden = true; });
   els.settings.addEventListener("click", function () {
     els.settingsSheet.hidden = !els.settingsSheet.hidden;
