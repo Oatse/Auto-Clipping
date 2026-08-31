@@ -103,6 +103,11 @@ class SubtitleRequest(BaseModel):
     # simultaneous speech readable but shares one set of timings; separate
     # tracks keep each voice's exact in/out points.
     per_speaker_tracks: bool = True
+    # "captions" = a caption track (simple, one cue at a time).
+    # "graphics" = Essential Graphics text clips: freely stylable, and
+    # overlapping speech can sit on separate tracks and show together.
+    import_as: str = "captions"
+    max_lanes: int = 4
 
 
 class SubtitleJob(BaseModel):
@@ -121,6 +126,8 @@ class SubtitleJob(BaseModel):
     # a solo clip apart from a collab it failed to split.
     speaker_count: int = 0
     imported: bool = False
+    # Placement summary when imported as Essential Graphics.
+    graphics: dict | None = None
     errors: list[str] = []
     logs: list[str] = []
 
@@ -284,6 +291,8 @@ async def _run_subtitle(job_id: str, req: SubtitleRequest) -> None:
             natural_caption=req.natural_caption,
             speaker_labels=req.speaker_labels,
             per_speaker_tracks=req.per_speaker_tracks,
+            import_as=req.import_as,
+            max_lanes=req.max_lanes,
             log_fn=log,
         )
         job.srt_path = _absolute(result.srt)
@@ -293,6 +302,7 @@ async def _run_subtitle(job_id: str, req: SubtitleRequest) -> None:
         job.segment_count = len(result.segments)
         job.speaker_count = len(result.speakers)
         job.imported = result.imported
+        job.graphics = result.graphics
         job.errors = list(result.errors)
         job.status = "completed" if result.ok else "failed"
         job.phase_label = (

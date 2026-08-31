@@ -186,6 +186,7 @@ class TestSubtitleEndpoint:
             r.speakers = ["SPEAKER_00", "SPEAKER_01"]
             r.speaker_srts = [tmp_path / "timeline.speaker1.srt",
                               tmp_path / "timeline.speaker2.srt"]
+            r.graphics = None
             r.imported = ok
             r.errors = errors or []
             r.ok = ok

@@ -56,6 +56,8 @@ class SubtitleResult:
     # One file per speaker, for stacking on separate caption tracks so
     # simultaneous speech keeps its own timing.
     speaker_srts: list[Path] = field(default_factory=list)
+    # Placement summary when captions were imported as Essential Graphics.
+    graphics: dict | None = None
     segments: list[TranscriptSegment] = field(default_factory=list)
     # Diarisation ids in order of first appearance. Surfaced so the caller can
     # tell "one person talking" from "diarisation failed to separate them".
@@ -428,6 +430,10 @@ async def subtitle_timeline(
     natural_caption: bool = True,
     speaker_labels: bool = True,
     per_speaker_tracks: bool = True,
+    # "captions" is a caption track; "graphics" places Essential Graphics text
+    # clips, which are freely stylable and can overlap across tracks.
+    import_as: str = "captions",
+    max_lanes: int = 4,
     engine=None,
     translator=None,
     log_fn: LogFn | None = None,
@@ -567,16 +573,35 @@ async def subtitle_timeline(
             )
 
     if import_back:
-        imported = import_captions(bridge, result.srt, log_fn=log_fn)
-        result.imported = imported.success
-        if not imported.success:
-            # Not fatal: the SRT exists and can be imported by hand.
-            result.errors.append(f"caption import failed: {imported.error}")
+        if import_as == "graphics":
+            # Essential Graphics rather than a caption track: freely stylable,
+            # and because each cue is an ordinary clip, overlapping speech can
+            # be laid on separate tracks and genuinely shown at once.
+            from .graphics import import_as_graphics
+
+            placed = import_as_graphics(
+                bridge, result.segments, max_lanes=max_lanes, log_fn=log_fn,
+            )
+            result.imported = placed.success
+            result.graphics = placed.data if placed.success else None
+            if not placed.success:
+                result.errors.append(f"graphic import failed: {placed.error}")
+            else:
+                log(
+                    f"Placed {placed.data.get('placed', 0)} caption graphic(s) "
+                    f"on {placed.data.get('tracks', 1)} track(s)"
+                )
         else:
-            # Bring the per-speaker files in as well, so the tracks are ready
-            # to drop without going back out to the file system.
-            for extra in result.speaker_srts:
-                import_captions(bridge, extra, log_fn=log_fn)
+            imported = import_captions(bridge, result.srt, log_fn=log_fn)
+            result.imported = imported.success
+            if not imported.success:
+                # Not fatal: the SRT exists and can be imported by hand.
+                result.errors.append(f"caption import failed: {imported.error}")
+            else:
+                # Bring the per-speaker files in as well, so the tracks are
+                # ready to drop without going back out to the file system.
+                for extra in result.speaker_srts:
+                    import_captions(bridge, extra, log_fn=log_fn)
 
     if not keep_audio:
         # A 13-minute timeline is ~150 MB of WAV; keeping it by default would

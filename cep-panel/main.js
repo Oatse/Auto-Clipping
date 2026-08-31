@@ -59,7 +59,7 @@
     resultMeta: $("resultMeta"), moments: $("moments"),
     importBtn: $("import"), revealBtn: $("reveal"), subtitle: $("subtitle"),
     subSource: $("subSource"), subTarget: $("subTarget"),
-    subSpeakers: $("subSpeakers"),
+    subSpeakers: $("subSpeakers"), subImportAs: $("subImportAs"),
     appUrl: $("appUrl"), settings: $("settings"),
     settingsSheet: $("settingsSheet"), appHost: $("appHost"),
     saveSettings: $("saveSettings")
@@ -409,7 +409,8 @@
       language: els.subSource.value,      // "" lets the engine detect it
       translate_to: els.subTarget.value,  // "" keeps the spoken language
       speaker_detection: speakers !== "off",
-      num_speakers: /^\d+$/.test(speakers) ? parseInt(speakers, 10) : null
+      num_speakers: /^\d+$/.test(speakers) ? parseInt(speakers, 10) : null,
+      import_as: els.subImportAs.value
     };
 
     request("POST", "/api/compilation/subtitle", payload, function (err, body) {
@@ -457,6 +458,23 @@
         var tracks = (job.speaker_srt_paths || []).length;
         var detail = job.segment_count + " caption(s)" +
           (voices > 1 ? " across " + voices + " speakers" : "");
+
+        if (job.graphics) {
+          // Graphics mode: say where they landed, since they go on new tracks
+          // above the footage rather than into a caption track.
+          var g = job.graphics;
+          endStatus(
+            "Captions ready",
+            detail + " placed as " + (g.placed || 0) + " editable graphic(s) on " +
+            (g.tracks || 1) + " new track(s)" +
+            ((g.tracks || 1) > 1
+              ? " — overlapping speech is stacked so both show."
+              : ".") +
+            (g.failed ? " " + g.failed + " could not be placed." : "")
+          );
+          return;
+        }
+
         detail += job.imported
           ? " imported into the project."
           : " written to " + job.srt_path + ".";
