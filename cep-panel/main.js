@@ -475,18 +475,21 @@
           return;
         }
 
-        detail += job.imported
-          ? " imported into the project."
-          : " written to " + job.srt_path + ".";
+        if (job.placed_on_timeline) {
+          detail += " placed on a caption track. To make them editable text," +
+            " select them and run Captions › Upgrade Caption to Graphic.";
+        } else {
+          detail += job.imported
+            ? " imported into the project — drag them onto a caption track."
+            : " written to " + job.srt_path + ".";
+        }
         if (tracks > 1) {
           // SRT cannot show two cues at once, so simultaneous speech is
           // merged into one cue in the main file. The per-speaker files keep
           // each voice's own timing for anyone who wants separate tracks.
-          detail += " Overlapping speech shares a cue in the main file; " +
-            "there are also " + tracks + " per-speaker files if you would " +
-            "rather stack them on separate caption tracks.";
-        } else {
-          detail += " Drag them onto a caption track.";
+          detail += " Overlapping speech shares a cue there; " + tracks +
+            " per-speaker files are in the project if you would rather stack " +
+            "them on their own caption tracks.";
         }
         endStatus("Captions ready", detail);
       });

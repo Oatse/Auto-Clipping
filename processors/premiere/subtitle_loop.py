@@ -58,6 +58,9 @@ class SubtitleResult:
     speaker_srts: list[Path] = field(default_factory=list)
     # Placement summary when captions were imported as Essential Graphics.
     graphics: dict | None = None
+    # True when the captions were laid on a caption track, not merely imported
+    # into the Project panel.
+    placed_on_timeline: bool = False
     segments: list[TranscriptSegment] = field(default_factory=list)
     # Diarisation ids in order of first appearance. Surfaced so the caller can
     # tell "one person talking" from "diarisation failed to separate them".
@@ -157,12 +160,25 @@ def import_captions(
     bridge: PremiereBridge,
     srt_path: Path,
     *,
+    place_on_timeline: bool = True,
+    start_seconds: float = 0.0,
     log_fn: LogFn | None = None,
 ) -> BridgeResponse:
-    """Bring an SRT back into the open project as an editable caption item."""
+    """Import an SRT and, by default, lay it on a caption track.
+
+    ``importFiles`` only puts the file in the Project panel, which left the
+    editor to drag it onto a track by hand. ``createCaptionTrack`` does that
+    step — one call for the whole file, regardless of how many cues it holds,
+    which is why this scales where placing graphics one at a time does not.
+
+    Placement is best-effort: if it fails, the caption item is still in the
+    project and can be dragged across manually, so the run is not lost.
+    """
     target = Path(srt_path).resolve()
     if log_fn:
-        log_fn(f"Importing {target.name} into the project...")
+        log_fn(f"Importing {target.name}...")
+
+    place = "true" if place_on_timeline else "false"
     return bridge.execute(
         f'var f = new File("{_escape(str(target))}");'
         "if (!f.exists) { return '{\"success\":false,\"error\":\"Subtitle file "
@@ -172,7 +188,26 @@ def import_captions(
         f'var okc = p.importFiles(["{_escape(str(target))}"], true, p.rootItem, false);'
         "if (!okc) { return '{\"success\":false,\"error\":\"Premiere refused the "
         "subtitle import\"}'; }"
-        "return '{\"success\":true,\"data\":{\"imported\":true}}';",
+        # Find what was just imported. Matching on name is how the project
+        # panel is addressed; the newest match wins so a re-run picks up the
+        # fresh copy rather than an older one of the same name.
+        f'var wanted = "{_escape(target.name)}";'
+        "var item = null, kids = p.rootItem.children;"
+        "for (var i = kids.numItems - 1; i >= 0; i--) {"
+        "  if (String(kids[i].name) === wanted) { item = kids[i]; break; }"
+        "}"
+        "var placed = false, why = '';"
+        f"if ({place} && item) {{"
+        "  try {"
+        "    var seq = app.project.activeSequence;"
+        "    if (!seq) { why = 'no active sequence'; }"
+        f'    else if (seq.createCaptionTrack(item, {start_seconds},'
+        "           Sequence.CAPTION_FORMAT_SUBTITLE)) { placed = true; }"
+        "    else { why = 'Premiere declined to create the caption track'; }"
+        "  } catch (e) { why = String(e).replace(/\"/g, \"'\"); }"
+        f"}} else if ({place}) {{ why = 'imported item not found in the project'; }}"
+        "return '{\"success\":true,\"data\":{\"imported\":true,\"placed\":' +"
+        " (placed ? 'true' : 'false') + ',\"why\":\"' + why + '\"}}';",
         timeout=120.0,
     )
 
@@ -598,10 +633,28 @@ async def subtitle_timeline(
                 # Not fatal: the SRT exists and can be imported by hand.
                 result.errors.append(f"caption import failed: {imported.error}")
             else:
-                # Bring the per-speaker files in as well, so the tracks are
-                # ready to drop without going back out to the file system.
+                result.placed_on_timeline = bool(
+                    (imported.data or {}).get("placed")
+                )
+                if result.placed_on_timeline:
+                    log(
+                        "Captions are on a caption track. To make them "
+                        "editable text, select them and use Premiere's "
+                        "Captions > Upgrade Caption to Graphic."
+                    )
+                else:
+                    why = (imported.data or {}).get("why") or "unknown reason"
+                    log(
+                        f"Captions are in the Project panel but not placed "
+                        f"({why}) — drag them onto a caption track."
+                    )
+                # Per-speaker files go into the project only. Placing them all
+                # would stack several caption tracks the editor did not ask
+                # for; they are there to be dropped deliberately.
                 for extra in result.speaker_srts:
-                    import_captions(bridge, extra, log_fn=log_fn)
+                    import_captions(
+                        bridge, extra, place_on_timeline=False, log_fn=log_fn,
+                    )
 
     if not keep_audio:
         # A 13-minute timeline is ~150 MB of WAV; keeping it by default would

@@ -21,6 +21,7 @@ from processors.premiere.subtitle_loop import (
     export_timeline_audio,
     find_audio_preset,
     format_timestamp,
+    import_captions,
     resolve_overlaps,
     subtitle_timeline,
     write_per_speaker_srt,
@@ -277,6 +278,65 @@ class TestPerSpeakerTracks:
 
     def test_solo_transcript_produces_nothing(self, tmp_path):
         assert write_per_speaker_srt([_seg(0, 2, "a", "SPEAKER_00")], tmp_path) == []
+
+
+class TestCaptionPlacement:
+    """importFiles alone only reaches the Project panel, leaving the editor to
+    drag the file onto a track. createCaptionTrack does that step — and does it
+    in one call for the whole file, which is why it scales where placing
+    graphics one at a time does not."""
+
+    def _script(self, **kwargs) -> str:
+        bridge = FakeBridge()
+        import_captions(bridge, Path("D:/out/timeline.srt"), **kwargs)
+        return bridge.scripts[0]
+
+    def test_places_on_a_caption_track_by_default(self):
+        script = self._script()
+        assert "createCaptionTrack" in script
+        assert "CAPTION_FORMAT_SUBTITLE" in script
+
+    def test_placement_can_be_skipped(self):
+        # Per-speaker files go to the project only; placing them all would
+        # stack tracks the editor did not ask for.
+        script = self._script(place_on_timeline=False)
+        assert "importFiles" in script
+        assert "if (false && item)" in script.replace("  ", " ")
+
+    def test_finds_the_newest_matching_item(self):
+        # A re-run leaves two items of the same name; the fresh one wins.
+        script = self._script()
+        assert "kids.numItems - 1" in script
+        assert "i >= 0" in script
+
+    def test_start_offset_is_passed(self):
+        script = self._script(start_seconds=12.5)
+        assert "12.5" in script
+
+    def test_reports_whether_placement_happened(self):
+        script = self._script()
+        assert '\\"placed\\"' in script or '"placed"' in script
+
+    def test_placement_failure_is_not_fatal(self, tmp_path, monkeypatch):
+        # The captions are still in the project and can be dragged across.
+        monkeypatch.setattr(
+            subtitle_loop, "export_timeline_audio",
+            lambda b, out, **k: (Path(out).write_bytes(b"RIFF"),
+                                 BridgeResponse(success=True))[1],
+        )
+        monkeypatch.setattr(
+            subtitle_loop, "import_captions",
+            lambda b, srt, **k: BridgeResponse(
+                success=True, data={"imported": True, "placed": False,
+                                    "why": "no active sequence"},
+            ),
+        )
+        result = asyncio.run(subtitle_timeline(
+            output_dir=tmp_path, bridge=FakeBridge(), engine=FakeEngine(),
+        ))
+        assert result.ok
+        assert result.imported is True
+        assert result.placed_on_timeline is False
 
 
 class TestSpeakerReporting:

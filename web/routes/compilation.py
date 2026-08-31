@@ -126,6 +126,8 @@ class SubtitleJob(BaseModel):
     # a solo clip apart from a collab it failed to split.
     speaker_count: int = 0
     imported: bool = False
+    # True when captions were laid on a caption track, not just imported.
+    placed_on_timeline: bool = False
     # Placement summary when imported as Essential Graphics.
     graphics: dict | None = None
     errors: list[str] = []
@@ -302,6 +304,7 @@ async def _run_subtitle(job_id: str, req: SubtitleRequest) -> None:
         job.segment_count = len(result.segments)
         job.speaker_count = len(result.speakers)
         job.imported = result.imported
+        job.placed_on_timeline = result.placed_on_timeline
         job.graphics = result.graphics
         job.errors = list(result.errors)
         job.status = "completed" if result.ok else "failed"
