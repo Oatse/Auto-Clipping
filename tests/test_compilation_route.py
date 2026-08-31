@@ -184,6 +184,8 @@ class TestSubtitleEndpoint:
             r.srt = srt if ok else None
             r.segments = [object(), object()]
             r.speakers = ["SPEAKER_00", "SPEAKER_01"]
+            r.speaker_srts = [tmp_path / "timeline.speaker1.srt",
+                              tmp_path / "timeline.speaker2.srt"]
             r.imported = ok
             r.errors = errors or []
             r.ok = ok
@@ -228,6 +230,15 @@ class TestSubtitleEndpoint:
         self._wait(client, job_id)
         assert spy.kwargs["num_speakers"] == 4
         assert spy.kwargs["speaker_detection"] is True
+
+    def test_per_speaker_tracks_are_reported(self, client, monkeypatch, tmp_path):
+        # SRT cannot show two cues at once, so separate files are what let
+        # simultaneous speech keep its own timing on its own track.
+        self._stub_loop(monkeypatch, tmp_path)
+        job_id = client.post("/api/compilation/subtitle", json={}).json()["job_id"]
+        body = self._wait(client, job_id)
+        assert len(body["speaker_srt_paths"]) == 2
+        assert body["speaker_srt_paths"][0].endswith("timeline.speaker1.srt")
 
     def test_diarisation_can_be_turned_off(self, client, monkeypatch, tmp_path):
         spy = self._stub_loop(monkeypatch, tmp_path)

@@ -99,6 +99,10 @@ class SubtitleRequest(BaseModel):
     # Prefix cues with a speaker name. Applied only when diarisation actually
     # found more than one voice.
     speaker_labels: bool = True
+    # Also emit one caption file per speaker. The merged single track keeps
+    # simultaneous speech readable but shares one set of timings; separate
+    # tracks keep each voice's exact in/out points.
+    per_speaker_tracks: bool = True
 
 
 class SubtitleJob(BaseModel):
@@ -110,6 +114,8 @@ class SubtitleJob(BaseModel):
     phase_label: str = "Starting"
     created_at: float = 0.0
     srt_path: str | None = None
+    # One per speaker, for stacking on separate caption tracks.
+    speaker_srt_paths: list[str] = []
     segment_count: int = 0
     # How many voices diarisation actually separated — the number that tells
     # a solo clip apart from a collab it failed to split.
@@ -277,9 +283,13 @@ async def _run_subtitle(job_id: str, req: SubtitleRequest) -> None:
             spicy_filter=req.spicy_filter,
             natural_caption=req.natural_caption,
             speaker_labels=req.speaker_labels,
+            per_speaker_tracks=req.per_speaker_tracks,
             log_fn=log,
         )
         job.srt_path = _absolute(result.srt)
+        job.speaker_srt_paths = [
+            p for p in (_absolute(x) for x in result.speaker_srts) if p
+        ]
         job.segment_count = len(result.segments)
         job.speaker_count = len(result.speakers)
         job.imported = result.imported

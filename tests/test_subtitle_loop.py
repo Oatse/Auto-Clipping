@@ -21,7 +21,9 @@ from processors.premiere.subtitle_loop import (
     export_timeline_audio,
     find_audio_preset,
     format_timestamp,
+    resolve_overlaps,
     subtitle_timeline,
+    write_per_speaker_srt,
     write_srt,
 )
 
@@ -90,9 +92,12 @@ class TestSrt:
         assert srt.count("-->") == 2
         assert "\n2\n" in srt          # renumbered, not 1 then 3
 
-    def test_end_before_start_is_corrected(self):
+    def test_end_before_start_gets_a_visible_duration(self):
+        # A zero-length cue renders as nothing in Premiere, so a reversed or
+        # empty range is given a small visible minimum rather than kept at 0.
         srt = build_srt([_seg(5, 3, "reversed")])
-        assert "00:00:05,000 --> 00:00:05,000" in srt
+        assert "00:00:05,000 --> 00:00:05,2" in srt
+        assert "reversed" in srt
 
     def test_empty_input(self):
         assert build_srt([]) == ""
@@ -155,6 +160,123 @@ class TestSpeakerLabels:
         ])
         assert srt.count("Speaker 1:") == 2
         assert srt.count("Speaker 2:") == 1
+
+
+class TestOverlappingSpeech:
+    """SRT is a sequence — it cannot show two cues at once, and Premiere
+    renders overlapping cues as one caption track fighting itself. Real
+    output from this project had 23 cross-speaker overlaps in 153 segments,
+    so this is the common case, not an edge case."""
+
+    def test_simultaneous_speakers_merge_into_one_cue(self):
+        srt = build_srt([
+            _seg(0.0, 3.0, "no way", "SPEAKER_00"),
+            _seg(1.0, 4.0, "I told you", "SPEAKER_01"),
+        ])
+        assert srt.count("-->") == 1              # one cue, not two
+        assert "Speaker 1: no way" in srt
+        assert "Speaker 2: I told you" in srt
+
+    def test_merged_cue_spans_the_union(self):
+        srt = build_srt([
+            _seg(1.0, 3.0, "a", "SPEAKER_00"),
+            _seg(2.0, 5.0, "b", "SPEAKER_01"),
+        ])
+        assert "00:00:01,000 --> 00:00:05,000" in srt
+
+    def test_no_cue_overlaps_another(self):
+        # The property that actually matters for Premiere.
+        cues = resolve_overlaps([
+            _seg(0.0, 3.0, "a", "SPEAKER_00"),
+            _seg(1.0, 4.0, "b", "SPEAKER_01"),
+            _seg(3.5, 6.0, "c", "SPEAKER_00"),
+            _seg(5.0, 8.0, "d", "SPEAKER_01"),
+        ])
+        for (s1, e1, _), (s2, _, _) in zip(cues, cues[1:]):
+            assert e1 <= s2 + 1e-6, f"cue {s1}-{e1} overlaps {s2}"
+
+    def test_sequential_speech_is_left_alone(self):
+        srt = build_srt([
+            _seg(0.0, 1.0, "first", "SPEAKER_00"),
+            _seg(2.0, 3.0, "second", "SPEAKER_01"),
+        ])
+        assert srt.count("-->") == 2              # not merged
+        assert "Speaker 1: first" in srt
+        assert "Speaker 2: second" in srt
+
+    def test_same_speaker_overlap_is_not_merged_into_two_lines(self):
+        # A diarisation artefact, not simultaneous speech.
+        cues = resolve_overlaps([
+            _seg(0.0, 2.0, "one", "SPEAKER_00"),
+            _seg(1.5, 3.0, "two", "SPEAKER_00"),
+        ])
+        assert len(cues) == 2
+        assert all("\n" not in text for _, _, text in cues)
+
+    def test_three_way_overlap(self):
+        srt = build_srt([
+            _seg(0.0, 4.0, "a", "SPEAKER_00"),
+            _seg(1.0, 4.0, "b", "SPEAKER_01"),
+            _seg(2.0, 4.0, "c", "SPEAKER_02"),
+        ])
+        assert srt.count("-->") == 1
+        for name in ("Speaker 1: a", "Speaker 2: b", "Speaker 3: c"):
+            assert name in srt
+
+    def test_merged_lines_follow_start_order(self):
+        srt = build_srt([
+            _seg(1.0, 4.0, "later", "SPEAKER_01"),
+            _seg(0.0, 3.0, "earlier", "SPEAKER_00"),
+        ])
+        body = srt.split("\n\n")[0]
+        assert body.index("earlier") < body.index("later")
+
+    def test_zero_length_cue_gets_a_visible_minimum(self):
+        cues = resolve_overlaps([
+            _seg(1.0, 5.0, "long", "SPEAKER_00"),
+            _seg(1.0, 1.0, "instant", "SPEAKER_01"),
+        ])
+        assert all(end > start for start, end, _ in cues)
+
+
+class TestPerSpeakerTracks:
+    """Separate caption tracks keep each voice's exact timing, which the
+    merged single track necessarily trades away."""
+
+    def test_one_file_per_speaker(self, tmp_path):
+        paths = write_per_speaker_srt([
+            _seg(0, 2, "a", "SPEAKER_00"),
+            _seg(1, 3, "b", "SPEAKER_01"),
+        ], tmp_path)
+        assert [p.name for p in paths] == [
+            "timeline.speaker1.srt", "timeline.speaker2.srt",
+        ]
+
+    def test_each_file_holds_only_its_speaker(self, tmp_path):
+        paths = write_per_speaker_srt([
+            _seg(0, 2, "mine", "SPEAKER_00"),
+            _seg(1, 3, "theirs", "SPEAKER_01"),
+        ], tmp_path)
+        first = paths[0].read_text(encoding="utf-8")
+        assert "mine" in first and "theirs" not in first
+
+    def test_timings_are_exact_not_merged(self, tmp_path):
+        # The whole point: 1-3 stays 1-3 instead of joining a union cue.
+        paths = write_per_speaker_srt([
+            _seg(0, 2, "a", "SPEAKER_00"),
+            _seg(1, 3, "b", "SPEAKER_01"),
+        ], tmp_path)
+        assert "00:00:01,000 --> 00:00:03,000" in paths[1].read_text(encoding="utf-8")
+
+    def test_no_labels_inside_per_speaker_files(self, tmp_path):
+        paths = write_per_speaker_srt([
+            _seg(0, 2, "a", "SPEAKER_00"),
+            _seg(1, 3, "b", "SPEAKER_01"),
+        ], tmp_path)
+        assert "Speaker" not in paths[0].read_text(encoding="utf-8")
+
+    def test_solo_transcript_produces_nothing(self, tmp_path):
+        assert write_per_speaker_srt([_seg(0, 2, "a", "SPEAKER_00")], tmp_path) == []
 
 
 class TestSpeakerReporting:

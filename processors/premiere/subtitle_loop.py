@@ -53,6 +53,9 @@ class SubtitleResult:
 
     audio: Path | None = None
     srt: Path | None = None
+    # One file per speaker, for stacking on separate caption tracks so
+    # simultaneous speech keeps its own timing.
+    speaker_srts: list[Path] = field(default_factory=list)
     segments: list[TranscriptSegment] = field(default_factory=list)
     # Diarisation ids in order of first appearance. Surfaced so the caller can
     # tell "one person talking" from "diarisation failed to separate them".
@@ -198,6 +201,107 @@ def speaker_label(speaker_id: str, order: Sequence[str]) -> str:
         return "Speaker 1"
 
 
+def resolve_overlaps(
+    segments: Sequence[TranscriptSegment],
+    *,
+    speaker_labels: bool = True,
+) -> list[tuple[float, float, str]]:
+    """Flatten segments into non-overlapping cues.
+
+    SRT has no way to show two cues at once — the format is a sequence, and
+    Premiere renders overlapping cues as one caption track fighting itself.
+    But people talk over each other constantly: a five-way collab in this
+    project's own output had 23 cross-speaker overlaps in 153 segments.
+
+    So simultaneous speech is merged into a single cue carrying a line per
+    speaker, which is what broadcast captions do:
+
+        Speaker 1: no way
+        Speaker 2: I told you
+
+    The merged cue spans the union of the overlapping segments, so the
+    individual in/out points are traded for both lines being readable at the
+    time they were said. Same-speaker overlap is a diarisation artefact rather
+    than simultaneous speech, so those are simply butted together instead.
+    """
+    ordered = sorted(
+        (s for s in segments if (s.text or "").strip()),
+        key=lambda s: (s.start, s.end),
+    )
+    if not ordered:
+        return []
+
+    order: list[str] = []
+    for segment in ordered:
+        speaker = getattr(segment, "speaker", "") or ""
+        if speaker and speaker not in order:
+            order.append(speaker)
+    multi_speaker = speaker_labels and len(order) > 1
+
+    cues: list[tuple[float, float, str]] = []
+    group: list[TranscriptSegment] = []
+
+    def flush() -> None:
+        if not group:
+            return
+        start = min(s.start for s in group)
+        end = max(max(s.end, s.start) for s in group)
+        speakers_here = []
+        for s in group:
+            sp = getattr(s, "speaker", "") or ""
+            if sp not in speakers_here:
+                speakers_here.append(sp)
+
+        if len(group) == 1 or len(speakers_here) < 2:
+            # One voice: keep the lines as they are rather than gluing a
+            # whole overlapping run into one long caption.
+            for s in group:
+                text = (s.text or "").strip()
+                if text:
+                    cues.append((s.start, max(s.end, s.start), text))
+            return
+
+        # Genuine simultaneous speech: one cue, one line per speaker, in the
+        # order they started.
+        lines: list[str] = []
+        for sp in speakers_here:
+            said = " ".join(
+                (s.text or "").strip()
+                for s in group
+                if (getattr(s, "speaker", "") or "") == sp
+            ).strip()
+            if not said:
+                continue
+            lines.append(
+                f"{speaker_label(sp, order)}: {said}" if multi_speaker else said
+            )
+        cues.append((start, end, "\n".join(lines)))
+
+    for segment in ordered:
+        if not group:
+            group = [segment]
+            continue
+        group_end = max(max(s.end, s.start) for s in group)
+        if segment.start < group_end - 1e-6:
+            group.append(segment)          # overlaps the run so far
+        else:
+            flush()
+            group = [segment]
+    flush()
+
+    # Merging can leave a cue running into the next one; trim rather than
+    # emit overlapping cues, which is the problem being solved.
+    cues.sort(key=lambda c: (c[0], c[1]))
+    trimmed: list[tuple[float, float, str]] = []
+    for index, (start, end, text) in enumerate(cues):
+        if index + 1 < len(cues):
+            end = min(end, cues[index + 1][0])
+        if end <= start:
+            end = start + 0.2              # keep a visible minimum
+        trimmed.append((start, end, text))
+    return trimmed
+
+
 def build_srt(
     segments: Sequence[TranscriptSegment],
     *,
@@ -220,27 +324,35 @@ def build_srt(
                 order.append(speaker)
     multi_speaker = speaker_labels and len(order) > 1
 
+    cues = resolve_overlaps(segments, speaker_labels=speaker_labels)
+
     blocks: list[str] = []
-    index = 0
     previous_speaker: str | None = None
-    for segment in segments:
-        text = (segment.text or "").strip()
-        if not text:
-            continue
-        index += 1
-
-        if multi_speaker:
-            speaker = getattr(segment, "speaker", "") or ""
-            # Only label when the speaker changes: repeating it on every cue
-            # of a long turn wastes caption width for no information.
-            if speaker != previous_speaker:
+    for index, (start, end, text) in enumerate(cues, start=1):
+        if multi_speaker and "\n" not in text:
+            # Single-voice cue: label it only when the speaker changes, since
+            # repeating the name through one turn wastes caption width.
+            # Merged cues already carry a label per line.
+            speaker = _speaker_at(segments, start)
+            if speaker and speaker != previous_speaker:
                 text = f"{speaker_label(speaker, order)}: {text}"
-                previous_speaker = speaker
-
-        start = format_timestamp(segment.start)
-        end = format_timestamp(max(segment.end, segment.start))
-        blocks.append(f"{index}\n{start} --> {end}\n{text}\n")
+            previous_speaker = speaker
+        elif "\n" in text:
+            previous_speaker = None        # a merged cue ends the run
+        blocks.append(
+            f"{index}\n{format_timestamp(start)} --> {format_timestamp(end)}\n{text}\n"
+        )
     return "\n".join(blocks)
+
+
+def _speaker_at(
+    segments: Sequence[TranscriptSegment], start: float
+) -> str:
+    """Speaker of the segment beginning at ``start``."""
+    for segment in segments:
+        if abs(segment.start - start) < 1e-6:
+            return getattr(segment, "speaker", "") or ""
+    return ""
 
 
 def write_srt(
@@ -256,6 +368,46 @@ def write_srt(
         build_srt(segments, speaker_labels=speaker_labels), encoding="utf-8",
     )
     return path
+
+
+def write_per_speaker_srt(
+    segments: Sequence[TranscriptSegment],
+    output_dir: Path,
+    *,
+    stem: str = "timeline",
+) -> list[Path]:
+    """Write one SRT per speaker, for stacking on separate caption tracks.
+
+    The merged single file keeps simultaneous speech readable on one track,
+    but flattens it: both lines share the union of their timings. Premiere
+    supports several caption tracks, and one file per speaker lets each keep
+    its own exact in/out points and be styled and positioned independently —
+    the closest thing to the per-speaker colours the burn-in renderer does.
+
+    Returns an empty list for a single-speaker transcript, where separate
+    tracks would add nothing.
+    """
+    order = _distinct_speakers(segments)
+    if len(order) < 2:
+        return []
+
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for number, speaker in enumerate(order, start=1):
+        owned = [
+            s for s in segments
+            if (getattr(s, "speaker", "") or "") == speaker
+            and (s.text or "").strip()
+        ]
+        if not owned:
+            continue
+        # No labels here: the file itself identifies the speaker, and the
+        # track will be styled per speaker anyway.
+        path = output_dir / f"{stem}.speaker{number}.srt"
+        path.write_text(build_srt(owned, speaker_labels=False), encoding="utf-8")
+        written.append(path)
+    return written
 
 
 # ─── The loop ────────────────────────────────────────────────────────────────
@@ -275,6 +427,7 @@ async def subtitle_timeline(
     spicy_filter: bool = True,
     natural_caption: bool = True,
     speaker_labels: bool = True,
+    per_speaker_tracks: bool = True,
     engine=None,
     translator=None,
     log_fn: LogFn | None = None,
@@ -402,6 +555,16 @@ async def subtitle_timeline(
         output_dir / "timeline.srt",
         speaker_labels=speaker_labels,
     )
+    if per_speaker_tracks:
+        # Simultaneous speech survives as separate tracks here, with each
+        # speaker keeping their exact timings instead of sharing a merged cue.
+        result.speaker_srts = write_per_speaker_srt(result.segments, output_dir)
+        if result.speaker_srts:
+            log(
+                f"Also wrote {len(result.speaker_srts)} per-speaker caption "
+                "file(s) — put each on its own caption track to let voices "
+                "overlap with their own timing."
+            )
 
     if import_back:
         imported = import_captions(bridge, result.srt, log_fn=log_fn)
@@ -409,6 +572,11 @@ async def subtitle_timeline(
         if not imported.success:
             # Not fatal: the SRT exists and can be imported by hand.
             result.errors.append(f"caption import failed: {imported.error}")
+        else:
+            # Bring the per-speaker files in as well, so the tracks are ready
+            # to drop without going back out to the file system.
+            for extra in result.speaker_srts:
+                import_captions(bridge, extra, log_fn=log_fn)
 
     if not keep_audio:
         # A 13-minute timeline is ~150 MB of WAV; keeping it by default would
@@ -430,6 +598,9 @@ __all__ = [
     "import_captions",
     "build_srt",
     "write_srt",
+    "write_per_speaker_srt",
+    "resolve_overlaps",
+    "speaker_label",
     "format_timestamp",
     "ENTIRE_SEQUENCE",
     "IN_TO_OUT",
