@@ -50,6 +50,20 @@ _TEMPLATE_ROOTS = (r"C:\Program Files\Adobe", "/Applications")
 # bound.
 MAX_LANES = 4
 
+# How many graphics to place per bridge call.
+#
+# This is a stability limit, not a tuning knob. Every importMGT re-reads and
+# unpacks the .mogrt from disk (roughly 800 KB), and doing a few hundred of
+# them inside one blocking ExtendScript call crashed Premiere outright.
+# Batching lets it finish, release, and redraw between groups, and turns a
+# failure into "batch 7 of 12 failed" instead of a lost session.
+BATCH_SIZE = 20
+
+# Refuse to place more than this without being asked twice. A long timeline
+# can produce several hundred cues, and that is precisely the load that took
+# Premiere down.
+SAFE_LIMIT = 400
+
 
 @dataclass
 class GraphicCue:
@@ -138,21 +152,83 @@ def assign_lanes(
     return cues
 
 
+def _prepare_tracks_script(lanes: int) -> str:
+    """Add the graphics tracks once, before any cue is placed."""
+    return f"""
+var seq = app.project.activeSequence;
+if (!seq) {{ return '{{"success":false,"error":"No sequence is open"}}'; }}
+var baseTrack = seq.videoTracks.numTracks;
+app.enableQE();
+try {{ qe.project.getActiveSequence().addTracks({lanes}, baseTrack, 0, 0); }} catch (e) {{}}
+return '{{"success":true,"data":{{"baseTrack":' + baseTrack +
+       ',"available":' + seq.videoTracks.numTracks + '}}}}';
+"""
+
+
+def _place_batch_script(cues: Sequence[GraphicCue], mogrt: Path, base_track: int) -> str:
+    """Place one batch of cues. Kept small on purpose — see BATCH_SIZE."""
+    payload = json.dumps(
+        [{"s": c.start, "e": c.end, "t": c.text, "l": c.lane} for c in cues],
+        ensure_ascii=False,
+    )
+    return f"""
+var CUES = {payload};
+var MOGRT = "{_escape(str(mogrt))}";
+var TICKS = {TICKS_PER_SECOND};
+var BASE = {base_track};
+
+var seq = app.project.activeSequence;
+if (!seq) {{ return '{{"success":false,"error":"No sequence is open"}}'; }}
+var available = seq.videoTracks.numTracks;
+var placed = 0, failed = 0;
+
+for (var i = 0; i < CUES.length; i++) {{
+  var cue = CUES[i];
+  var trackIndex = BASE + cue.l;
+  if (trackIndex >= available) {{ trackIndex = available - 1; }}
+
+  var ticks = Math.round(cue.s * TICKS);
+  var clip = null;
+  try {{ clip = seq.importMGT(MOGRT, ticks.toString(), trackIndex, 0); }} catch (e) {{ clip = null; }}
+  if (!clip) {{ failed++; continue; }}
+
+  try {{
+    var comps = clip.components, text = null;
+    for (var k = 0; k < comps.numItems; k++) {{
+      if (comps[k].displayName === 'Text') {{ text = comps[k]; break; }}
+    }}
+    if (text) {{ text.properties[0].setValue(cue.t, true); }}
+  }} catch (e) {{}}
+
+  try {{
+    var endTime = clip.end;
+    endTime.seconds = cue.e;
+    clip.end = endTime;
+  }} catch (e) {{}}
+
+  placed++;
+}}
+return '{{"success":true,"data":{{"placed":' + placed + ',"failed":' + failed + '}}}}';
+"""
+
+
 def import_as_graphics(
     bridge: PremiereBridge,
     segments: Sequence[TranscriptSegment],
     *,
     template: Path | None = None,
     max_lanes: int = MAX_LANES,
-    timeout: float = 900.0,
+    batch_size: int = BATCH_SIZE,
+    limit: int | None = SAFE_LIMIT,
+    timeout: float = 300.0,
     log_fn: LogFn | None = None,
 ) -> BridgeResponse:
     """Place every caption on the timeline as an Essential Graphics clip.
 
-    The whole run is a single ExtendScript call. Sending one command per cue
-    would mean a round trip through the connector's 200 ms polling loop for
-    each of a few hundred captions — minutes of waiting for work that takes
-    seconds inside Premiere.
+    Placed in batches rather than one long call. Each ``importMGT`` re-reads
+    and unpacks the template from disk, and a few hundred of them inside one
+    blocking script crashed Premiere. Batching lets it finish and redraw
+    between groups, and localises a failure instead of losing the run.
     """
     mogrt = template or find_caption_template()
     if mogrt is None:
@@ -166,6 +242,13 @@ def import_as_graphics(
     if not cues:
         return BridgeResponse.failed("no captions to place")
 
+    if limit is not None and len(cues) > limit:
+        return BridgeResponse.failed(
+            f"{len(cues)} captions is more than this places at once ({limit}). "
+            "That volume of graphics is what makes Premiere unstable — subtitle "
+            "a shorter section, or use the caption-track mode instead."
+        )
+
     lanes_used = max((c.lane for c in cues), default=0) + 1
     if log_fn:
         log_fn(
@@ -173,63 +256,39 @@ def import_as_graphics(
             + (" so overlapping speech can show together" if lanes_used > 1 else "")
         )
 
-    payload = json.dumps(
-        [{"s": c.start, "e": c.end, "t": c.text, "l": c.lane} for c in cues],
-        ensure_ascii=False,
+    prepared = bridge.execute(_prepare_tracks_script(lanes_used), timeout=120.0)
+    if not prepared.success:
+        return BridgeResponse.failed(f"could not add tracks: {prepared.error}")
+    base_track = int((prepared.data or {}).get("baseTrack", 0))
+
+    placed = failed = 0
+    batches = [cues[i:i + batch_size] for i in range(0, len(cues), batch_size)]
+    for number, batch in enumerate(batches, start=1):
+        response = bridge.execute(
+            _place_batch_script(batch, mogrt, base_track), timeout=timeout,
+        )
+        if not response.success:
+            # Stop rather than keep hammering an unhappy Premiere, and report
+            # how far it got so the partial result is understandable.
+            return BridgeResponse.failed(
+                f"stopped at batch {number} of {len(batches)} after placing "
+                f"{placed} graphic(s): {response.error}"
+            )
+        placed += int((response.data or {}).get("placed", 0))
+        failed += int((response.data or {}).get("failed", 0))
+        if log_fn and len(batches) > 1:
+            log_fn(f"  {placed}/{len(cues)} placed")
+
+    return BridgeResponse(
+        success=True,
+        data={
+            "placed": placed,
+            "failed": failed,
+            "tracks": lanes_used,
+            "baseTrack": base_track,
+            "batches": len(batches),
+        },
     )
-
-    script = f"""
-var CUES = {payload};
-var MOGRT = "{_escape(str(mogrt))}";
-var TICKS = {TICKS_PER_SECOND};
-var LANES = {lanes_used};
-
-var seq = app.project.activeSequence;
-if (!seq) {{ return '{{"success":false,"error":"No sequence is open"}}'; }}
-
-// Graphics go on tracks above the footage, one lane per simultaneous voice.
-var baseTrack = seq.videoTracks.numTracks;
-app.enableQE();
-var qseq = qe.project.getActiveSequence();
-try {{ qseq.addTracks(LANES, baseTrack, 0, 0); }} catch (e) {{}}
-
-// addTracks may cap out; fall back to whatever exists.
-var available = seq.videoTracks.numTracks;
-var placed = 0, failed = 0;
-
-for (var i = 0; i < CUES.length; i++) {{
-  var cue = CUES[i];
-  var trackIndex = baseTrack + cue.l;
-  if (trackIndex >= available) {{ trackIndex = available - 1; }}
-
-  var ticks = Math.round(cue.s * TICKS);
-  var clip = null;
-  try {{ clip = seq.importMGT(MOGRT, ticks.toString(), trackIndex, 0); }} catch (e) {{ clip = null; }}
-  if (!clip) {{ failed++; continue; }}
-
-  // Give it the cue's words.
-  try {{
-    var comps = clip.components, text = null;
-    for (var k = 0; k < comps.numItems; k++) {{
-      if (comps[k].displayName === 'Text') {{ text = comps[k]; break; }}
-    }}
-    if (text) {{ text.properties[0].setValue(cue.t, true); }}
-  }} catch (e) {{}}
-
-  // And the cue's duration: the template arrives with its own default.
-  try {{
-    var endTime = clip.end;
-    endTime.seconds = cue.e;
-    clip.end = endTime;
-  }} catch (e) {{}}
-
-  placed++;
-}}
-
-return '{{"success":true,"data":{{"placed":' + placed + ',"failed":' + failed +
-       ',"tracks":' + LANES + ',"baseTrack":' + baseTrack + '}}}}';
-"""
-    return bridge.execute(script, timeout=timeout)
 
 
 __all__ = [

@@ -154,13 +154,14 @@
       <label class="field">
         <span>Bring back as</span>
         <select id="subImportAs">
-          <option value="graphics" selected>Graphics &mdash; editable text clips</option>
-          <option value="captions">Caption track &mdash; simple</option>
+          <option value="captions" selected>Caption track &mdash; light, one at a time</option>
+          <option value="graphics">Graphics &mdash; editable, overlaps allowed</option>
         </select>
         <span class="hint">
           Graphics are ordinary text clips: restyle or animate them freely, and
-          people talking at once land on separate tracks so both show. A caption
-          track is simpler but shows one cue at a time.
+          people talking at once land on separate tracks so both show. They are
+          far heavier on Premiere though &mdash; hundreds of them can destabilise
+          it, so prefer them on shorter timelines.
         </span>
       </label>
       <button id="subtitle" class="ghost">Subtitle open timeline</button>
