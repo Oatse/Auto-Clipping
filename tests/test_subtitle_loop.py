@@ -317,6 +317,64 @@ class TestCaptionPlacement:
         script = self._script()
         assert '\\"placed\\"' in script or '"placed"' in script
 
+    def test_each_speaker_gets_its_own_caption_track(self, tmp_path, monkeypatch):
+        # Verified in Premiere: two caption tracks display simultaneously, so
+        # overlapping speech is readable AND keeps its own timing — which the
+        # merged single track has to flatten into a shared cue.
+        monkeypatch.setattr(
+            subtitle_loop, "export_timeline_audio",
+            lambda b, out, **k: (Path(out).write_bytes(b"RIFF"),
+                                 BridgeResponse(success=True))[1],
+        )
+        placed: list = []
+
+        def fake_import(bridge, path, *, place_on_timeline=True, **kw):
+            placed.append((Path(path).name, place_on_timeline))
+            return BridgeResponse(
+                success=True,
+                data={"imported": True, "placed": place_on_timeline, "why": ""},
+            )
+
+        monkeypatch.setattr(subtitle_loop, "import_captions", fake_import)
+
+        result = asyncio.run(subtitle_timeline(
+            output_dir=tmp_path, bridge=FakeBridge(),
+            engine=FakeEngine([
+                _seg(0, 3, "a", "SPEAKER_00"),
+                _seg(1, 4, "b", "SPEAKER_01"),
+            ]),
+        ))
+
+        by_name = dict(placed)
+        assert by_name["timeline.speaker1.srt"] is True
+        assert by_name["timeline.speaker2.srt"] is True
+        # The merged file is imported but NOT placed: placing it too would
+        # duplicate every line on a third track.
+        assert by_name["timeline.srt"] is False
+        assert result.placed_on_timeline is True
+
+    def test_single_speaker_places_the_merged_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            subtitle_loop, "export_timeline_audio",
+            lambda b, out, **k: (Path(out).write_bytes(b"RIFF"),
+                                 BridgeResponse(success=True))[1],
+        )
+        placed: list = []
+
+        def fake_import(bridge, path, *, place_on_timeline=True, **kw):
+            placed.append((Path(path).name, place_on_timeline))
+            return BridgeResponse(
+                success=True,
+                data={"imported": True, "placed": place_on_timeline},
+            )
+
+        monkeypatch.setattr(subtitle_loop, "import_captions", fake_import)
+        asyncio.run(subtitle_timeline(
+            output_dir=tmp_path, bridge=FakeBridge(),
+            engine=FakeEngine([_seg(0, 1, "solo", "SPEAKER_00")]),
+        ))
+        assert placed == [("timeline.srt", True)]
+
     def test_placement_failure_is_not_fatal(self, tmp_path, monkeypatch):
         # The captions are still in the project and can be dragged across.
         monkeypatch.setattr(

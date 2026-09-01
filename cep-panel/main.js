@@ -476,8 +476,14 @@
         }
 
         if (job.placed_on_timeline) {
-          detail += " placed on a caption track. To make them editable text," +
-            " select them and run Captions › Upgrade Caption to Graphic.";
+          // With several voices each gets its own caption track, so people
+          // talking over each other show together with their own timing.
+          detail += tracks > 1
+            ? " placed on " + tracks + " caption tracks, one per speaker, so " +
+              "overlapping speech shows together."
+            : " placed on a caption track.";
+          detail += " To make them editable text, select them and run " +
+            "Captions › Upgrade Caption to Graphic.";
         } else {
           detail += job.imported
             ? " imported into the project — drag them onto a caption track."

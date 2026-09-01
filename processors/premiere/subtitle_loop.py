@@ -627,34 +627,60 @@ async def subtitle_timeline(
                     f"on {placed.data.get('tracks', 1)} track(s)"
                 )
         else:
-            imported = import_captions(bridge, result.srt, log_fn=log_fn)
-            result.imported = imported.success
-            if not imported.success:
-                # Not fatal: the SRT exists and can be imported by hand.
-                result.errors.append(f"caption import failed: {imported.error}")
-            else:
-                result.placed_on_timeline = bool(
-                    (imported.data or {}).get("placed")
+            # With more than one voice, give each its own caption track.
+            # Premiere shows them simultaneously, so people talking over each
+            # other are both readable AND keep their exact in/out points —
+            # which the merged single track has to flatten into a shared cue.
+            use_speaker_tracks = bool(result.speaker_srts)
+
+            if use_speaker_tracks:
+                placed_tracks = 0
+                for extra in result.speaker_srts:
+                    response = import_captions(bridge, extra, log_fn=log_fn)
+                    if response.success and (response.data or {}).get("placed"):
+                        placed_tracks += 1
+                # The merged file still goes in, unplaced, as the one-track
+                # alternative — placing it too would duplicate every line.
+                merged = import_captions(
+                    bridge, result.srt, place_on_timeline=False, log_fn=log_fn,
                 )
-                if result.placed_on_timeline:
+                result.imported = merged.success or placed_tracks > 0
+                result.placed_on_timeline = placed_tracks > 0
+                if placed_tracks:
                     log(
-                        "Captions are on a caption track. To make them "
-                        "editable text, select them and use Premiere's "
-                        "Captions > Upgrade Caption to Graphic."
+                        f"{placed_tracks} caption tracks placed, one per "
+                        "speaker — overlapping speech shows together with its "
+                        "own timing. Select them and use Captions > Upgrade "
+                        "Caption to Graphic to make them editable text."
                     )
                 else:
-                    why = (imported.data or {}).get("why") or "unknown reason"
-                    log(
-                        f"Captions are in the Project panel but not placed "
-                        f"({why}) — drag them onto a caption track."
+                    result.errors.append(
+                        "per-speaker caption tracks could not be placed"
                     )
-                # Per-speaker files go into the project only. Placing them all
-                # would stack several caption tracks the editor did not ask
-                # for; they are there to be dropped deliberately.
-                for extra in result.speaker_srts:
-                    import_captions(
-                        bridge, extra, place_on_timeline=False, log_fn=log_fn,
+            else:
+                imported = import_captions(bridge, result.srt, log_fn=log_fn)
+                result.imported = imported.success
+                if not imported.success:
+                    # Not fatal: the SRT exists and can be imported by hand.
+                    result.errors.append(
+                        f"caption import failed: {imported.error}"
                     )
+                else:
+                    result.placed_on_timeline = bool(
+                        (imported.data or {}).get("placed")
+                    )
+                    if result.placed_on_timeline:
+                        log(
+                            "Captions are on a caption track. To make them "
+                            "editable text, select them and use Premiere's "
+                            "Captions > Upgrade Caption to Graphic."
+                        )
+                    else:
+                        why = (imported.data or {}).get("why") or "unknown reason"
+                        log(
+                            f"Captions are in the Project panel but not placed "
+                            f"({why}) — drag them onto a caption track."
+                        )
 
     if not keep_audio:
         # A 13-minute timeline is ~150 MB of WAV; keeping it by default would
